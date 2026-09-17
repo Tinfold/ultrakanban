@@ -39,10 +39,15 @@ nginx serves the app on `ULTRAKANBAN_PORT` (8080 by default) and both containers
 including after a reboot. The database and attachments live in the `ultrakanban-data` volume.
 
 ```sh
-docker compose logs -f app                                   # logs
-docker compose cp ./data/ultrakanban.db app:/app/data/        # import an existing board (while stopped)
-docker compose cp app:/app/data ./backup                      # back up database + attachments
-docker compose down && docker compose up -d --build           # update after pulling changes
+docker compose logs -f app                            # logs
+docker compose cp app:/app/data ./backup             # back up the database and attachments
+docker compose down && docker compose up -d --build  # update after pulling changes
+
+# Move an existing local board into the container
+docker compose stop app
+docker compose cp ./data/ultrakanban.db app:/app/data/
+docker compose cp ./data/attachments app:/app/data/
+docker compose start app
 ```
 
 There is no authentication, so only publish it on a network you trust. To put it on the internet, terminate
