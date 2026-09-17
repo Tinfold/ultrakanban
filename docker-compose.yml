@@ -20,6 +20,7 @@ services:
     volumes:
       # `z` relabels the file for containers; required where SELinux is enforcing (Fedora, RHEL).
       - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro,z
+      - ./deploy/40-resolver.sh:/docker-entrypoint.d/40-resolver.sh:ro,z
     depends_on:
       - app
 

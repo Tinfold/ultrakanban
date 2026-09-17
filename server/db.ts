@@ -91,7 +91,8 @@ const MIGRATIONS = [
   `,
 ]
 
-const path = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'
+export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'
+const path = databasePath
 if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true })
 
 const db = new DatabaseSync(path)

@@ -1,8 +1,10 @@
-import { existsSync } from 'node:fs'
+import { existsSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { serve } from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { createApp } from './app.ts'
-import { closeDatabase } from './db.ts'
+import { closeDatabase, databasePath } from './db.ts'
 import { createAttachmentFiles } from './attachment-files.ts'
 import { createGitHubClient } from './github.ts'
 import { createPullRequestSync } from './pull-request-sync.ts'
@@ -14,7 +16,17 @@ const clientDir = 'dist'
 const syncIntervalMs = Number(process.env.GITHUB_SYNC_INTERVAL ?? 60) * 1000
 
 const pullRequests = createPullRequestSync(createGitHubClient())
-const attachmentFiles = createAttachmentFiles(process.env.ULTRAKANBAN_ATTACHMENTS ?? 'data/attachments')
+/**
+ * Attachment files live next to their database by default: the two belong together, and a stray
+ * directory would be swept clean of files the database it belongs to doesn't know about.
+ */
+const attachmentsDirectory =
+  process.env.ULTRAKANBAN_ATTACHMENTS ??
+  (databasePath === ':memory:'
+    ? mkdtempSync(join(tmpdir(), 'ultrakanban-'))
+    : join(dirname(databasePath), 'attachments'))
+
+const attachmentFiles = createAttachmentFiles(attachmentsDirectory)
 const app = createApp({ pullRequests, attachmentFiles })
 pullRequests.start(syncIntervalMs)
 void attachmentFiles.sweep(listAttachmentIds())

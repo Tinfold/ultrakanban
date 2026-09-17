@@ -35,7 +35,7 @@ cp .env.example .env          # set GITHUB_TOKEN (get one with: gh auth token)
 docker compose up -d --build  # http://localhost:8080
 ```
 
-nginx serves the app on `ULTRAKANBAN_PORT` (8080 by default) and both containers restart automatically,
+nginx serves the app on `ULTRAKANBAN_PORT` (4317 by default) and both containers restart automatically,
 including after a reboot. The database and attachments live in the `ultrakanban-data` volume.
 
 ```sh
@@ -74,7 +74,7 @@ npm start            # http://127.0.0.1:4317 serves the app and the API
 | `PORT`                    | `4317`                | API / app port                                                           |
 | `HOST`                    | `127.0.0.1`           | Bind address. Use `0.0.0.0` to reach it from your phone on LAN           |
 | `ULTRAKANBAN_DB`          | `data/ultrakanban.db` | SQLite database file (`:memory:` for throwaway)                          |
-| `ULTRAKANBAN_ATTACHMENTS` | `data/attachments`    | Directory for uploaded attachment files                                  |
+| `ULTRAKANBAN_ATTACHMENTS` | next to the database  | Directory for uploaded attachment files                                  |
 | `GITHUB_TOKEN`            | `gh auth token`       | Token for checking pull requests (private repos need `repo` read access) |
 | `GITHUB_SYNC_INTERVAL`    | `60`                  | Seconds between pull request checks                                      |
 
