@@ -16,9 +16,10 @@ services:
     image: nginx:1.29-alpine
     restart: always
     ports:
-      - '${ULTRAKANBAN_PORT:-8080}:80'
+      - '${ULTRAKANBAN_PORT:-4317}:80'
     volumes:
-      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # `z` relabels the file for containers; required where SELinux is enforcing (Fedora, RHEL).
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro,z
     depends_on:
       - app
 
