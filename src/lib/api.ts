@@ -1,0 +1,87 @@
+import type { Activity, ApiErrorBody, Attachment, BoardDetail, BoardSummary, Column, Tag, Ticket } from '@shared/domain'
+import type {
+  BoardExport,
+  CreateBoardInput,
+  CreateColumnInput,
+  CreateTagInput,
+  CreateTicketInput,
+  MoveTicketInput,
+  UpdateBoardInput,
+  UpdateColumnInput,
+  UpdateTagInput,
+  UpdateTicketInput,
+} from '@shared/schemas'
+import { readActor } from './actor'
+
+export class ApiError extends Error {
+  readonly status: number
+  readonly code: string
+
+  constructor(status: number, code: string, message: string) {
+    super(message)
+    this.status = status
+    this.code = code
+  }
+}
+
+/** Sends JSON, or `FormData` as multipart (the browser sets its content type). */
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const json = body !== undefined && !(body instanceof FormData)
+  const response = await fetch(`/api${path}`, {
+    method,
+    headers: { 'X-Actor': readActor(), ...(json && { 'Content-Type': 'application/json' }) },
+    body: json ? JSON.stringify(body) : (body as FormData | undefined),
+  })
+  if (!response.ok) {
+    const data = (await response.json().catch(() => null)) as ApiErrorBody | null
+    throw new ApiError(response.status, data?.error.code ?? 'http_error', data?.error.message ?? response.statusText)
+  }
+  return response.status === 204 ? (undefined as T) : response.json()
+}
+
+const query = (params: Record<string, string | undefined>) => {
+  const search = new URLSearchParams(Object.entries(params).filter((entry): entry is [string, string] => !!entry[1]))
+  return search.size ? `?${search}` : ''
+}
+
+export const api = {
+  listBoards: () => request<BoardSummary[]>('GET', '/boards'),
+  getBoard: (boardId: string) => request<BoardDetail>('GET', `/boards/${boardId}`),
+  createBoard: (input: CreateBoardInput) => request<BoardSummary>('POST', '/boards', input),
+  updateBoard: (boardId: string, input: UpdateBoardInput) =>
+    request<BoardSummary>('PATCH', `/boards/${boardId}`, input),
+  deleteBoard: (boardId: string) => request<void>('DELETE', `/boards/${boardId}`),
+  exportBoard: (boardId: string) => request<BoardExport>('GET', `/boards/${boardId}/export`),
+  importBoard: (data: unknown) => request<BoardSummary>('POST', '/boards/import', data),
+
+  createColumn: (boardId: string, input: CreateColumnInput) =>
+    request<Column>('POST', `/boards/${boardId}/columns`, input),
+  updateColumn: (columnId: string, input: UpdateColumnInput) => request<Column>('PATCH', `/columns/${columnId}`, input),
+  moveColumn: (columnId: string, position: number) =>
+    request<Column>('POST', `/columns/${columnId}/move`, { position }),
+  deleteColumn: (columnId: string, moveTicketsTo?: string) =>
+    request<void>('DELETE', `/columns/${columnId}${query({ moveTicketsTo })}`),
+
+  createTag: (boardId: string, input: CreateTagInput) => request<Tag>('POST', `/boards/${boardId}/tags`, input),
+  updateTag: (tagId: string, input: UpdateTagInput) => request<Tag>('PATCH', `/tags/${tagId}`, input),
+  deleteTag: (tagId: string) => request<void>('DELETE', `/tags/${tagId}`),
+
+  createTicket: (boardId: string, input: CreateTicketInput) =>
+    request<Ticket>('POST', `/boards/${boardId}/tickets`, input),
+  updateTicket: (ticketId: string, input: UpdateTicketInput) => request<Ticket>('PATCH', `/tickets/${ticketId}`, input),
+  moveTicket: (ticketId: string, input: MoveTicketInput) => request<Ticket>('POST', `/tickets/${ticketId}/move`, input),
+  deleteTicket: (ticketId: string) => request<void>('DELETE', `/tickets/${ticketId}`),
+  listActivity: (ticketId: string) => request<Activity[]>('GET', `/tickets/${ticketId}/activity`),
+  syncPullRequest: (ticketId: string) => request<Ticket>('POST', `/tickets/${ticketId}/pull-request/sync`),
+  githubStatus: () => request<{ auth: 'env' | 'gh' | null }>('GET', '/github'),
+  listAttachments: (ticketId: string) => request<Attachment[]>('GET', `/tickets/${ticketId}/attachments`),
+  uploadAttachment: (ticketId: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<Attachment>('POST', `/tickets/${ticketId}/attachments`, form)
+  },
+  deleteAttachment: (attachmentId: string) => request<void>('DELETE', `/attachments/${attachmentId}`),
+  addComment: (ticketId: string, body: string) => request<Activity>('POST', `/tickets/${ticketId}/comments`, { body }),
+}
+
+export const errorMessage = (error: unknown) => (error instanceof Error ? error.message : 'Something went wrong')

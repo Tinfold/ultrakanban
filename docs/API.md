@@ -1,0 +1,204 @@
+# ultrakanban API
+
+JSON over HTTP. Base URL: `http://127.0.0.1:4317/api` (in development the Vite dev server also proxies `/api`).
+
+- Send `Content-Type: application/json` for request bodies.
+- Send `X-Actor: <your-name>` on writes so the activity log shows who did what.
+- Every write is a single atomic SQLite transaction: it either fully applies or not at all.
+- Errors look like `{ "error": { "code": "...", "message": "...", "details": ... } }`.
+  - `400 validation_error` / `bad_request` - fix the request.
+  - `404 not_found` - unknown board/column/tag/ticket or route.
+  - `404 no_ticket_available` - `claim-next` found nothing to claim.
+  - `409 already_claimed` / `claimed_by_other` - someone else holds the ticket (`details.ticket` has its current state).
+  - `409 version_conflict` - `ifVersion` did not match (`details.ticket` has its current state).
+  - `409 tag_exists` - tag names are unique per board (case-insensitive).
+  - `409 pull_request_not_merged` - the board's done column only accepts tickets whose pull request is merged.
+  - `413 payload_too_large` / `415 unsupported_media_type` - attachments must be PNG, JPEG, GIF, WebP, MP4 or WebM, up to 25 MB.
+
+Columns and tags can be referenced **by id or by name** (case-insensitive) wherever a request field says `ref`.
+Unknown tag names are created automatically when creating or updating tickets.
+
+## Recommended agent workflow
+
+1. `GET /api/boards` and pick a board. `GET /api/boards/:boardId` shows its columns, tags, tickets and workflow
+   (`board.reviewColumnId`, `board.doneColumnId`).
+2. Claim work atomically: `POST /api/boards/:boardId/tickets/claim-next` with
+   `{ "agent": "agent-1", "column": "Todo", "moveTo": "In progress" }`.
+   Only one agent can ever win a given ticket. Repeat on `404 no_ticket_available` later.
+   Or claim a specific ticket: `POST /api/tickets/:ticketId/claim`.
+3. Read the ticket's comments (`GET /api/tickets/:ticketId/activity`) before starting: they may be newer than
+   the description. Report progress and decisions with `POST /api/tickets/:ticketId/comments`.
+4. **If the change is visible** (UI, styling, charts, CLI output), attach screenshots or a short screen recording to
+   the ticket so reviewers can see the result without running it:
+   `curl -X POST $API/tickets/$TICKET/attachments -H 'X-Actor: agent-1' -F file=@screenshot.png`.
+5. Open a GitHub pull request for the work, then submit for review: `POST /api/tickets/:ticketId/review` with
+   `{ "agent": "agent-1", "pullRequest": "https://github.com/owner/repo/pull/123", "comment": "What changed and how it was verified" }`.
+   This links the pull request, keeps the ticket assigned to you and moves it to the review column in one step.
+6. Keep answering feedback until the pull request is merged: re-read the ticket's activity for new comments and
+   check the pull request's review comments (`gh pr view --comments`,
+   `gh api repos/:owner/:repo/pulls/:number/comments`). Push fixes, reply, and summarise on the ticket.
+7. **Don't move tickets to the done column yourself.** It only accepts tickets whose pull request is merged, and the
+   server moves them there automatically once GitHub reports the merge.
+8. To give up on a ticket, hand it back with `POST /api/tickets/:ticketId/release` `{ "agent": "agent-1", "moveTo": "Todo" }`.
+9. For read-modify-write edits, pass the ticket's `version` as `ifVersion` so concurrent edits are rejected instead of lost.
+
+Work **one ticket per agent, one agent at a time**: claim a ticket, finish it, then start a fresh agent for the
+next one. Parallel agents produce conflicting branches, and reusing one agent across tickets fills its context.
+A ready-made Claude Code skill for this workflow lives in the repository at `.claude/skills/ultrakanban/`.
+
+Boards without a review/done column (see board settings) have no pull request requirement: finish tickets with
+`POST /api/tickets/:ticketId/move`.
+
+## Pull request workflow
+
+- The server checks linked pull requests on GitHub every minute (and right after one is linked), authenticated with
+  `GITHUB_TOKEN`/`GH_TOKEN` or the `gh` CLI login. `GET /api/github` returns `{ "auth": "env" | "gh" | null }`.
+- When a pull request is merged, its ticket moves to the done column (actor `github`). Closed pull requests are noted
+  in the activity log; the ticket stays where it is.
+- Moving a ticket into the done column without a merged pull request fails with `409 pull_request_not_merged`,
+  whether through `move`, `claim`/`release` `moveTo`, or creating a ticket there. Humans can pass `force: true` to
+  `move` or ticket creation to override it; agents should not.
+
+## Types
+
+```ts
+type Priority = 'none' | 'low' | 'medium' | 'high' | 'urgent'
+type Color = 'gray' | 'red' | 'orange' | 'amber' | 'green' | 'teal' | 'blue' | 'indigo' | 'violet' | 'pink'
+
+interface Ticket {
+  id: string
+  boardId: string
+  number: number // board-scoped, shown as #12
+  columnId: string
+  title: string
+  description: string // markdown
+  priority: Priority
+  assignee: string | null
+  dueDate: string | null // YYYY-MM-DD
+  tagIds: string[]
+  pullRequest: PullRequest | null
+  position: number // order within its column, 0-based
+  version: number // increments on every change
+  commentCount: number
+  attachmentCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+interface PullRequest {
+  url: string // https://github.com/owner/repo/pull/123
+  repo: string // owner/repo
+  number: number
+  state: 'unknown' | 'open' | 'draft' | 'merged' | 'closed' // unknown until GitHub has been checked
+  title: string | null
+  checkedAt: string | null
+}
+
+interface BoardSummary {
+  id: string
+  name: string
+  description: string
+  reviewColumnId: string | null // where POST /tickets/:id/review moves tickets
+  doneColumnId: string | null // only accepts tickets with a merged pull request
+  ticketCount: number
+  createdAt: string
+  updatedAt: string
+}
+```
+
+## Boards
+
+| Method | Path                      | Body / query                                                                       | Returns                                        |
+| ------ | ------------------------- | ---------------------------------------------------------------------------------- | ---------------------------------------------- |
+| GET    | `/boards`                 |                                                                                    | `BoardSummary[]` (most recently updated first) |
+| POST   | `/boards`                 | `{ name, description?, columns?: string[], reviewColumn?: ref, doneColumn?: ref }` | `BoardSummary`                                 |
+| GET    | `/boards/:boardId`        |                                                                                    | `{ board, columns, tags, tickets }`            |
+| PATCH  | `/boards/:boardId`        | `{ name?, description?, reviewColumn?: ref \| null, doneColumn?: ref \| null }`    | `BoardSummary`                                 |
+| DELETE | `/boards/:boardId`        |                                                                                    | `204`                                          |
+| GET    | `/boards/:boardId/export` |                                                                                    | portable board JSON                            |
+| POST   | `/boards/import`          | portable board JSON                                                                | `BoardSummary`                                 |
+
+## Columns and tags
+
+| Method | Path                       | Body / query                                             | Returns  |
+| ------ | -------------------------- | -------------------------------------------------------- | -------- |
+| POST   | `/boards/:boardId/columns` | `{ name, color?, wipLimit?: number \| null, position? }` | `Column` |
+| PATCH  | `/columns/:columnId`       | `{ name?, color?, wipLimit? }`                           | `Column` |
+| POST   | `/columns/:columnId/move`  | `{ position }`                                           | `Column` |
+| DELETE | `/columns/:columnId`       | `?moveTicketsTo=ref` (otherwise its tickets are deleted) | `204`    |
+| POST   | `/boards/:boardId/tags`    | `{ name, color? }`                                       | `Tag`    |
+| PATCH  | `/tags/:tagId`             | `{ name?, color? }`                                      | `Tag`    |
+| DELETE | `/tags/:tagId`             |                                                          | `204`    |
+
+## Tickets
+
+| Method | Path                                   | Body / query                                                                                                                    | Returns                                                                                                                                                                   |
+| ------ | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/boards/:boardId/tickets`             | `?column=ref&assignee=name&unassigned=true&tag=ref&priority=high&q=text` (`tag`, `priority` repeatable)                         | `Ticket[]` in board order                                                                                                                                                 |
+| GET    | `/boards/:boardId/tickets/:number`     |                                                                                                                                 | `Ticket`                                                                                                                                                                  |
+| POST   | `/boards/:boardId/tickets`             | `{ title, description?, column?: ref, priority?, tags?: ref[], assignee?, dueDate?, pullRequest?: url, position?, force? }`     | `Ticket` (defaults to the first column, appended)                                                                                                                         |
+| GET    | `/tickets/:ticketId`                   |                                                                                                                                 | `Ticket`                                                                                                                                                                  |
+| PATCH  | `/tickets/:ticketId`                   | `{ title?, description?, priority?, tags?: ref[], assignee?: string \| null, dueDate?, pullRequest?: url \| null, ifVersion? }` | `Ticket`                                                                                                                                                                  |
+| DELETE | `/tickets/:ticketId`                   |                                                                                                                                 | `204`                                                                                                                                                                     |
+| POST   | `/tickets/:ticketId/move`              | `{ column: ref, position?, ifVersion?, force? }`                                                                                | `Ticket` (appended when `position` is omitted)                                                                                                                            |
+| POST   | `/tickets/:ticketId/claim`             | `{ agent, moveTo?: ref, ifVersion? }`                                                                                           | `Ticket`; `409` if claimed by someone else (idempotent for the same agent)                                                                                                |
+| POST   | `/tickets/:ticketId/release`           | `{ agent, moveTo?: ref, force? }`                                                                                               | `Ticket`; `409` if claimed by someone else unless `force`                                                                                                                 |
+| POST   | `/boards/:boardId/tickets/claim-next`  | `{ agent, column: ref, tags?: ref[], moveTo?: ref }`                                                                            | `Ticket`: highest priority, then earliest due date, then board order, among unassigned tickets in `column` having all `tags`                                              |
+| POST   | `/tickets/:ticketId/review`            | `{ agent, pullRequest: url, comment?: markdown, ifVersion? }`                                                                   | `Ticket`: links the pull request, assigns `agent`, posts `comment`, moves to the review column; `409` if claimed by someone else, `400` if the board has no review column |
+| POST   | `/tickets/:ticketId/pull-request/sync` |                                                                                                                                 | `Ticket` after checking its pull request on GitHub now                                                                                                                    |
+| GET    | `/tickets/:ticketId/activity`          |                                                                                                                                 | `Activity[]` (oldest first)                                                                                                                                               |
+| POST   | `/tickets/:ticketId/comments`          | `{ body }` (markdown)                                                                                                           | `Activity`                                                                                                                                                                |
+
+## Attachments
+
+Screenshots and screen recordings on tickets. Upload one file per request as `multipart/form-data` in a field named
+`file`; the type is detected from the file contents (PNG, JPEG, GIF, WebP, MP4 or WebM, up to 25 MB). Uploads and
+deletions appear in the ticket's activity. Attachments are not included in board exports.
+
+| Method | Path                             | Body             | Returns                       |
+| ------ | -------------------------------- | ---------------- | ----------------------------- |
+| POST   | `/tickets/:ticketId/attachments` | multipart `file` | `Attachment`                  |
+| GET    | `/tickets/:ticketId/attachments` |                  | `Attachment[]` (oldest first) |
+| GET    | `/attachments/:attachmentId`     |                  | the file                      |
+| DELETE | `/attachments/:attachmentId`     |                  | `204`                         |
+
+```ts
+interface Attachment {
+  id: string
+  ticketId: string
+  filename: string
+  contentType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp' | 'video/mp4' | 'video/webm'
+  size: number // bytes
+  actor: string
+  createdAt: string
+  url: string // /api/attachments/:id, also usable in markdown: ![screenshot](/api/attachments/:id)
+}
+```
+
+## Live updates
+
+`GET /events?board=:boardId` is a server-sent event stream. It emits `change` events with data `{ "boardId": "..." }`
+after every committed change (omit `board` to receive all boards), plus periodic `ping` events.
+
+## Examples
+
+```sh
+API=http://127.0.0.1:4317/api
+BOARD=<board id>
+
+# Add a ticket
+curl -s -X POST $API/boards/$BOARD/tickets -H 'Content-Type: application/json' -H 'X-Actor: agent-1' \
+  -d '{"title":"Fix login redirect","description":"Steps:\n- [ ] reproduce\n- [ ] fix","priority":"high","tags":["bug"],"column":"Todo"}'
+
+# Take the next ticket and start it
+curl -s -X POST $API/boards/$BOARD/tickets/claim-next -H 'Content-Type: application/json' \
+  -d '{"agent":"agent-1","column":"Todo","moveTo":"In progress"}'
+
+# Attach a screenshot of the result
+curl -s -X POST $API/tickets/$TICKET/attachments -H 'X-Actor: agent-1' -F file=@screenshot.png
+
+# Submit it for review with the pull request
+curl -s -X POST $API/tickets/$TICKET/review -H 'Content-Type: application/json' -H 'X-Actor: agent-1' \
+  -d '{"agent":"agent-1","pullRequest":"https://github.com/owner/repo/pull/123","comment":"Fixed the redirect loop; screenshots attached."}'
+# It moves to Done by itself once the pull request is merged.
+```
