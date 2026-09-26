@@ -10,6 +10,21 @@ export function colorForName(name: string): Color {
   return COLORS[1 + (hash % (COLORS.length - 1))]
 }
 
+export const AGENT_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+export type AgentEffort = (typeof AGENT_EFFORTS)[number]
+
+/** What a board's agent runs as when the board doesn't say (see scripts/agent-board.sh). */
+export const AGENT_DEFAULTS = { name: 'claude', model: 'opus', effort: 'high' } as const
+
+/**
+ * Name a board's agent claims tickets under: `<agent>/<model>/<effort>`, e.g. `claude/opus/high`. The agent name
+ * itself belongs to the board's controller (scripts/agent-loop.sh), which starts one of these workers per run.
+ */
+export function agentWorkerName(board: Pick<BoardSummary, 'agentName' | 'agentModel' | 'agentEffort'>) {
+  const { name, model, effort } = AGENT_DEFAULTS
+  return `${board.agentName ?? name}/${board.agentModel ?? model}/${board.agentEffort ?? effort}`
+}
+
 export const PULL_REQUEST_STATES = ['unknown', 'open', 'draft', 'merged', 'closed'] as const
 /** `unknown` until GitHub has been checked (or when it can't be reached). */
 export type PullRequestState = (typeof PULL_REQUEST_STATES)[number]
@@ -76,8 +91,12 @@ export interface BoardSummary {
   githubRepo: string | null
   /** Whether the host's agent supervisor runs an agent loop for this board (see scripts/agent-supervisor.sh). */
   agentEnabled: boolean
-  /** Name the agent claims tickets under; `claude` when not set. */
+  /** Name of the board's agent (its controller); `claude` when not set. Its workers are named by `agentWorkerName`. */
   agentName: string | null
+  /** Claude model the agent runs, as an alias or a full model name; `opus` when not set. */
+  agentModel: string | null
+  /** Effort level the agent runs at; `high` when not set. */
+  agentEffort: AgentEffort | null
   ticketCount: number
   createdAt: string
   updatedAt: string

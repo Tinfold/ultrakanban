@@ -90,12 +90,12 @@ Everything is one atomic SQLite transaction, so agents can safely work in parall
 
 ```sh
 # Add a ticket (columns and tags by name; unknown tags are created)
-curl -X POST localhost:4317/api/boards/$BOARD/tickets -H 'Content-Type: application/json' -H 'X-Actor: agent-1' \
+curl -X POST localhost:4317/api/boards/$BOARD/tickets -H 'Content-Type: application/json' -H 'X-Actor: claude/claude-opus-5-5/high' \
   -d '{"title":"Fix login redirect","priority":"high","tags":["bug"],"column":"Todo"}'
 
 # Take the most important unassigned ticket and start it. Never double-assigns.
 curl -X POST localhost:4317/api/boards/$BOARD/tickets/claim-next -H 'Content-Type: application/json' \
-  -d '{"agent":"agent-1","column":"Todo","moveTo":"In progress"}'
+  -d '{"agent":"claude/claude-opus-5-5/high","column":"Todo","moveTo":"In progress"}'
 ```
 
 With a review and done column configured (**Board menu → Board settings**; the Software template and boards with
@@ -103,11 +103,11 @@ columns named "Review" and "Done" get this automatically), agents finish work li
 
 ```sh
 # Attach screenshots of visible changes to the ticket
-curl -X POST localhost:4317/api/tickets/$TICKET/attachments -H 'X-Actor: agent-1' -F file=@screenshot.png
+curl -X POST localhost:4317/api/tickets/$TICKET/attachments -H 'X-Actor: claude/claude-opus-5-5/high' -F file=@screenshot.png
 
 # Link the PR, post a summary, move to Review
 curl -X POST localhost:4317/api/tickets/$TICKET/review -H 'Content-Type: application/json' \
-  -d '{"agent":"agent-1","pullRequest":"https://github.com/acme/app/pull/42","comment":"What changed and how it was verified"}'
+  -d '{"agent":"claude/claude-opus-5-5/high","pullRequest":"https://github.com/acme/app/pull/42","comment":"What changed and how it was verified"}'
 ```
 
 The server polls GitHub and moves the ticket to Done when the PR is merged. Moving it there earlier is rejected
@@ -148,6 +148,13 @@ made with `gh repo clone`, under `~/.local/share/ultrakanban-agent/boards/<board
 are never touched. Before every run the loop fetches and checks out the default branch (or, for feedback on a
 pull request, its branch) with no local changes, and goes back to the default branch afterwards. Logs:
 `journalctl --user -u ultrakanban-agent -u 'ultrakanban-agent@*' -f`.
+
+**Names.** The board's **Agent name** (default `claude`) names the loop, which controls the work; its notes on
+tickets come from `<agent>-loop`. The runs it starts claim tickets as `<agent>/<model>/<effort>`, from the board's
+**Model** (default `opus`) and **Effort** (default `high`) settings, which the loop passes to `claude`. So the board
+always shows which model and effort did the work, e.g. `claude/claude-opus-5-5/high`; a full model name keeps
+model versions apart. When you change the model or effort, the loop reassigns each ticket it holds to the new name
+before its next run on it. Agents you run yourself should follow the same pattern (see the skill).
 
 Running the services on the host, not in the containers, is deliberate: the agents use your `claude` login, your
 `gh` auth and git.

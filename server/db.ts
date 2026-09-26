@@ -94,6 +94,10 @@ const MIGRATIONS = [
   ALTER TABLE boards ADD COLUMN agent_enabled INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE boards ADD COLUMN agent_name TEXT;
   `,
+  `
+  ALTER TABLE boards ADD COLUMN agent_model TEXT;
+  ALTER TABLE boards ADD COLUMN agent_effort TEXT;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

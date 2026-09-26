@@ -1,4 +1,4 @@
-import type { BoardDetail, BoardSummary } from '../../shared/domain.ts'
+import type { AgentEffort, BoardDetail, BoardSummary } from '../../shared/domain.ts'
 import type { CreateBoardInput, UpdateBoardInput } from '../../shared/schemas.ts'
 import { newId, now, sql, touchBoard, updateRow } from '../db.ts'
 import { badRequest, notFound } from '../errors.ts'
@@ -15,6 +15,8 @@ interface BoardRow {
   github_repo: string | null
   agent_enabled: number
   agent_name: string | null
+  agent_model: string | null
+  agent_effort: AgentEffort | null
   ticket_count: number
   created_at: string
   updated_at: string
@@ -33,6 +35,8 @@ const toBoard = (row: BoardRow): BoardSummary => ({
   githubRepo: row.github_repo,
   agentEnabled: row.agent_enabled === 1,
   agentName: row.agent_name,
+  agentModel: row.agent_model,
+  agentEffort: row.agent_effort,
   ticketCount: row.ticket_count,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -64,8 +68,8 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     timestamp,
   )
   for (const name of input.columns ?? []) createColumn(id, { name })
-  const { reviewColumn, doneColumn, githubRepo, agentEnabled, agentName } = input
-  return updateBoard(id, { reviewColumn, doneColumn, githubRepo, agentEnabled, agentName })
+  const { reviewColumn, doneColumn, githubRepo, agentEnabled, agentName, agentModel, agentEffort } = input
+  return updateBoard(id, { reviewColumn, doneColumn, githubRepo, agentEnabled, agentName, agentModel, agentEffort })
 }
 
 export function updateBoard(id: string, input: UpdateBoardInput): BoardSummary {
@@ -79,6 +83,8 @@ export function updateBoard(id: string, input: UpdateBoardInput): BoardSummary {
     github_repo: input.githubRepo,
     agent_enabled: input.agentEnabled === undefined ? undefined : Number(input.agentEnabled),
     agent_name: input.agentName,
+    agent_model: input.agentModel,
+    agent_effort: input.agentEffort,
   })
   const board = getBoard(id)
   if (board.agentEnabled && !board.githubRepo) {

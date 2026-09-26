@@ -3,7 +3,14 @@ import { mkdtempSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, test } from 'node:test'
-import type { Activity, Attachment, BoardDetail, BoardSummary, Ticket } from '../shared/domain.ts'
+import {
+  type Activity,
+  agentWorkerName,
+  type Attachment,
+  type BoardDetail,
+  type BoardSummary,
+  type Ticket,
+} from '../shared/domain.ts'
 import { createApp } from './app.ts'
 import { createAttachmentFiles } from './attachment-files.ts'
 import { subscribe } from './events.ts'
@@ -284,19 +291,29 @@ describe('pull request workflow', () => {
     const {
       body: { board: initial },
     } = await call<BoardDetail>('GET', `/boards/${boardId}`)
-    assert.deepEqual([initial.githubRepo, initial.agentEnabled, initial.agentName], [null, false, null])
+    assert.deepEqual(
+      [initial.githubRepo, initial.agentEnabled, initial.agentName, initial.agentModel, initial.agentEffort],
+      [null, false, null, null, null],
+    )
+    assert.equal(agentWorkerName(initial), 'claude/opus/high')
 
     const off = await call('PATCH', `/boards/${boardId}`, { agentEnabled: true })
     assert.equal(off.status, 400, 'the agent needs a repository')
     assert.equal((await call('PATCH', `/boards/${boardId}`, { githubRepo: 'not a repo' })).status, 400)
     assert.equal((await call('PATCH', `/boards/${boardId}`, { agentName: 'has space' })).status, 400)
+    assert.equal((await call('PATCH', `/boards/${boardId}`, { agentName: 'claude/opus' })).status, 400)
+    assert.equal((await call('PATCH', `/boards/${boardId}`, { agentModel: 'opus/high' })).status, 400)
+    assert.equal((await call('PATCH', `/boards/${boardId}`, { agentEffort: 'extreme' })).status, 400)
 
     const { body: on } = await call<BoardSummary>('PATCH', `/boards/${boardId}`, {
       githubRepo: 'acme/app',
       agentEnabled: true,
       agentName: 'claude-2',
+      agentModel: 'claude-sonnet-5',
+      agentEffort: 'xhigh',
     })
     assert.deepEqual([on.githubRepo, on.agentEnabled, on.agentName], ['acme/app', true, 'claude-2'])
+    assert.equal(agentWorkerName(on), 'claude-2/claude-sonnet-5/xhigh')
     const { body: boards } = await call<BoardSummary[]>('GET', '/boards')
     assert.ok(boards.some((board) => board.id === boardId && board.agentEnabled))
 
@@ -304,8 +321,13 @@ describe('pull request workflow', () => {
       agentEnabled: false,
       githubRepo: null,
       agentName: null,
+      agentModel: null,
+      agentEffort: null,
     })
-    assert.deepEqual([cleared.githubRepo, cleared.agentEnabled, cleared.agentName], [null, false, null])
+    assert.deepEqual(
+      [cleared.githubRepo, cleared.agentEnabled, cleared.agentName, cleared.agentModel, cleared.agentEffort],
+      [null, false, null, null, null],
+    )
   })
 
   test('review needs a configured review column', async () => {

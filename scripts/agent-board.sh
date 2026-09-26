@@ -18,6 +18,8 @@ dir=$AGENT_HOME/boards/$BOARD
 board=$(curl -sf "$KANBAN/api/boards/$BOARD") || { echo "can't read board $BOARD from $KANBAN"; exit 1; }
 repo=$(jq -r '.board.githubRepo // ""' <<<"$board")
 agent=$(jq -r '.board.agentName // "claude"' <<<"$board")
+model=$(jq -r '.board.agentModel // "opus"' <<<"$board")
+effort=$(jq -r '.board.agentEffort // "high"' <<<"$board")
 if [[ $(jq -r .board.agentEnabled <<<"$board") != true || -z $repo ]]; then
   echo "the agent is off for board $BOARD"
   exit 0
@@ -39,6 +41,6 @@ if [[ -f $here/../skill/SKILL.md ]] && ! git -C "$dir/repo" ls-files --error-unm
 fi
 
 cd "$dir/repo" || exit 1
-echo "working board $BOARD on $repo as $agent"
-export KANBAN BOARD AGENT=$agent STATE_DIR=$dir/state AGENT_LOOP_CLEAN=1
+echo "working board $BOARD on $repo as $agent/$model/$effort"
+export KANBAN BOARD AGENT=$agent MODEL=$model EFFORT=$effort STATE_DIR=$dir/state AGENT_LOOP_CLEAN=1
 exec "$here/agent-loop.sh"

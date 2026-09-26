@@ -20,26 +20,32 @@ Unknown tag names are created automatically when creating or updating tickets.
 
 ## Recommended agent workflow
 
+**Name yourself after what you run on.** An agent's name (the `agent` field and the `X-Actor` header) is
+`<agent>/<model>/<effort>`, e.g. `claude/claude-opus-5-5/high`: the tool or board agent, then the exact model and
+effort level. Use the name you were given if there is one; otherwise build it this way and never invent a new one,
+so the board and its history show which model and effort did each piece of work. The board's own agent names its
+runs like this from the board settings (`agentWorkerName` in `shared/domain.ts`).
+
 1. `GET /api/boards` and pick a board. `GET /api/boards/:boardId` shows its columns, tags, tickets and workflow
    (`board.reviewColumnId`, `board.doneColumnId`).
 2. Claim work atomically: `POST /api/boards/:boardId/tickets/claim-next` with
-   `{ "agent": "agent-1", "column": "Todo", "moveTo": "In progress" }`.
+   `{ "agent": "claude/claude-opus-5-5/high", "column": "Todo", "moveTo": "In progress" }`.
    Only one agent can ever win a given ticket. Repeat on `404 no_ticket_available` later.
    Or claim a specific ticket: `POST /api/tickets/:ticketId/claim`.
 3. Read the ticket's comments (`GET /api/tickets/:ticketId/activity`) before starting: they may be newer than
    the description. Report progress and decisions with `POST /api/tickets/:ticketId/comments`.
 4. **If the change is visible** (UI, styling, charts, CLI output), attach screenshots or a short screen recording to
    the ticket so reviewers can see the result without running it:
-   `curl -X POST $API/tickets/$TICKET/attachments -H 'X-Actor: agent-1' -F file=@screenshot.png`.
+   `curl -X POST $API/tickets/$TICKET/attachments -H 'X-Actor: claude/claude-opus-5-5/high' -F file=@screenshot.png`.
 5. Open a GitHub pull request for the work, then submit for review: `POST /api/tickets/:ticketId/review` with
-   `{ "agent": "agent-1", "pullRequest": "https://github.com/owner/repo/pull/123", "comment": "What changed and how it was verified" }`.
+   `{ "agent": "claude/claude-opus-5-5/high", "pullRequest": "https://github.com/owner/repo/pull/123", "comment": "What changed and how it was verified" }`.
    This links the pull request, keeps the ticket assigned to you and moves it to the review column in one step.
 6. Keep answering feedback until the pull request is merged: re-read the ticket's activity for new comments and
    check the pull request's review comments (`gh pr view --comments`,
    `gh api repos/:owner/:repo/pulls/:number/comments`). Push fixes, reply, and summarise on the ticket.
 7. **Don't move tickets to the done column yourself.** It only accepts tickets whose pull request is merged, and the
    server moves them there automatically once GitHub reports the merge.
-8. To give up on a ticket, hand it back with `POST /api/tickets/:ticketId/release` `{ "agent": "agent-1", "moveTo": "Todo" }`.
+8. To give up on a ticket, hand it back with `POST /api/tickets/:ticketId/release` `{ "agent": "claude/claude-opus-5-5/high", "moveTo": "Todo" }`.
 9. For read-modify-write edits, pass the ticket's `version` as `ifVersion` so concurrent edits are rejected instead of lost.
 
 Work **one ticket per agent, one agent at a time**: claim a ticket, finish it, then start a fresh agent for the
@@ -104,7 +110,9 @@ interface BoardSummary {
   doneColumnId: string | null // only accepts tickets with a merged pull request
   githubRepo: string | null // "owner/name" the board's tickets are about
   agentEnabled: boolean // the host's agent supervisor runs an agent loop for this board
-  agentName: string | null // name that agent claims tickets under ("claude" when null)
+  agentName: string | null // name of that agent, the loop that controls it ("claude" when null)
+  agentModel: string | null // model it runs, an alias or full name ("opus" when null)
+  agentEffort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null // effort it runs at ("high" when null)
   ticketCount: number
   createdAt: string
   updatedAt: string
@@ -113,18 +121,20 @@ interface BoardSummary {
 
 ## Boards
 
-| Method | Path                      | Body / query                                                                                                                                                     | Returns                                        |
-| ------ | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| GET    | `/boards`                 |                                                                                                                                                                  | `BoardSummary[]` (most recently updated first) |
-| POST   | `/boards`                 | `{ name, description?, columns?: string[], reviewColumn?: ref, doneColumn?: ref, githubRepo?, agentEnabled?, agentName? }`                                       | `BoardSummary`                                 |
-| GET    | `/boards/:boardId`        |                                                                                                                                                                  | `{ board, columns, tags, tickets }`            |
-| PATCH  | `/boards/:boardId`        | `{ name?, description?, reviewColumn?: ref \| null, doneColumn?: ref \| null, githubRepo?: string \| null, agentEnabled?: boolean, agentName?: string \| null }` | `BoardSummary`                                 |
-| DELETE | `/boards/:boardId`        |                                                                                                                                                                  | `204`                                          |
-| GET    | `/boards/:boardId/export` |                                                                                                                                                                  | portable board JSON                            |
-| POST   | `/boards/import`          | portable board JSON                                                                                                                                              | `BoardSummary`                                 |
+| Method | Path                      | Body / query                                                                                                                                                                                                                | Returns                                        |
+| ------ | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| GET    | `/boards`                 |                                                                                                                                                                                                                             | `BoardSummary[]` (most recently updated first) |
+| POST   | `/boards`                 | `{ name, description?, columns?: string[], reviewColumn?: ref, doneColumn?: ref, githubRepo?, agentEnabled?, agentName?, agentModel?, agentEffort? }`                                                                       | `BoardSummary`                                 |
+| GET    | `/boards/:boardId`        |                                                                                                                                                                                                                             | `{ board, columns, tags, tickets }`            |
+| PATCH  | `/boards/:boardId`        | `{ name?, description?, reviewColumn?: ref \| null, doneColumn?: ref \| null, githubRepo?: string \| null, agentEnabled?: boolean, agentName?: string \| null, agentModel?: string \| null, agentEffort?: string \| null }` | `BoardSummary`                                 |
+| DELETE | `/boards/:boardId`        |                                                                                                                                                                                                                             | `204`                                          |
+| GET    | `/boards/:boardId/export` |                                                                                                                                                                                                                             | portable board JSON                            |
+| POST   | `/boards/import`          | portable board JSON                                                                                                                                                                                                         | `BoardSummary`                                 |
 
 `agentEnabled` can only be switched on once `githubRepo` is set (`400` otherwise). It is read by
 `scripts/agent-supervisor.sh`, which runs on the host and keeps one agent loop per enabled board; see the README.
+The loop runs Claude Code with `agentModel` and `agentEffort` and claims tickets as
+`<agentName>/<agentModel>/<agentEffort>`, e.g. `claude/opus/high` with nothing set.
 
 ## Columns and tags
 
@@ -195,18 +205,18 @@ API=http://127.0.0.1:4317/api
 BOARD=<board id>
 
 # Add a ticket
-curl -s -X POST $API/boards/$BOARD/tickets -H 'Content-Type: application/json' -H 'X-Actor: agent-1' \
+curl -s -X POST $API/boards/$BOARD/tickets -H 'Content-Type: application/json' -H 'X-Actor: claude/claude-opus-5-5/high' \
   -d '{"title":"Fix login redirect","description":"Steps:\n- [ ] reproduce\n- [ ] fix","priority":"high","tags":["bug"],"column":"Todo"}'
 
 # Take the next ticket and start it
 curl -s -X POST $API/boards/$BOARD/tickets/claim-next -H 'Content-Type: application/json' \
-  -d '{"agent":"agent-1","column":"Todo","moveTo":"In progress"}'
+  -d '{"agent":"claude/claude-opus-5-5/high","column":"Todo","moveTo":"In progress"}'
 
 # Attach a screenshot of the result
-curl -s -X POST $API/tickets/$TICKET/attachments -H 'X-Actor: agent-1' -F file=@screenshot.png
+curl -s -X POST $API/tickets/$TICKET/attachments -H 'X-Actor: claude/claude-opus-5-5/high' -F file=@screenshot.png
 
 # Submit it for review with the pull request
-curl -s -X POST $API/tickets/$TICKET/review -H 'Content-Type: application/json' -H 'X-Actor: agent-1' \
-  -d '{"agent":"agent-1","pullRequest":"https://github.com/owner/repo/pull/123","comment":"Fixed the redirect loop; screenshots attached."}'
+curl -s -X POST $API/tickets/$TICKET/review -H 'Content-Type: application/json' -H 'X-Actor: claude/claude-opus-5-5/high' \
+  -d '{"agent":"claude/claude-opus-5-5/high","pullRequest":"https://github.com/owner/repo/pull/123","comment":"Fixed the redirect loop; screenshots attached."}'
 # It moves to Done by itself once the pull request is merged.
 ```

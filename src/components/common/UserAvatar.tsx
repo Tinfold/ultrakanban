@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 
 const initials = (name: string) =>
   name
-    .split(/[\s._-]+/)
+    .split(/[\s./_-]+/)
     .filter(Boolean)
     .slice(0, 2)
     .map((part) => part[0]!.toUpperCase())

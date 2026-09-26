@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # Works an ultrakanban board with Claude Code for as long as you leave it running, one `claude -p` at a time.
 #
+# The loop is the board's agent (its controller), named AGENT. The runs it starts are its workers, and they claim
+# tickets under a name made of the agent, the model and the effort level they run with: AGENT/MODEL/EFFORT, e.g.
+# claude/opus/high. The loop passes that model and effort to claude, so the name always says what did the work.
+# Tickets held under another of the agent's names (another model or effort, or the bare agent name) are its own too:
+# before a run on one, the loop reassigns it to the current worker.
+#
 # A single Claude Code session left looping for days keeps growing in memory (and swap) until the process ends.
 # This loop runs outside Claude Code and starts a fresh, short-lived `claude -p` for every piece of work, so all
 # of that memory goes back to the OS after each run. The loop itself keeps no history, so it doesn't grow.
@@ -32,7 +38,9 @@
 #   KANBAN=http://localhost:4317 BOARD=<board id> scripts/agent-loop.sh
 #
 # Optional settings (environment variables):
-#   AGENT               name used for claims and the X-Actor header (default: claude)
+#   AGENT               name of the board's agent; its workers claim tickets as AGENT/MODEL/EFFORT (default: claude)
+#   MODEL               Claude model the workers run, an alias or a full name such as claude-opus-5-5 (default: opus)
+#   EFFORT              effort level the workers run at: low, medium, high, xhigh or max (default: high)
 #   TODO_COLUMN         column to take new tickets from (default: Todo)
 #   IN_PROGRESS_COLUMN  column to move claimed tickets to (default: In progress)
 #   CANCELLED_COLUMN    column for tickets whose pull request was closed without merging (default: Cancelled)
@@ -42,7 +50,7 @@
 #   MAX_ATTEMPTS        failed runs in a row before waiting for new feedback (default: 3)
 #   MAX_CI_RUNS         runs in a row started only by failing CI, with no human feedback between (default: 2)
 #   SKIP_PERMISSIONS    1 passes --dangerously-skip-permissions to claude, 0 doesn't (default: 1)
-#   CLAUDE_ARGS         extra arguments for claude, e.g. "--model opus"
+#   CLAUDE_ARGS         extra arguments for claude; set the model and effort with MODEL and EFFORT, not here
 #   STATE_DIR           where watermarks are kept (default: $XDG_STATE_HOME/ultrakanban-agent-loop/BOARD-AGENT)
 #   AGENT_LOOP_CLEAN    1 when running in a dedicated clone: before each run the loop fetches, discards local
 #                       changes and checks out the default branch (or the pull request's branch for feedback runs).
@@ -55,6 +63,9 @@ set -uo pipefail
 : "${KANBAN:?set KANBAN to the board server, e.g. http://localhost:4317}"
 : "${BOARD:?set BOARD to the board id}"
 AGENT=${AGENT:-claude}
+MODEL=${MODEL:-opus}
+EFFORT=${EFFORT:-high}
+WORKER="$AGENT/$MODEL/$EFFORT"
 LOOP_ACTOR="$AGENT-loop"
 MARKER="<!-- ultrakanban:$AGENT -->"
 TODO_COLUMN=${TODO_COLUMN:-Todo}
@@ -70,6 +81,7 @@ INFRA_PATTERN='billing|spending limit|payments have failed|account is locked|acc
 INFRA_PATTERN+='|was not started|minutes quota|exceeded .*(minutes|quota)'
 STATE_DIR=${STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/ultrakanban-agent-loop/$BOARD-${AGENT//\//_}}
 read -r -a claude_args <<<"${CLAUDE_ARGS:-}"
+claude_args+=(--model "$MODEL" --effort "$EFFORT")
 if [[ ${SKIP_PERMISSIONS:-1} == 1 ]]; then
   claude_args+=(--dangerously-skip-permissions)
 fi
@@ -82,6 +94,7 @@ mkdir -p "$STATE_DIR" || exit 1
 read -r -d '' TRIAGE <<'JQ'
 def bot: (.user.type // "") == "Bot" or ((.user.login // "") | endswith("[bot]"));
 def feedback: (bot | not) and ((.body // "") | contains($marker) | not);
+def ours: . == $agent or . == $loop or startswith($agent + "/");
 def clip: if length > 2000 then .[:2000] + " [...]" else . end;
 . as [$activity, $pr, $ci, $issue, $reviews, $inline, $s]
 | ($pr // {}) as $p
@@ -90,7 +103,7 @@ def clip: if length > 2000 then .[:2000] + " [...]" else . end;
 | (($ci.code // []) - $handedOver) as $newFailures
 | (if $p.mergeable == "CONFLICTING" or $p.mergeStateStatus == "DIRTY" then "\($p.headRefOid):\($p.baseRefOid)"
    else "" end) as $conflict
-| [ ($activity[] | select(.type == "comment" and .id > ($s.activity // 0) and .actor != $agent and .actor != $loop)
+| [ ($activity[] | select(.type == "comment" and .id > ($s.activity // 0) and (.actor | ours | not))
       | {key: "t\(.id)", text: "Ticket comment from \(.actor):\n\(.data.body // "" | clip)"}),
     ($issue[] | select(.id > ($s.issue // 0) and feedback)
       | {key: "i\(.id)", text: "Pull request comment from \(.user.login) (\(.html_url)):\n\(.body // "" | clip)"}),
@@ -145,10 +158,11 @@ log() { printf '%s %s\n' "$(date '+%F %T')" "$*"; }
 
 get() { curl -sf "$KANBAN/api$1"; }
 
-# POSTs JSON as the agent; prints the response body and then the HTTP status on its own line.
+# Sends JSON (POST unless a method is given) as the worker, or as the given actor; prints the response body and then
+# the HTTP status on its own line.
 post() {
-  curl -s -w '\n%{http_code}' -X POST "$KANBAN/api$1" \
-    -H 'Content-Type: application/json' -H "X-Actor: $AGENT" -d "$2"
+  curl -s -w '\n%{http_code}' -X "${4:-POST}" "$KANBAN/api$1" \
+    -H 'Content-Type: application/json' -H "X-Actor: ${3:-$WORKER}" -d "$2"
 }
 
 # Comments on a ticket as the loop rather than the agent.
@@ -283,7 +297,8 @@ retried with backoff, up to $MAX_ATTEMPTS runs in a row; after that, new feedbac
 
 intro() {
   printf '%s' "Use the ultrakanban skill. KANBAN=$KANBAN, BOARD=$BOARD.
-Your name (agent field and X-Actor header): $AGENT.
+Your name (agent field and X-Actor header): $WORKER. Use exactly this name: it says that you are the $AGENT agent
+running $MODEL at $EFFORT effort.
 This is a non-interactive run started by scripts/agent-loop.sh: do the work, then exit. Don't wait for review; the loop
 starts a new run when feedback arrives. If you need an answer from a human, ask in a ticket comment and exit.
 End every pull request comment, review and inline reply you post with this exact line, so the loop doesn't mistake
@@ -293,14 +308,14 @@ $MARKER"
 
 # Moves a ticket whose pull request was closed without merging to the cancelled column.
 cancel() {
-  local id=$1 number=$2 pr_url=$3 cancelled=$4 response
+  local id=$1 number=$2 pr_url=$3 cancelled=$4 holder=$5 response
   if [[ -z $cancelled ]]; then
     log "error: ticket #$number ($id): $pr_url was closed without merging, but the board has no \
 \"$CANCELLED_COLUMN\" column; leaving the ticket alone"
     return 1
   fi
-  response=$(post "/tickets/$id/release" "$(jq -nc --arg agent "$AGENT" --arg moveTo "$cancelled" \
-    '{agent: $agent, moveTo: $moveTo}')")
+  response=$(post "/tickets/$id/release" "$(jq -nc --arg agent "$holder" --arg moveTo "$cancelled" \
+    '{agent: $agent, moveTo: $moveTo}')" "$holder")
   if [[ ${response##*$'\n'} != 200 ]]; then
     log "error: ticket #$number ($id): can't move it to $CANCELLED_COLUMN: ${response%$'\n'*}"
     return 1
@@ -310,17 +325,32 @@ cancel() {
   log "ticket #$number ($id): $pr_url was closed without merging; moved it to $CANCELLED_COLUMN"
 }
 
+# Reassigns a ticket held under another of the agent's names to the current worker, in one versioned update.
+adopt() {
+  local id=$1 number=$2 holder=$3 version=$4 response
+  [[ $holder == "$WORKER" ]] && return 0
+  response=$(post "/tickets/$id" "$(jq -nc --arg assignee "$WORKER" --argjson version "$version" \
+    '{assignee: $assignee, ifVersion: $version}')" "$LOOP_ACTOR" PATCH)
+  if [[ ${response##*$'\n'} != 200 ]]; then
+    log "error: ticket #$number ($id): can't reassign it from $holder to $WORKER: ${response%$'\n'*}"
+    return 1
+  fi
+  log "ticket #$number ($id): reassigned from $holder to $WORKER"
+}
+
 # Checks the tickets the agent holds and handles the first one that needs work. Returns 1 if none did.
 handle_feedback() {
-  local board review cancelled tickets file id number column pr_url repo pr_number pr branch ci issue reviews inline \
-    activity state triage items ci_note
+  local board review cancelled tickets file id number column holder version pr_url repo pr_number pr branch ci issue \
+    reviews inline activity state triage items ci_note
   board=$(get "/boards/$BOARD") || { log "can't read board $BOARD"; return 1; }
   review=$(jq -r '.board.reviewColumnId // ""' <<<"$board")
   cancelled=$(jq -r --arg name "$CANCELLED_COLUMN" \
     '[.columns[] | select((.name | ascii_downcase) == ($name | ascii_downcase)) | .id][0] // ""' <<<"$board")
   tickets=$(jq -r --arg agent "$AGENT" --arg cancelled "$cancelled" '(.board.doneColumnId // "") as $done
-    | .tickets[] | select(.assignee == $agent and .columnId != $done and .columnId != $cancelled)
-    | [.id, .number, .columnId, .pullRequest.url // "-", .pullRequest.repo // "-", .pullRequest.number // "-"] | @tsv' \
+    | .tickets[] | select(.assignee | . != null and (. == $agent or startswith($agent + "/")))
+    | select(.columnId != $done and .columnId != $cancelled)
+    | [.id, .number, .columnId, .assignee, .version, .pullRequest.url // "-", .pullRequest.repo // "-",
+       .pullRequest.number // "-"] | @tsv' \
     <<<"$board")
   board=
 
@@ -332,7 +362,7 @@ handle_feedback() {
     [[ $'\n'$tickets == *$'\n'"$id"$'\t'* ]] || rm -f "$file"
   done
 
-  while IFS=$'\t' read -r -u 3 id number column pr_url repo pr_number; do
+  while IFS=$'\t' read -r -u 3 id number column holder version pr_url repo pr_number; do
     [[ -n $id ]] || continue
     pr=null branch= ci=null issue='[]' reviews='[]' inline='[]'
     if [[ $pr_url != - ]]; then
@@ -351,7 +381,7 @@ handle_feedback() {
           ;;
         CLOSED)
           if [[ $column == "$review" ]]; then
-            cancel "$id" "$number" "$pr_url" "$cancelled" && return 0
+            cancel "$id" "$number" "$pr_url" "$cancelled" "$holder" && return 0
             continue
           fi
           pr=null
@@ -383,6 +413,7 @@ loop stopped starting runs for CI on this ticket. Comment on the ticket to let i
     fi
     [[ $(jq -r .run <<<"$triage") == true ]] || continue
 
+    adopt "$id" "$number" "$holder" "$version" || continue
     items=$(jq -r '.items | map(.text) | join("\n\n---\n\n")' <<<"$triage")
     log "ticket #$number ($id): $(jq -r '.items | map(.text | split("\n")[0] | rtrimstr(":")) | join("; ")' \
       <<<"$triage")"
@@ -411,7 +442,7 @@ Finish with a ticket comment summarising what you did, then exit." \
 # Claims the next ticket from the todo column and works it. Returns 1 if there was nothing to claim.
 claim_next() {
   local response status ticket id snapshot
-  response=$(post "/boards/$BOARD/tickets/claim-next" "$(jq -nc --arg agent "$AGENT" --arg column "$TODO_COLUMN" \
+  response=$(post "/boards/$BOARD/tickets/claim-next" "$(jq -nc --arg agent "$WORKER" --arg column "$TODO_COLUMN" \
     --arg moveTo "$IN_PROGRESS_COLUMN" '{agent: $agent, column: $column, moveTo: $moveTo}')")
   status=${response##*$'\n'}
   ticket=${response%$'\n'*}
@@ -444,7 +475,7 @@ idle() {
 sleeper=
 trap 'log "stopped"; [[ -n $sleeper ]] && kill "$sleeper" 2>/dev/null; exit 0' INT TERM
 
-log "working board $BOARD as $AGENT"
+log "working board $BOARD as $AGENT, claiming tickets as $WORKER"
 while true; do
   handle_feedback || claim_next || idle
 done

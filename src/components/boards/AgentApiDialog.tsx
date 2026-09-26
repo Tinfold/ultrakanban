@@ -49,7 +49,7 @@ export function AgentApiDialog({ open, onOpenChange }: { open: boolean; onOpenCh
     (detail.board.doneColumnId && columnsById.get(detail.board.doneColumnId)?.name) || detail.columns.at(-1)?.name
   const json = (value: object) => `'${JSON.stringify(value)}'`
   const post = (path: string, body: object) =>
-    `curl -s -X POST ${api}${path} \\\n  -H 'Content-Type: application/json' -H 'X-Actor: agent-1' \\\n  -d ${json(body)}`
+    `curl -s -X POST ${api}${path} \\\n  -H 'Content-Type: application/json' -H 'X-Actor: claude/claude-opus-5-5/high' \\\n  -d ${json(body)}`
 
   const finish = review
     ? `5. Open a GitHub pull request, then submit for review: POST /tickets/<id>/review {"agent":"<your name>","pullRequest":"<PR URL>","comment":"<what changed and how you verified it>"}. This links the PR and moves the ticket to "${review}".
@@ -68,6 +68,7 @@ Work one ticket at a time, and use a fresh agent per ticket so context stays sma
       wrap: true,
       code: `Track your work on the kanban board through its HTTP API at ${api} (reference: GET ${api}).
 Board id: ${detail.board.id}. Send the header "X-Actor: <your name>" on every request.
+Your name is <agent>/<model>/<effort>: the tool you run in, then your exact model and effort level, e.g. claude/claude-opus-5-5/high. Use the same name every time.
 
 1. Claim a ticket: POST ${boardPath}/tickets/claim-next {"agent":"<your name>","column":"${todo}","moveTo":"${inProgress}"}.
 2. Read the ticket and its comments: GET /tickets/<id> and GET /tickets/<id>/activity. Comments may be newer than the description; follow the newest instruction and ask in a comment if they conflict.
@@ -87,17 +88,21 @@ ${finish}`,
     },
     {
       title: 'Claim the next ticket',
-      code: post(`${boardPath}/tickets/claim-next`, { agent: 'agent-1', column: todo, moveTo: inProgress }),
+      code: post(`${boardPath}/tickets/claim-next`, {
+        agent: 'claude/claude-opus-5-5/high',
+        column: todo,
+        moveTo: inProgress,
+      }),
     },
     {
       title: 'Attach a screenshot',
-      code: `curl -s -X POST ${api}/tickets/$TICKET_ID/attachments \\\n  -H 'X-Actor: agent-1' -F file=@screenshot.png`,
+      code: `curl -s -X POST ${api}/tickets/$TICKET_ID/attachments \\\n  -H 'X-Actor: claude/claude-opus-5-5/high' -F file=@screenshot.png`,
     },
     review
       ? {
           title: 'Submit for review',
           code: post('/tickets/$TICKET_ID/review', {
-            agent: 'agent-1',
+            agent: 'claude/claude-opus-5-5/high',
             pullRequest: 'https://github.com/owner/repo/pull/123',
             comment: 'Adds rate limiting. Screenshots are attached to the ticket.',
           }),

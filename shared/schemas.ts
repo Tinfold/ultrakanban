@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { COLORS, parsePullRequestUrl, PRIORITIES, PULL_REQUEST_STATES } from './domain.ts'
+import { AGENT_EFFORTS, COLORS, parsePullRequestUrl, PRIORITIES, PULL_REQUEST_STATES } from './domain.ts'
 
 const name = z.string().trim().min(1).max(200)
 const color = z.enum(COLORS)
@@ -27,6 +27,12 @@ const agentName = z
   .trim()
   .regex(/^[\w.-]{1,64}$/, 'Use letters, digits, ".", "_" and "-" only')
   .nullable()
+const agentModel = z
+  .string()
+  .trim()
+  .regex(/^[\w.[\]-]{1,100}$/, 'Use a model alias or name, e.g. opus or claude-opus-5-5')
+  .nullable()
+const agentEffort = z.enum(AGENT_EFFORTS).nullable()
 /** Skips the merged-pull-request requirement of the board's done column. Meant for humans, not agents. */
 const force = z.boolean().optional()
 
@@ -39,6 +45,8 @@ export const createBoardSchema = z.object({
   githubRepo: githubRepo.optional(),
   agentEnabled: z.boolean().optional(),
   agentName: agentName.optional(),
+  agentModel: agentModel.optional(),
+  agentEffort: agentEffort.optional(),
 })
 
 export const updateBoardSchema = z.object({
@@ -49,6 +57,8 @@ export const updateBoardSchema = z.object({
   githubRepo: githubRepo.optional(),
   agentEnabled: z.boolean().optional(),
   agentName: agentName.optional(),
+  agentModel: agentModel.optional(),
+  agentEffort: agentEffort.optional(),
 })
 
 export const createColumnSchema = z.object({

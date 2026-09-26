@@ -14,6 +14,10 @@ agents can work the same board safely.
 - `BOARD` — the board id. List boards with `curl -s $KANBAN/api/boards`; ask the user which one if several.
 - Send `-H "X-Actor: <your name>"` on every write so the activity log shows who did what. Use the same name
   as the `agent` field.
+- Your name is `<agent>/<model>/<effort>`: the agent, then your exact model and effort level, e.g.
+  `claude/claude-opus-5-5/high`. When you are given a name (the board's agent loop always gives one), use exactly
+  that. Otherwise build it this way, with `claude` as the agent for Claude Code, and never make one up: the board
+  and its dashboard group work by name, so the same model and effort must always show up under the same name.
 
 ## Working rules
 
