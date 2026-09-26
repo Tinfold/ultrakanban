@@ -5,13 +5,14 @@ import { AppHeader } from '@/components/app/AppHeader'
 import { AgentList } from '@/components/overview/AgentList'
 import { BoardTable } from '@/components/overview/BoardTable'
 import { type ChartSeries, ColumnChart } from '@/components/overview/ColumnChart'
+import { NeedsAttention } from '@/components/overview/NeedsAttention'
 import { RecentActivity } from '@/components/overview/RecentActivity'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useOverview } from '@/hooks/queries'
 import { useNow } from '@/hooks/use-now'
 import { useStoredState } from '@/hooks/use-stored-state'
 import { formatDuration } from '@/lib/format'
-import { dailyActivity, workedByAgent } from '@/lib/overview'
+import { dailyActivity, median, needsAttention, workedByAgent } from '@/lib/overview'
 import { storageKeys } from '@/lib/storage'
 import { cn } from '@/lib/utils'
 
@@ -34,6 +35,13 @@ function Stat({ label, value, detail }: { label: string; value: ReactNode; detai
       <p className="mt-0.5 truncate text-xs text-muted-foreground">{detail}</p>
     </div>
   )
+}
+
+const tickets = (count: number) => `${count} ${count === 1 ? 'ticket' : 'tickets'}`
+
+function formatMedian(values: number[]) {
+  const value = median(values)
+  return value === null ? '—' : formatDuration(value)
 }
 
 function Section({ title, children, className }: { title: string; children: ReactNode; className?: string }) {
@@ -86,6 +94,14 @@ export function OverviewPage() {
     const waiting = agents.filter((agent) => agent.status === 'review').length
     const completed = daily.reduce((total, day) => total + day.events.completed, 0)
     const workedMs = daily.reduce((total, day) => total + day.workedMs, 0)
+    const created = daily.reduce((total, day) => total + day.events.created, 0)
+    const attention = needsAttention(agents, now)
+    const unclaimed = totals.open - totals.working - totals.review
+    const completions = overview.completions.filter(
+      (completion) => Date.parse(completion.at) >= daily[0].start.getTime(),
+    )
+    const cycleTimes = completions.flatMap((completion) => completion.cycleMs ?? [])
+    const reviewTimes = completions.flatMap((completion) => completion.reviewMs ?? [])
     const columns = daily.map((day) => ({
       label: format(day.start, days === 7 ? 'EEE' : 'MMM d'),
       title: format(day.start, 'EEEE, MMM d'),
@@ -103,6 +119,25 @@ export function OverviewPage() {
           <Stat label="In review" value={totals.review} detail="Waiting on a pull request" />
           <Stat label="Completed" value={completed} detail={`Last ${days} days`} />
           <Stat label="Time worked" value={formatDuration(workedMs)} detail={`Last ${days} days, all agents`} />
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+          <Stat
+            label="Median cycle time"
+            value={formatMedian(cycleTimes)}
+            detail={`Start to done, ${tickets(cycleTimes.length)}`}
+          />
+          <Stat
+            label="Median review wait"
+            value={formatMedian(reviewTimes)}
+            detail={`Until done, ${tickets(reviewTimes.length)}`}
+          />
+          <Stat
+            label="Backlog"
+            value={created === completed ? '±0' : `${created > completed ? '+' : '−'}${Math.abs(created - completed)}`}
+            detail={`${created} created, ${completed} completed`}
+          />
+          <Stat label="Unclaimed" value={unclaimed} detail="Open and unassigned" />
         </div>
 
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
@@ -136,9 +171,14 @@ export function OverviewPage() {
               <BoardTable boards={overview.boards} />
             </Section>
           </div>
-          <Section title="Recent activity">
-            <RecentActivity activity={overview.recent} />
-          </Section>
+          <div className="grid grid-cols-1 content-start gap-6">
+            <Section title="Needs attention">
+              <NeedsAttention review={attention.review} stalled={attention.stalled} now={now} />
+            </Section>
+            <Section title="Recent activity">
+              <RecentActivity activity={overview.recent} />
+            </Section>
+          </div>
         </div>
       </div>
     )
