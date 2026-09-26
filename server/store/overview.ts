@@ -1,15 +1,17 @@
-import type {
-  Activity,
-  Overview,
-  OverviewActivity,
-  OverviewAgent,
-  OverviewBoard,
-  OverviewEventKind,
-  OverviewRange,
-  OverviewTicket,
-  PullRequestState,
-  WorkSession,
-  WorkState,
+import {
+  type Activity,
+  AGENT_EFFORTS,
+  agentWorkerName,
+  type Overview,
+  type OverviewActivity,
+  type OverviewAgent,
+  type OverviewBoard,
+  type OverviewEventKind,
+  type OverviewRange,
+  type OverviewTicket,
+  type PullRequestState,
+  type WorkSession,
+  type WorkState,
 } from '../../shared/domain.ts'
 import { sql } from '../db.ts'
 import { type ActivityRow, toActivity } from './activity.ts'
@@ -17,8 +19,6 @@ import { listBoards } from './boards.ts'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const RECENT_LIMIT = 30
-/** Name the host agent claims tickets under when a board doesn't set one (see scripts/agent-board.sh). */
-const DEFAULT_AGENT_NAME = 'claude'
 
 interface TicketRow {
   id: string
@@ -207,15 +207,21 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
       .map((row) => [row.board_id, row.at]),
   )
 
+  // A board's host agent runs as its worker name, or as that name with a ticket's own effort. Only the board's
+  // default worker is listed while idle; the per-ticket variants show up once they have work.
   const agentBoards = new Map<string, string[]>()
+  const hostAgents: string[] = []
   for (const board of boards) {
     if (!board.agentEnabled) continue
-    const name = board.agentName ?? DEFAULT_AGENT_NAME
-    agentBoards.set(name, [...(agentBoards.get(name) ?? []), board.id])
+    hostAgents.push(agentWorkerName(board))
+    for (const effort of AGENT_EFFORTS) {
+      const name = agentWorkerName({ ...board, agentEffort: effort })
+      agentBoards.set(name, [...(agentBoards.get(name) ?? []), board.id])
+    }
   }
 
   const statusRank = { working: 0, review: 1, idle: 2 }
-  const agentNames = new Set([...agentBoards.keys(), ...holdings.keys(), ...workedMs.keys()])
+  const agentNames = new Set([...hostAgents, ...holdings.keys(), ...workedMs.keys()])
   const agents = [...agentNames]
     .map((name): OverviewAgent => {
       const held = (holdings.get(name) ?? []).sort(

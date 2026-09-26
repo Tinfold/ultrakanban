@@ -11,11 +11,19 @@ import {
 export type BoardPatch = Partial<
   Pick<
     BoardSummary,
-    'name' | 'description' | 'reviewColumnId' | 'doneColumnId' | 'githubRepo' | 'agentEnabled' | 'agentName'
+    | 'name'
+    | 'description'
+    | 'reviewColumnId'
+    | 'doneColumnId'
+    | 'githubRepo'
+    | 'agentEnabled'
+    | 'agentName'
+    | 'agentModel'
+    | 'agentEffort'
   >
 >
 export type TicketPatch = Partial<
-  Pick<Ticket, 'title' | 'description' | 'priority' | 'assignee' | 'dueDate' | 'tagIds'>
+  Pick<Ticket, 'title' | 'description' | 'priority' | 'assignee' | 'dueDate' | 'agentEffort' | 'tagIds'>
 >
 export type ColumnPatch = Partial<Pick<Column, 'name' | 'color' | 'wipLimit'>>
 export type TagPatch = Partial<Pick<Tag, 'name' | 'color'>>

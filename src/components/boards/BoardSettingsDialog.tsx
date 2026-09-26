@@ -1,5 +1,5 @@
 import { CircleAlertIcon, CircleCheckIcon } from 'lucide-react'
-import type { FormEvent } from 'react'
+import { type FormEvent, useState } from 'react'
 import { useBoardContext } from '@/components/board/board-context'
 import { ColorDot } from '@/components/common/TagChip'
 import { Button } from '@/components/ui/button'
@@ -16,8 +16,10 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { useGitHubStatus } from '@/hooks/queries'
+import { AGENT_DEFAULTS, AGENT_EFFORTS, type AgentEffort, agentWorkerName } from '@shared/domain'
 
 const NONE = '__none'
+const DEFAULT_EFFORT = '__default'
 
 function ColumnSelect({ id, name, value }: { id: string; name: string; value: string | null }) {
   const { detail } = useBoardContext()
@@ -62,7 +64,26 @@ function GitHubStatus() {
 }
 
 export function BoardSettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Board settings</DialogTitle>
+          <DialogDescription>Agents see the description when they read the board.</DialogDescription>
+        </DialogHeader>
+        <BoardSettingsForm onClose={() => onOpenChange(false)} />
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** Mounted with the dialog's content, so it starts from the saved settings each time the dialog opens. */
+function BoardSettingsForm({ onClose }: { onClose: () => void }) {
   const { detail, actions } = useBoardContext()
+  const [agent, setAgent] = useState(() => {
+    const { agentName, agentModel, agentEffort } = detail.board
+    return { agentName, agentModel, agentEffort }
+  })
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -81,107 +102,139 @@ export function BoardSettingsDialog({ open, onOpenChange }: { open: boolean; onO
       doneColumnId: columnId('doneColumn'),
       githubRepo: text('githubRepo'),
       agentName: text('agentName'),
+      agentModel: text('agentModel'),
+      agentEffort: agent.agentEffort,
       agentEnabled: data.get('agentEnabled') === 'on',
     })
-    onOpenChange(false)
+    onClose()
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Board settings</DialogTitle>
-          <DialogDescription>Agents see the description when they read the board.</DialogDescription>
-        </DialogHeader>
-        <form onSubmit={submit} className="grid gap-4">
+    <form onSubmit={submit} className="grid gap-4">
+      <div className="grid gap-2">
+        <Label htmlFor="board-settings-name">Name</Label>
+        <Input id="board-settings-name" name="name" required defaultValue={detail.board.name} />
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor="board-settings-description">Description</Label>
+        <Textarea
+          id="board-settings-description"
+          name="description"
+          rows={3}
+          defaultValue={detail.board.description}
+          placeholder="What is this board for? Conventions for agents?"
+        />
+      </div>
+
+      <fieldset className="grid gap-3 border-t pt-4">
+        <legend className="sr-only">Pull request workflow</legend>
+        <div className="grid gap-1">
+          <h3 className="text-sm font-medium">Pull request workflow</h3>
+          <p className="text-xs text-muted-foreground">
+            Agents submit tickets to the review column with their GitHub pull request. Tickets only enter the done
+            column once that pull request is merged, and move there automatically when it is.
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
           <div className="grid gap-2">
-            <Label htmlFor="board-settings-name">Name</Label>
-            <Input id="board-settings-name" name="name" required defaultValue={detail.board.name} />
+            <Label htmlFor="board-settings-review">Review column</Label>
+            <ColumnSelect id="board-settings-review" name="reviewColumn" value={detail.board.reviewColumnId} />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="board-settings-description">Description</Label>
-            <Textarea
-              id="board-settings-description"
-              name="description"
-              rows={3}
-              defaultValue={detail.board.description}
-              placeholder="What is this board for? Conventions for agents?"
+            <Label htmlFor="board-settings-done">Done column</Label>
+            <ColumnSelect id="board-settings-done" name="doneColumn" value={detail.board.doneColumnId} />
+          </div>
+        </div>
+        <GitHubStatus />
+      </fieldset>
+
+      <fieldset className="grid gap-3 border-t pt-4">
+        <legend className="sr-only">Agent</legend>
+        <div className="grid gap-1">
+          <h3 className="text-sm font-medium">Agent</h3>
+          <p className="text-xs text-muted-foreground">
+            When on, the agent service on the host works this board: it claims tickets, opens pull requests in its own
+            clone of the repository and answers review feedback. It runs Claude Code without permission prompts.
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="grid gap-2">
+            <Label htmlFor="board-settings-repo">GitHub repository</Label>
+            <Input
+              id="board-settings-repo"
+              name="githubRepo"
+              defaultValue={detail.board.githubRepo ?? ''}
+              placeholder="owner/name"
+              pattern="[\w.\-]+/[\w.\-]+"
+              title="owner/name"
             />
           </div>
+          <div className="grid gap-2">
+            <Label htmlFor="board-settings-agent-name">Agent name</Label>
+            <Input
+              id="board-settings-agent-name"
+              name="agentName"
+              defaultValue={detail.board.agentName ?? ''}
+              placeholder={AGENT_DEFAULTS.name}
+              pattern="[\w.\-]{1,64}"
+              onChange={(event) => setAgent({ ...agent, agentName: event.target.value.trim() || null })}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="board-settings-agent-model">Model</Label>
+            <Input
+              id="board-settings-agent-model"
+              name="agentModel"
+              defaultValue={detail.board.agentModel ?? ''}
+              placeholder={AGENT_DEFAULTS.model}
+              pattern="[\w.\[\]\-]{1,100}"
+              title="A model alias or name, e.g. opus or claude-opus-5-5"
+              onChange={(event) => setAgent({ ...agent, agentModel: event.target.value.trim() || null })}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="board-settings-agent-effort">Effort</Label>
+            <Select
+              value={agent.agentEffort ?? DEFAULT_EFFORT}
+              onValueChange={(value) =>
+                setAgent({ ...agent, agentEffort: value === DEFAULT_EFFORT ? null : (value as AgentEffort) })
+              }
+            >
+              <SelectTrigger id="board-settings-agent-effort" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={DEFAULT_EFFORT}>Default ({AGENT_DEFAULTS.effort})</SelectItem>
+                {AGENT_EFFORTS.map((effort) => (
+                  <SelectItem key={effort} value={effort}>
+                    {effort}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          It claims tickets as <code>{agentWorkerName(agent)}</code>. A full model name, such as claude-opus-5-5, keeps
+          each model version apart on the board.
+        </p>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            name="agentEnabled"
+            defaultChecked={detail.board.agentEnabled}
+            className="size-4 accent-primary"
+          />
+          Run the agent on this board
+        </label>
+      </fieldset>
 
-          <fieldset className="grid gap-3 border-t pt-4">
-            <legend className="sr-only">Pull request workflow</legend>
-            <div className="grid gap-1">
-              <h3 className="text-sm font-medium">Pull request workflow</h3>
-              <p className="text-xs text-muted-foreground">
-                Agents submit tickets to the review column with their GitHub pull request. Tickets only enter the done
-                column once that pull request is merged, and move there automatically when it is.
-              </p>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-2">
-                <Label htmlFor="board-settings-review">Review column</Label>
-                <ColumnSelect id="board-settings-review" name="reviewColumn" value={detail.board.reviewColumnId} />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="board-settings-done">Done column</Label>
-                <ColumnSelect id="board-settings-done" name="doneColumn" value={detail.board.doneColumnId} />
-              </div>
-            </div>
-            <GitHubStatus />
-          </fieldset>
-
-          <fieldset className="grid gap-3 border-t pt-4">
-            <legend className="sr-only">Agent</legend>
-            <div className="grid gap-1">
-              <h3 className="text-sm font-medium">Agent</h3>
-              <p className="text-xs text-muted-foreground">
-                When on, the agent service on the host works this board: it claims tickets, opens pull requests in its
-                own clone of the repository and answers review feedback. It runs Claude Code without permission prompts.
-              </p>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-2">
-                <Label htmlFor="board-settings-repo">GitHub repository</Label>
-                <Input
-                  id="board-settings-repo"
-                  name="githubRepo"
-                  defaultValue={detail.board.githubRepo ?? ''}
-                  placeholder="owner/name"
-                  pattern="[\w.\-]+/[\w.\-]+"
-                  title="owner/name"
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="board-settings-agent-name">Agent name</Label>
-                <Input
-                  id="board-settings-agent-name"
-                  name="agentName"
-                  defaultValue={detail.board.agentName ?? ''}
-                  placeholder="claude"
-                  pattern="[\w.\-]{1,64}"
-                />
-              </div>
-            </div>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                name="agentEnabled"
-                defaultChecked={detail.board.agentEnabled}
-                className="size-4 accent-primary"
-              />
-              Run the agent on this board
-            </label>
-          </fieldset>
-
-          <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit">Save</Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+      <DialogFooter>
+        <Button type="button" variant="ghost" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button type="submit">Save</Button>
+      </DialogFooter>
+    </form>
   )
 }

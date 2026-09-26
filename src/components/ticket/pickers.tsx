@@ -1,6 +1,6 @@
 import { CalendarIcon, CheckIcon, PlusIcon, UserRoundXIcon } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
-import type { Priority } from '@shared/domain'
+import { AGENT_DEFAULTS, AGENT_EFFORTS, type AgentEffort, type Priority } from '@shared/domain'
 import { ColorDot } from '@/components/common/TagChip'
 import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { UserAvatar } from '@/components/common/UserAvatar'
@@ -57,6 +57,33 @@ export function PriorityPicker({ value, onChange, children }: PickerProps<Priori
             <DropdownMenuRadioItem key={priority} value={priority}>
               <PriorityIcon priority={priority} />
               {PRIORITY_LABELS[priority]}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+const BOARD_EFFORT = '__board'
+
+/** The effort level the board's agent works a ticket at; `null` follows the board's setting. */
+export function EffortPicker({ value, onChange, children }: PickerProps<AgentEffort | null>) {
+  const { detail } = useBoardContext()
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-48">
+        <DropdownMenuRadioGroup
+          value={value ?? BOARD_EFFORT}
+          onValueChange={(next) => onChange(next === BOARD_EFFORT ? null : (next as AgentEffort))}
+        >
+          <DropdownMenuRadioItem value={BOARD_EFFORT}>
+            Board default ({detail.board.agentEffort ?? AGENT_DEFAULTS.effort})
+          </DropdownMenuRadioItem>
+          {AGENT_EFFORTS.map((effort) => (
+            <DropdownMenuRadioItem key={effort} value={effort}>
+              {effort}
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import {
+  AGENT_EFFORTS,
   COLORS,
   OVERVIEW_RANGES,
   type OverviewRange,
@@ -34,6 +35,12 @@ const agentName = z
   .trim()
   .regex(/^[\w.-]{1,64}$/, 'Use letters, digits, ".", "_" and "-" only')
   .nullable()
+const agentModel = z
+  .string()
+  .trim()
+  .regex(/^[\w.[\]-]{1,100}$/, 'Use a model alias or name, e.g. opus or claude-opus-5-5')
+  .nullable()
+const agentEffort = z.enum(AGENT_EFFORTS).nullable()
 /** Skips the merged-pull-request requirement of the board's done column. Meant for humans, not agents. */
 const force = z.boolean().optional()
 
@@ -46,6 +53,8 @@ export const createBoardSchema = z.object({
   githubRepo: githubRepo.optional(),
   agentEnabled: z.boolean().optional(),
   agentName: agentName.optional(),
+  agentModel: agentModel.optional(),
+  agentEffort: agentEffort.optional(),
 })
 
 export const updateBoardSchema = z.object({
@@ -56,6 +65,8 @@ export const updateBoardSchema = z.object({
   githubRepo: githubRepo.optional(),
   agentEnabled: z.boolean().optional(),
   agentName: agentName.optional(),
+  agentModel: agentModel.optional(),
+  agentEffort: agentEffort.optional(),
 })
 
 export const createColumnSchema = z.object({
@@ -87,6 +98,7 @@ export const createTicketSchema = z.object({
   tags: z.array(ref).max(50).optional(),
   assignee: name.nullable().optional(),
   dueDate: isoDate.optional(),
+  agentEffort: agentEffort.optional(),
   pullRequest: pullRequestUrl.nullable().optional(),
   position: position.optional(),
   force,
@@ -99,6 +111,7 @@ export const updateTicketSchema = z.object({
   tags: z.array(ref).max(50).optional(),
   assignee: name.nullable().optional(),
   dueDate: isoDate.optional(),
+  agentEffort: agentEffort.optional(),
   pullRequest: pullRequestUrl.nullable().optional(),
   ifVersion: version.optional(),
 })
@@ -176,6 +189,7 @@ export const boardExportSchema = z.object({
       tags: z.array(name).default([]),
       assignee: name.nullable().default(null),
       dueDate: isoDate.default(null),
+      agentEffort: agentEffort.default(null),
       pullRequest: z
         .object({
           url: pullRequestUrl,

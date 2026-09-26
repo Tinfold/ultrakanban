@@ -3,7 +3,15 @@ import { mkdtempSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, test } from 'node:test'
-import type { Activity, Attachment, BoardDetail, BoardSummary, Overview, Ticket } from '../shared/domain.ts'
+import {
+  type Activity,
+  agentWorkerName,
+  type Attachment,
+  type BoardDetail,
+  type BoardSummary,
+  type Overview,
+  type Ticket,
+} from '../shared/domain.ts'
 import { createApp } from './app.ts'
 import { createAttachmentFiles } from './attachment-files.ts'
 import { subscribe } from './events.ts'
@@ -183,7 +191,7 @@ describe('boards', () => {
   })
 
   test('export/import round-trips a board', async () => {
-    const ticket = await addTicket({ title: 'A', column: 'Done', tags: ['x'], priority: 'high' })
+    const ticket = await addTicket({ title: 'A', column: 'Done', tags: ['x'], priority: 'high', agentEffort: 'low' })
     await call('POST', `/tickets/${ticket.id}/comments`, { body: 'hello' })
     const { body: exported } = await call('GET', `/boards/${boardId}/export`)
 
@@ -285,19 +293,29 @@ describe('pull request workflow', () => {
     const {
       body: { board: initial },
     } = await call<BoardDetail>('GET', `/boards/${boardId}`)
-    assert.deepEqual([initial.githubRepo, initial.agentEnabled, initial.agentName], [null, false, null])
+    assert.deepEqual(
+      [initial.githubRepo, initial.agentEnabled, initial.agentName, initial.agentModel, initial.agentEffort],
+      [null, false, null, null, null],
+    )
+    assert.equal(agentWorkerName(initial), 'claude/opus/high')
 
     const off = await call('PATCH', `/boards/${boardId}`, { agentEnabled: true })
     assert.equal(off.status, 400, 'the agent needs a repository')
     assert.equal((await call('PATCH', `/boards/${boardId}`, { githubRepo: 'not a repo' })).status, 400)
     assert.equal((await call('PATCH', `/boards/${boardId}`, { agentName: 'has space' })).status, 400)
+    assert.equal((await call('PATCH', `/boards/${boardId}`, { agentName: 'claude/opus' })).status, 400)
+    assert.equal((await call('PATCH', `/boards/${boardId}`, { agentModel: 'opus/high' })).status, 400)
+    assert.equal((await call('PATCH', `/boards/${boardId}`, { agentEffort: 'extreme' })).status, 400)
 
     const { body: on } = await call<BoardSummary>('PATCH', `/boards/${boardId}`, {
       githubRepo: 'acme/app',
       agentEnabled: true,
       agentName: 'claude-2',
+      agentModel: 'claude-sonnet-5',
+      agentEffort: 'xhigh',
     })
     assert.deepEqual([on.githubRepo, on.agentEnabled, on.agentName], ['acme/app', true, 'claude-2'])
+    assert.equal(agentWorkerName(on), 'claude-2/claude-sonnet-5/xhigh')
     const { body: boards } = await call<BoardSummary[]>('GET', '/boards')
     assert.ok(boards.some((board) => board.id === boardId && board.agentEnabled))
 
@@ -305,8 +323,26 @@ describe('pull request workflow', () => {
       agentEnabled: false,
       githubRepo: null,
       agentName: null,
+      agentModel: null,
+      agentEffort: null,
     })
-    assert.deepEqual([cleared.githubRepo, cleared.agentEnabled, cleared.agentName], [null, false, null])
+    assert.deepEqual(
+      [cleared.githubRepo, cleared.agentEnabled, cleared.agentName, cleared.agentModel, cleared.agentEffort],
+      [null, false, null, null, null],
+    )
+  })
+
+  test('tickets can set the effort the agent works them at', async () => {
+    const ticket = await addTicket({ title: 'Hard', agentEffort: 'max' })
+    assert.equal(ticket.agentEffort, 'max')
+    assert.equal((await addTicket({ title: 'Plain' })).agentEffort, null, 'null follows the board')
+    assert.equal((await call('PATCH', `/tickets/${ticket.id}`, { agentEffort: 'extreme' })).status, 400)
+
+    const { body: cleared } = await call<Ticket>('PATCH', `/tickets/${ticket.id}`, { agentEffort: null })
+    assert.equal(cleared.agentEffort, null)
+    assert.equal(cleared.version, ticket.version + 1)
+    const activity = (await call<Activity[]>('GET', `/tickets/${ticket.id}/activity`)).body
+    assert.ok(activity.some((entry) => entry.type === 'updated' && entry.data.fields.includes('agentEffort')))
   })
 
   test('review needs a configured review column', async () => {
@@ -369,11 +405,19 @@ describe('pull request workflow', () => {
     assert.equal((await call('GET', '/overview?days=3')).status, 400)
   })
 
-  test('overview lists enabled board agents even when idle', async () => {
+  test('overview lists enabled board agents under their worker names', async () => {
     await call('PATCH', `/boards/${boardId}`, { githubRepo: 'acme/app', agentEnabled: true, agentName: 'idle-agent' })
-    const { body } = await call<Overview>('GET', '/overview')
-    const agent = body.agents.find((entry) => entry.name === 'idle-agent')
+    const { body: idle } = await call<Overview>('GET', '/overview')
+    const agent = idle.agents.find((entry) => entry.name === 'idle-agent/opus/high')
     assert.deepEqual([agent?.status, agent?.agentOf], ['idle', [boardId]])
+    assert.ok(!idle.agents.some((entry) => entry.name === 'idle-agent' || entry.name === 'idle-agent/opus/max'))
+
+    // A ticket's own effort runs under its own worker name, which still counts as the board's host agent.
+    await addTicket({ title: 'A' })
+    await call('POST', `/boards/${boardId}/tickets/claim-next`, { agent: 'idle-agent/opus/max', column: 'Todo' })
+    const { body: working } = await call<Overview>('GET', '/overview')
+    const variant = working.agents.find((entry) => entry.name === 'idle-agent/opus/max')
+    assert.deepEqual([variant?.status, variant?.agentOf], ['working', [boardId]])
     await call('PATCH', `/boards/${boardId}`, { agentEnabled: false })
   })
 
