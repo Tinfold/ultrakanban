@@ -1,5 +1,5 @@
 export class HttpError extends Error {
-  readonly status: 400 | 404 | 409 | 413 | 415
+  readonly status: 400 | 404 | 409 | 413 | 415 | 502
   readonly code: string
   readonly details?: unknown
 

@@ -71,14 +71,14 @@ npm run build
 npm start            # http://127.0.0.1:4317 serves the app and the API
 ```
 
-| Variable                  | Default               | Purpose                                                                  |
-| ------------------------- | --------------------- | ------------------------------------------------------------------------ |
-| `PORT`                    | `4317`                | API / app port                                                           |
-| `HOST`                    | `127.0.0.1`           | Bind address. Use `0.0.0.0` to reach it from your phone on LAN           |
-| `ULTRAKANBAN_DB`          | `data/ultrakanban.db` | SQLite database file (`:memory:` for throwaway)                          |
-| `ULTRAKANBAN_ATTACHMENTS` | next to the database  | Directory for uploaded attachment files                                  |
-| `GITHUB_TOKEN`            | `gh auth token`       | Token for checking pull requests (private repos need `repo` read access) |
-| `GITHUB_SYNC_INTERVAL`    | `60`                  | Seconds between pull request checks                                      |
+| Variable                  | Default               | Purpose                                                                                                           |
+| ------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `PORT`                    | `4317`                | API / app port                                                                                                    |
+| `HOST`                    | `127.0.0.1`           | Bind address. Use `0.0.0.0` to reach it from your phone on LAN                                                    |
+| `ULTRAKANBAN_DB`          | `data/ultrakanban.db` | SQLite database file (`:memory:` for throwaway)                                                                   |
+| `ULTRAKANBAN_ATTACHMENTS` | next to the database  | Directory for uploaded attachment files                                                                           |
+| `GITHUB_TOKEN`            | `gh auth token`       | Token for checking pull requests (private repos need `repo` read access) and creating repositories (`repo` scope) |
+| `GITHUB_SYNC_INTERVAL`    | `60`                  | Seconds between pull request checks                                                                               |
 
 There is no authentication: only expose it on networks you trust.
 
@@ -141,7 +141,8 @@ It installs and enables two systemd user services that start at login: `ultrakan
 scripts and the skill to `~/.local/share/ultrakanban-agent`, so run it again after updating. To keep everything
 running while you are logged out, also run `loginctl enable-linger`.
 
-Then, per board, open **Board menu → Board settings**, set the **GitHub repository** (`owner/name`) and switch on
+Then, per board, open **Board menu → Board settings**, set the **GitHub repository** (`owner/name`, or **New** to
+create one on GitHub with the server's login and link it) and switch on
 **Run the agent on this board** (or `PATCH /api/boards/:id` with `githubRepo` and `agentEnabled`). The supervisor
 ([`scripts/agent-supervisor.sh`](scripts/agent-supervisor.sh)) checks the boards every 30 seconds and keeps one
 `ultrakanban-agent@<board>` unit running per enabled board. It stops the loop when the board is switched off or

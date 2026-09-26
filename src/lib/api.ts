@@ -14,6 +14,7 @@ import type {
   BoardExport,
   CreateBoardInput,
   CreateColumnInput,
+  CreateGitHubRepoInput,
   CreateTagInput,
   CreateTicketInput,
   MoveTicketInput,
@@ -63,6 +64,8 @@ export const api = {
     request<BoardSummary>('PATCH', `/boards/${boardId}`, input),
   deleteBoard: (boardId: string) => request<void>('DELETE', `/boards/${boardId}`),
   exportBoard: (boardId: string) => request<BoardExport>('GET', `/boards/${boardId}/export`),
+  createGitHubRepo: (boardId: string, input: CreateGitHubRepoInput) =>
+    request<BoardSummary>('POST', `/boards/${boardId}/github-repo`, input),
   importBoard: (data: unknown) => request<BoardSummary>('POST', '/boards/import', data),
 
   createColumn: (boardId: string, input: CreateColumnInput) =>

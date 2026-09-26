@@ -1,6 +1,7 @@
-import { CircleAlertIcon, CircleCheckIcon } from 'lucide-react'
+import { CircleAlertIcon, CircleCheckIcon, PlusIcon } from 'lucide-react'
 import { type FormEvent, useState } from 'react'
 import { useBoardContext } from '@/components/board/board-context'
+import { CreateGitHubRepoDialog } from '@/components/boards/CreateGitHubRepoDialog'
 import { ColorDot } from '@/components/common/TagChip'
 import { Button } from '@/components/ui/button'
 import {
@@ -84,6 +85,9 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
     const { agentName, agentModel, agentEffort } = detail.board
     return { agentName, agentModel, agentEffort }
   })
+  const [githubRepo, setGithubRepo] = useState(detail.board.githubRepo ?? '')
+  const [creatingRepo, setCreatingRepo] = useState(false)
+  const signedIn = !!useGitHubStatus().data?.auth
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -159,11 +163,26 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div className="grid gap-2">
-            <Label htmlFor="board-settings-repo">GitHub repository</Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="board-settings-repo">GitHub repository</Label>
+              <Button
+                type="button"
+                variant="link"
+                size="xs"
+                className="h-auto p-0"
+                disabled={!signedIn}
+                title={signedIn ? 'Create a repository on GitHub for this board' : 'Sign in to GitHub first'}
+                onClick={() => setCreatingRepo(true)}
+              >
+                <PlusIcon />
+                New
+              </Button>
+            </div>
             <Input
               id="board-settings-repo"
               name="githubRepo"
-              defaultValue={detail.board.githubRepo ?? ''}
+              value={githubRepo}
+              onChange={(event) => setGithubRepo(event.target.value)}
               placeholder="owner/name"
               pattern="[\w.\-]+/[\w.\-]+"
               title="owner/name"
@@ -235,6 +254,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
         </Button>
         <Button type="submit">Save</Button>
       </DialogFooter>
+      <CreateGitHubRepoDialog open={creatingRepo} onOpenChange={setCreatingRepo} onCreated={setGithubRepo} />
     </form>
   )
 }

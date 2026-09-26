@@ -69,6 +69,23 @@ export const updateBoardSchema = z.object({
   agentEffort: agentEffort.optional(),
 })
 
+/** Creates a repository on GitHub and links it to the board. */
+export const createGitHubRepoSchema = z.object({
+  /** User or organization to create it under; the server's GitHub account when omitted. */
+  owner: z
+    .string()
+    .trim()
+    .regex(/^[a-z\d](?:[a-z\d-]{0,38})$/i, 'Must be a GitHub user or organization name')
+    .optional(),
+  name: z
+    .string()
+    .trim()
+    .regex(/^[\w.-]{1,100}$/, 'Use letters, digits, ".", "_" and "-" only')
+    .refine((name) => name !== '.' && name !== '..', 'Not a valid repository name'),
+  description: z.string().trim().max(350).optional(),
+  private: z.boolean().default(true),
+})
+
 export const createColumnSchema = z.object({
   name,
   color: color.optional(),
@@ -205,6 +222,7 @@ export const boardExportSchema = z.object({
 
 export type CreateBoardInput = z.input<typeof createBoardSchema>
 export type UpdateBoardInput = z.input<typeof updateBoardSchema>
+export type CreateGitHubRepoInput = z.input<typeof createGitHubRepoSchema>
 export type CreateColumnInput = z.input<typeof createColumnSchema>
 export type UpdateColumnInput = z.input<typeof updateColumnSchema>
 export type CreateTagInput = z.input<typeof createTagSchema>
