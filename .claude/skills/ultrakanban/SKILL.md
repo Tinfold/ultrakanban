@@ -23,6 +23,11 @@ agents can work the same board safely.
 - **A fresh agent per ticket.** When you are orchestrating, spawn a new subagent for each ticket and give it
   only the ticket id and this skill. Let it finish and report back before spawning the next one. This keeps
   each agent's context small — never carry one agent through several tickets.
+- **Don't loop for days in one session.** A Claude Code process keeps growing in memory (and eventually swap)
+  the longer it runs, even when its subagents are fresh, and only gives it back when it exits. To work a board
+  unattended, run the ultrakanban repository's `scripts/agent-loop.sh` in the project instead: it claims tickets
+  with curl and starts a new short-lived `claude -p` process for each one. Don't use `/loop` or a long-lived
+  orchestrator session for this.
 - **Read before you write.** Ticket comments and pull request review comments are how humans steer you.
 - **Never move a ticket to the done column.** It moves there by itself when the pull request is merged.
 
@@ -80,7 +85,10 @@ This links the pull request, keeps the ticket yours and moves it to the review c
 
 ## 6. Answer review feedback
 
-After submitting, check both places for feedback until the pull request is merged or you are told to stop:
+After submitting, check both places for feedback until the pull request is merged or you are told to stop.
+In a non-interactive run (`claude -p`, e.g. started by `scripts/agent-loop.sh`), check once and then exit
+instead of waiting; a ticket sent back for changes comes back later with its pull request already linked, and
+you address the feedback on that pull request's branch.
 
 ```sh
 curl -s $KANBAN/api/tickets/$TICKET/activity   # new ticket comments

@@ -118,6 +118,23 @@ its comments, attach screenshots, submit the pull request, and answer review fee
 `~/.claude/skills/ultrakanban/` to use it from any project. It also sets the rule that keeps context small:
 **one ticket per agent, one agent at a time** — finish a ticket, then start a fresh agent for the next.
 
+To work a board unattended for days, don't leave one Claude Code session looping on it: the Claude Code process
+grows in memory (and swap) over a long session and only gives it back when it exits, and nothing in this project
+can change that. Run the loop outside Claude Code instead, so each ticket gets its own short-lived process:
+
+```sh
+cd ~/code/my-app   # the repository the tickets are about
+KANBAN=http://localhost:4317 BOARD=$BOARD ~/ultrakanban/scripts/agent-loop.sh
+```
+
+[`scripts/agent-loop.sh`](scripts/agent-loop.sh) claims the next ticket with `curl`, runs `claude -p` on it until
+it is submitted for review, and waits `IDLE_SECONDS` when there is nothing to do. It needs `curl`, `jq`, `timeout`
+and the skill installed. `claude -p` can't ask for permission, so allow the tools the work needs (`curl`, `git`,
+`gh`, your test commands) in the project's `.claude/settings.json` or pass flags through `CLAUDE_ARGS`. A run that
+fails or hits `TICKET_TIMEOUT` leaves its ticket claimed with a comment saying so. To send a ticket back for
+changes, comment, move it to Todo and unassign it (or `POST /api/tickets/$TICKET/release`); the next run picks it
+up with its pull request already linked.
+
 Also: claim/release specific tickets, move to a column/position, comment, edit with optimistic concurrency
 (`ifVersion`), filter tickets, and subscribe to `GET /api/events`.
 

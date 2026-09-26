@@ -44,6 +44,8 @@ Unknown tag names are created automatically when creating or updating tickets.
 
 Work **one ticket per agent, one agent at a time**: claim a ticket, finish it, then start a fresh agent for the
 next one. Parallel agents produce conflicting branches, and reusing one agent across tickets fills its context.
+For unattended work, start each agent as its own process from an external loop (the repository has one in
+`scripts/agent-loop.sh`) rather than keeping one long-lived agent session looping over the board.
 A ready-made Claude Code skill for this workflow lives in the repository at `.claude/skills/ultrakanban/`.
 
 Boards without a review/done column (see board settings) have no pull request requirement: finish tickets with
