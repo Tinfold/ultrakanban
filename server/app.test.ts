@@ -405,6 +405,27 @@ describe('pull request workflow', () => {
     assert.equal((await call('GET', '/overview?days=3')).status, 400)
   })
 
+  test('overview drops tickets whose pull request was closed or that were cancelled', async () => {
+    const agent = 'closing-agent'
+    await call('POST', `/boards/${boardId}/columns`, { name: 'Cancelled' })
+    const closed = await addTicket({ title: 'Closed' })
+    const cancelled = await addTicket({ title: 'Cancelled', column: 'In progress' })
+    await call('POST', `/tickets/${closed.id}/claim`, { agent, moveTo: 'In progress' })
+    await call('POST', `/tickets/${cancelled.id}/claim`, { agent })
+    await call('POST', `/tickets/${closed.id}/review`, { agent, pullRequest: PR })
+    pullRequestStatuses.set(PR, { state: 'closed', title: 'Some PR' })
+    await call('POST', `/tickets/${closed.id}/pull-request/sync`)
+    pullRequestStatuses.clear()
+    await call('POST', `/tickets/${cancelled.id}/move`, { column: 'Cancelled' })
+
+    const { body: overview } = await call<Overview>('GET', '/overview')
+    const held = overview.agents.find((entry) => entry.name === agent)!
+    const board = overview.boards.find((entry) => entry.id === boardId)!
+    assert.deepEqual([held.status, held.tickets.length], ['idle', 0])
+    assert.deepEqual([board.open, board.working, board.review], [0, 0, 0])
+    assert.ok(overview.sessions.filter((session) => session.agent === agent).every((session) => session.end !== null))
+  })
+
   test('overview lists enabled board agents under their worker names', async () => {
     await call('PATCH', `/boards/${boardId}`, { githubRepo: 'acme/app', agentEnabled: true, agentName: 'idle-agent' })
     const { body: idle } = await call<Overview>('GET', '/overview')
