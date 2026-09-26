@@ -28,6 +28,7 @@ export function exportBoard(id: string): BoardExport {
       tags: ticket.tagIds.map((tagId) => tagName.get(tagId)!),
       assignee: ticket.assignee,
       dueDate: ticket.dueDate,
+      agentEffort: ticket.agentEffort,
       pullRequest: ticket.pullRequest && {
         url: ticket.pullRequest.url,
         state: ticket.pullRequest.state,

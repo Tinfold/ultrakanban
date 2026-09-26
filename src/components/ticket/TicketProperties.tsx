@@ -1,6 +1,6 @@
-import { CalendarIcon, TagIcon, UserRoundIcon } from 'lucide-react'
+import { CalendarIcon, GaugeIcon, TagIcon, UserRoundIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
-import type { Ticket } from '@shared/domain'
+import { AGENT_DEFAULTS, type Ticket } from '@shared/domain'
 import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { ColorDot, TagChip } from '@/components/common/TagChip'
 import { UserAvatar } from '@/components/common/UserAvatar'
@@ -9,7 +9,7 @@ import { dueState, formatDueDate } from '@/lib/format'
 import { PRIORITY_LABELS } from '@/lib/priority'
 import { cn } from '@/lib/utils'
 import { useBoardContext } from '../board/board-context'
-import { AssigneePicker, ColumnPicker, DueDatePicker, PriorityPicker, TagPicker } from './pickers'
+import { AssigneePicker, ColumnPicker, DueDatePicker, EffortPicker, PriorityPicker, TagPicker } from './pickers'
 import { PullRequestField } from './PullRequestField'
 
 function Property({ label, children }: { label: string; children: ReactNode }) {
@@ -24,7 +24,7 @@ function Property({ label, children }: { label: string; children: ReactNode }) {
 const triggerClass = 'h-auto min-h-7 w-full justify-start px-2 py-1 font-normal'
 
 export function TicketProperties({ ticket }: { ticket: Ticket }) {
-  const { actions, moveTicket, columnsById, tagsById } = useBoardContext()
+  const { actions, detail, moveTicket, columnsById, tagsById } = useBoardContext()
   const column = columnsById.get(ticket.columnId)
   const tags = ticket.tagIds.flatMap((tagId) => tagsById.get(tagId) ?? [])
 
@@ -82,6 +82,24 @@ export function TicketProperties({ ticket }: { ticket: Ticket }) {
           </Button>
         </DueDatePicker>
       </Property>
+
+      {(detail.board.agentEnabled || ticket.agentEffort) && (
+        <Property label="Agent effort">
+          <EffortPicker
+            value={ticket.agentEffort}
+            onChange={(agentEffort) => actions.updateTicket(ticket.id, { agentEffort })}
+          >
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(triggerClass, !ticket.agentEffort && 'text-muted-foreground')}
+            >
+              <GaugeIcon />
+              {ticket.agentEffort ?? `Board default (${detail.board.agentEffort ?? AGENT_DEFAULTS.effort})`}
+            </Button>
+          </EffortPicker>
+        </Property>
+      )}
 
       <Property label="Pull request">
         <PullRequestField ticket={ticket} />

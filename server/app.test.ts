@@ -189,7 +189,7 @@ describe('boards', () => {
   })
 
   test('export/import round-trips a board', async () => {
-    const ticket = await addTicket({ title: 'A', column: 'Done', tags: ['x'], priority: 'high' })
+    const ticket = await addTicket({ title: 'A', column: 'Done', tags: ['x'], priority: 'high', agentEffort: 'low' })
     await call('POST', `/tickets/${ticket.id}/comments`, { body: 'hello' })
     const { body: exported } = await call('GET', `/boards/${boardId}/export`)
 
@@ -328,6 +328,19 @@ describe('pull request workflow', () => {
       [cleared.githubRepo, cleared.agentEnabled, cleared.agentName, cleared.agentModel, cleared.agentEffort],
       [null, false, null, null, null],
     )
+  })
+
+  test('tickets can set the effort the agent works them at', async () => {
+    const ticket = await addTicket({ title: 'Hard', agentEffort: 'max' })
+    assert.equal(ticket.agentEffort, 'max')
+    assert.equal((await addTicket({ title: 'Plain' })).agentEffort, null, 'null follows the board')
+    assert.equal((await call('PATCH', `/tickets/${ticket.id}`, { agentEffort: 'extreme' })).status, 400)
+
+    const { body: cleared } = await call<Ticket>('PATCH', `/tickets/${ticket.id}`, { agentEffort: null })
+    assert.equal(cleared.agentEffort, null)
+    assert.equal(cleared.version, ticket.version + 1)
+    const activity = (await call<Activity[]>('GET', `/tickets/${ticket.id}/activity`)).body
+    assert.ok(activity.some((entry) => entry.type === 'updated' && entry.data.fields.includes('agentEffort')))
   })
 
   test('review needs a configured review column', async () => {

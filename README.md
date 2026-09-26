@@ -153,8 +153,9 @@ pull request, its branch) with no local changes, and goes back to the default br
 tickets come from `<agent>-loop`. The runs it starts claim tickets as `<agent>/<model>/<effort>`, from the board's
 **Model** (default `opus`) and **Effort** (default `high`) settings, which the loop passes to `claude`. So the board
 always shows which model and effort did the work, e.g. `claude/claude-opus-5-5/high`; a full model name keeps
-model versions apart. When you change the model or effort, the loop reassigns each ticket it holds to the new name
-before its next run on it. Agents you run yourself should follow the same pattern (see the skill).
+model versions apart. A ticket can ask for its own effort (**Agent effort** in the ticket's properties, shown while
+the board's agent is on); tickets that don't use the board's. When you change the model or effort, the loop
+reassigns each ticket it holds to the new name before its next run on it. Agents you run yourself should follow the same pattern (see the skill).
 
 Running the services on the host, not in the containers, is deliberate: the agents use your `claude` login, your
 `gh` auth and git.

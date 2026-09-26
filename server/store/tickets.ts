@@ -1,4 +1,5 @@
 import {
+  type AgentEffort,
   type Column,
   parsePullRequestUrl,
   PRIORITIES,
@@ -33,6 +34,7 @@ interface TicketRow {
   priority: number
   assignee: string | null
   due_date: string | null
+  agent_effort: AgentEffort | null
   pr_url: string | null
   pr_state: string
   pr_title: string | null
@@ -77,6 +79,7 @@ const toTicket = (row: TicketRow): Ticket => ({
   priority: PRIORITIES[row.priority],
   assignee: row.assignee,
   dueDate: row.due_date,
+  agentEffort: row.agent_effort,
   tagIds: row.tag_ids ? row.tag_ids.split(',') : [],
   pullRequest: row.pr_url ? toPullRequest(row.pr_url, row) : null,
   position: row.position,
@@ -89,7 +92,7 @@ const toTicket = (row: TicketRow): Ticket => ({
 
 const priorityRank = (priority: Priority) => PRIORITIES.indexOf(priority)
 
-const EDITABLE_FIELDS = ['title', 'description', 'priority', 'dueDate'] as const
+const EDITABLE_FIELDS = ['title', 'description', 'priority', 'dueDate', 'agentEffort'] as const
 
 /** Actor recorded for changes caused by GitHub pull request updates. */
 export const GITHUB_ACTOR = 'github'
@@ -233,8 +236,8 @@ export function createTicket(boardId: string, input: CreateTicketInput, actor: s
   const timestamp = now()
   sql.run(
     `INSERT INTO tickets (id, board_id, column_id, number, title, description, priority, assignee, due_date,
-       position, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       agent_effort, position, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     boardId,
     column.id,
@@ -244,6 +247,7 @@ export function createTicket(boardId: string, input: CreateTicketInput, actor: s
     priorityRank(input.priority ?? 'none'),
     input.assignee ?? null,
     input.dueDate ?? null,
+    input.agentEffort ?? null,
     count,
     timestamp,
     timestamp,
@@ -269,6 +273,7 @@ export function updateTicket(id: string, input: UpdateTicketInput, actor: string
     description: has('description') ? input.description : undefined,
     priority: has('priority') && input.priority ? priorityRank(input.priority) : undefined,
     due_date: has('dueDate') ? input.dueDate : undefined,
+    agent_effort: has('agentEffort') ? input.agentEffort : undefined,
   })
 
   if (input.tags) {

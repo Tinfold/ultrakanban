@@ -90,6 +90,7 @@ export const createTicketSchema = z.object({
   tags: z.array(ref).max(50).optional(),
   assignee: name.nullable().optional(),
   dueDate: isoDate.optional(),
+  agentEffort: agentEffort.optional(),
   pullRequest: pullRequestUrl.nullable().optional(),
   position: position.optional(),
   force,
@@ -102,6 +103,7 @@ export const updateTicketSchema = z.object({
   tags: z.array(ref).max(50).optional(),
   assignee: name.nullable().optional(),
   dueDate: isoDate.optional(),
+  agentEffort: agentEffort.optional(),
   pullRequest: pullRequestUrl.nullable().optional(),
   ifVersion: version.optional(),
 })
@@ -172,6 +174,7 @@ export const boardExportSchema = z.object({
       tags: z.array(name).default([]),
       assignee: name.nullable().default(null),
       dueDate: isoDate.default(null),
+      agentEffort: agentEffort.default(null),
       pullRequest: z
         .object({
           url: pullRequestUrl,

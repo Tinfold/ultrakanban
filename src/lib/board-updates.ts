@@ -23,7 +23,7 @@ export type BoardPatch = Partial<
   >
 >
 export type TicketPatch = Partial<
-  Pick<Ticket, 'title' | 'description' | 'priority' | 'assignee' | 'dueDate' | 'tagIds'>
+  Pick<Ticket, 'title' | 'description' | 'priority' | 'assignee' | 'dueDate' | 'agentEffort' | 'tagIds'>
 >
 export type ColumnPatch = Partial<Pick<Column, 'name' | 'color' | 'wipLimit'>>
 export type TagPatch = Partial<Pick<Tag, 'name' | 'color'>>

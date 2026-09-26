@@ -16,6 +16,7 @@ const FIELD_LABELS: Record<string, string> = {
   description: 'description',
   priority: 'priority',
   dueDate: 'due date',
+  agentEffort: 'agent effort',
   tags: 'tags',
 }
 

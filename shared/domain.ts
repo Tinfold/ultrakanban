@@ -131,6 +131,8 @@ export interface Ticket {
   assignee: string | null
   /** ISO date (YYYY-MM-DD). */
   dueDate: string | null
+  /** Effort level the board's agent works this ticket at; the board's `agentEffort` when not set. */
+  agentEffort: AgentEffort | null
   tagIds: string[]
   pullRequest: PullRequest | null
   position: number
