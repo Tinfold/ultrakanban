@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from 'react'
+import { type CSSProperties, type ReactNode, useState } from 'react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
@@ -58,9 +58,10 @@ export function ColumnChart({
   const top = ticks.at(-1)!
   const labelEvery = Math.ceil(columns.length / AXIS_LABELS)
   const empty = totals.every((total) => total === 0)
+  const [open, setOpen] = useState<number | null>(null)
 
   return (
-    <figure className={cn('grid gap-4 rounded-xl border bg-card p-4', className)}>
+    <figure className={cn('relative grid gap-4 rounded-xl border bg-card p-4', className)}>
       <figcaption className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
         <div>
           <h2 className="text-sm font-medium">{title}</h2>
@@ -106,10 +107,20 @@ export function ColumnChart({
           )}
           <div className="absolute inset-0 flex">
             {columns.map((column, i) => (
-              <Tooltip key={column.title}>
+              <Tooltip
+                key={column.title}
+                open={open === i}
+                onOpenChange={(next) => setOpen((current) => (next ? i : current === i ? null : current))}
+              >
                 <TooltipTrigger asChild>
                   <div
                     tabIndex={empty ? -1 : 0}
+                    onClick={(event) => {
+                      // Tooltips only open on hover and focus, never on touch: a tap shows the column's values
+                      // instead of closing them. Preventing default stops the trigger's own close on click.
+                      event.preventDefault()
+                      setOpen(i)
+                    }}
                     className="group flex h-full min-w-0 flex-1 items-end justify-center rounded-sm outline-none focus-visible:bg-muted/60"
                   >
                     <div

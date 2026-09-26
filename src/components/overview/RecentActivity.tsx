@@ -38,7 +38,7 @@ export function RecentActivity({ activity }: { activity: OverviewActivity[] }) {
   if (!activity.length) return <p className="px-1 text-sm text-muted-foreground">No activity yet.</p>
 
   return (
-    <ol className="grid gap-2.5 rounded-xl border bg-card p-3">
+    <ol className="grid grid-cols-1 gap-2.5 rounded-xl border bg-card p-3">
       {activity.map((entry) => (
         <li key={entry.id} className="flex gap-2 text-xs text-muted-foreground">
           <UserAvatar name={entry.actor} size="xs" />

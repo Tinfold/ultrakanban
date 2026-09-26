@@ -42,7 +42,7 @@ export function QuickAddTicket({ columnId, onClose, onCreated }: QuickAddTicketP
         onBlur={() => !title.trim() && onClose()}
         placeholder="Ticket title"
         rows={2}
-        className="min-h-0 resize-none border-0 bg-transparent! p-1 text-[13px] shadow-none focus-visible:ring-0"
+        className="min-h-0 resize-none border-0 bg-transparent! p-1 text-base shadow-none focus-visible:ring-0 md:text-[13px]"
       />
       <div className="mt-1 flex items-center justify-end gap-1">
         <Button size="xs" variant="ghost" onMouseDown={(event) => event.preventDefault()} onClick={onClose}>
