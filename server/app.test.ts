@@ -366,7 +366,7 @@ describe('pull request workflow', () => {
   test('overview shows who works on what, for how long, and what got done', async () => {
     const agent = 'overview-agent'
     const ticket = await addTicket({ title: 'A' })
-    await addTicket({ title: 'B' })
+    const other = await addTicket({ title: 'B' })
     await call('POST', `/boards/${boardId}/tickets/claim-next`, { agent, column: 'Todo', moveTo: 'In progress' })
 
     const { body: working } = await call<Overview>('GET', '/overview?days=7')
@@ -401,6 +401,14 @@ describe('pull request workflow', () => {
     assert.deepEqual([agentOf(done).status, agentOf(done).tickets.length, agentOf(done).completed], ['idle', 0, 1])
     assert.deepEqual([boardOf(done).open, boardOf(done).completed], [1, 1])
     assert.ok(done.events.some((event) => event.boardId === boardId && event.kind === 'completed'))
+    const completion = done.completions.find((entry) => entry.ticketId === ticket.id)!
+    assert.ok(completion.cycleMs !== null && completion.reviewMs !== null && completion.cycleMs >= completion.reviewMs)
+
+    // Tickets moved to done without being worked or reviewed have no cycle or review time.
+    await call('POST', `/tickets/${other.id}/move`, { column: 'Done', force: true })
+    const { body: moved } = await call<Overview>('GET', '/overview')
+    const skipped = moved.completions.find((entry) => entry.ticketId === other.id)!
+    assert.deepEqual([skipped.cycleMs, skipped.reviewMs], [null, null])
 
     assert.equal((await call('GET', '/overview?days=3')).status, 400)
   })
