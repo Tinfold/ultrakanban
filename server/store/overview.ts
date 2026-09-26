@@ -48,10 +48,22 @@ interface Workflow {
 
 const key = (name: string) => name.toLowerCase()
 
-/** Where a ticket stands for its assignee, given the column it's in. */
-function workState(workflow: Workflow, column: string | null, assignee: string | null): WorkState | null {
-  if (!assignee || column === null) return null
-  if (column === workflow.doneName) return null
+/** Where agents release tickets whose pull request was closed without merging (see scripts/agent-loop.sh). */
+const CANCELLED = 'cancelled'
+
+/** Whether nobody works on a ticket anymore: it's done or cancelled, or its pull request was closed unmerged. */
+function isClosed(workflow: Workflow, column: string, pullRequestClosed: boolean) {
+  return pullRequestClosed || column === workflow.doneName || column === CANCELLED
+}
+
+/** Where a ticket stands for its assignee, given the column it's in and whether its pull request was closed. */
+function workState(
+  workflow: Workflow,
+  column: string | null,
+  assignee: string | null,
+  pullRequestClosed: boolean,
+): WorkState | null {
+  if (!assignee || column === null || isClosed(workflow, column, pullRequestClosed)) return null
   return column === workflow.reviewName ? 'review' : 'working'
 }
 
@@ -88,7 +100,7 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
   // Replay the history of every ticket that changed within the range or is assigned now.
   const history = sql.all<ActivityRow>(
     `SELECT * FROM activity
-     WHERE type IN ('created', 'moved', 'claimed', 'released')
+     WHERE type IN ('created', 'moved', 'claimed', 'released', 'pull_request')
        AND ticket_id IN (SELECT ticket_id FROM activity WHERE created_at >= ? UNION SELECT id FROM tickets WHERE assignee IS NOT NULL)
      ORDER BY ticket_id, id`,
     since,
@@ -111,6 +123,8 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
       ? null
       : ticket.assignee
     let column: string | null = null
+    let pullRequestClosed = false
+    let state: WorkState | null = null
     let session: WorkSession | null = null
     for (const entry of entries) {
       if (entry.type === 'created') column = key(entry.data.column)
@@ -123,8 +137,12 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
       }
       if (entry.type === 'claimed') assignee = entry.data.assignee
       if (entry.type === 'released') assignee = null
+      // Linking another pull request or reopening this one resumes the work.
+      if (entry.type === 'pull_request') pullRequestClosed = entry.data.event === 'closed'
 
-      const worker = workState(workflow, column, assignee) === 'working' ? assignee : null
+      const previous: WorkState | null = state
+      state = workState(workflow, column, assignee, pullRequestClosed)
+      const worker = state === 'working' ? assignee : null
       if (session && session.agent !== worker) {
         session.end = entry.createdAt
         session = null
@@ -133,7 +151,8 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
         session = { agent: worker, ticketId: ticket.id, boardId: ticket.board_id, start: entry.createdAt, end: null }
         sessions.push(session)
       }
-      stateSince.set(ticket.id, entry.createdAt)
+      // Pull request updates don't move the ticket, so only count when they change its state.
+      if (entry.type !== 'pull_request' || state !== previous) stateSince.set(ticket.id, entry.createdAt)
     }
   }
 
@@ -153,7 +172,7 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
     const workflow = workflows.get(ticket.board_id)!
     const counts = boardCounts.get(ticket.board_id) ?? { open: 0, working: 0, review: 0 }
     boardCounts.set(ticket.board_id, counts)
-    if (ticket.column_id === workflow.doneId) continue
+    if (isClosed(workflow, key(columnNames.get(ticket.column_id)!), ticket.pr_state === 'closed')) continue
     counts.open++
     if (!ticket.assignee) continue
     const state: WorkState = ticket.column_id === workflow.reviewId ? 'review' : 'working'
