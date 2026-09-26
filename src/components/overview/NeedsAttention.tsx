@@ -4,6 +4,7 @@ import { PullRequestIcon } from '@/components/common/PullRequestIcon'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { formatDateTime, formatDuration, ticketRef } from '@/lib/format'
 import { ticketHref } from '@/lib/overview'
+import { PULL_REQUEST_STATE_LABELS } from '@/lib/pull-request'
 
 type HeldTicket = OverviewTicket & { agent: string }
 
@@ -14,17 +15,16 @@ function Group({ title, tickets, now }: { title: string; tickets: HeldTicket[]; 
       <h3 className="px-2 text-xs text-muted-foreground">{title}</h3>
       <ul className="grid grid-cols-1">
         {tickets.map((ticket) => (
-          <li key={ticket.id}>
+          <li key={ticket.id} className="flex items-start gap-1 rounded-md hover:bg-muted">
             <Link
               href={ticketHref(ticket)}
-              className="flex gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+              className="flex min-w-0 flex-1 gap-2 rounded-md px-2 py-1.5 text-xs focus-visible:bg-muted focus-visible:outline-none"
             >
               <UserAvatar name={ticket.agent} size="xs" />
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-1.5">
                   <span className="font-mono text-muted-foreground">{ticketRef(ticket.number)}</span>
                   <span className="truncate text-foreground">{ticket.title}</span>
-                  {ticket.pullRequest && <PullRequestIcon state={ticket.pullRequest.state} className="size-3.5" />}
                 </span>
                 <span className="block truncate text-muted-foreground">
                   {ticket.agent} · {ticket.boardName}
@@ -38,6 +38,19 @@ function Group({ title, tickets, now }: { title: string; tickets: HeldTicket[]; 
                 {formatDuration(now - Date.parse(ticket.since))}
               </time>
             </Link>
+            {ticket.pullRequest && (
+              // Straight to the pull request, for reviewing without opening the ticket first.
+              <a
+                href={ticket.pullRequest.url}
+                target="_blank"
+                rel="noreferrer"
+                aria-label={`Open the pull request (${PULL_REQUEST_STATE_LABELS[ticket.pullRequest.state].toLowerCase()})`}
+                title="Open the pull request"
+                className="shrink-0 rounded-md p-2 hover:bg-background focus-visible:bg-background focus-visible:outline-none"
+              >
+                <PullRequestIcon state={ticket.pullRequest.state} className="size-3.5" />
+              </a>
+            )}
           </li>
         ))}
       </ul>
