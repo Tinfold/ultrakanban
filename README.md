@@ -118,25 +118,58 @@ its comments, attach screenshots, submit the pull request, and answer review fee
 `~/.claude/skills/ultrakanban/` to use it from any project. It also sets the rule that keeps context small:
 **one ticket per agent, one agent at a time** — finish a ticket, then start a fresh agent for the next.
 
-To work a board unattended for days, don't leave one Claude Code session looping on it: the Claude Code process
-grows in memory (and swap) over a long session and only gives it back when it exits, and nothing in this project
-can change that. Run the loop outside Claude Code instead, so each ticket gets its own short-lived process:
+Also: claim/release specific tickets, move to a column/position, comment, edit with optimistic concurrency
+(`ifVersion`), filter tickets, and subscribe to `GET /api/events`.
+
+### Running agents unattended
+
+Don't leave one Claude Code session looping on the board for days: the Claude Code process grows in memory (and
+swap) over a long session and only gives it back when it exits, and nothing in this project can change that.
+[`scripts/agent-loop.sh`](scripts/agent-loop.sh) runs the loop outside Claude Code instead and starts a fresh,
+short-lived `claude -p` for each piece of work, so memory goes back to the OS after every run:
 
 ```sh
 cd ~/code/my-app   # the repository the tickets are about
 KANBAN=http://localhost:4317 BOARD=$BOARD ~/ultrakanban/scripts/agent-loop.sh
 ```
 
-[`scripts/agent-loop.sh`](scripts/agent-loop.sh) claims the next ticket with `curl`, runs `claude -p` on it until
-it is submitted for review, and waits `IDLE_SECONDS` when there is nothing to do. It needs `curl`, `jq`, `timeout`
-and the skill installed. `claude -p` can't ask for permission, so allow the tools the work needs (`curl`, `git`,
-`gh`, your test commands) in the project's `.claude/settings.json` or pass flags through `CLAUDE_ARGS`. A run that
-fails or hits `TICKET_TIMEOUT` leaves its ticket claimed with a comment saying so. To send a ticket back for
-changes, comment, move it to Todo and unassign it (or `POST /api/tickets/$TICKET/release`); the next run picks it
-up with its pull request already linked.
+Each round, it first checks the tickets the agent holds and starts a run for one that has a new ticket comment,
+pull request comment, review or inline comment, a failing check or merge conflicts. Feedback counts as handled
+once the agent has acted on the ticket after it (every run ends with a ticket comment), so there is no state file.
+A pull request closed without merging releases its ticket to Todo. When none of its tickets needs work, it claims a
+new Todo ticket, and when there is nothing to do at all it waits `IDLE_SECONDS`. A failed run is retried with backoff (`RETRY_SECONDS`,
+doubling, up to `MAX_ATTEMPTS`); after that a new ticket comment retries it. Other settings are listed at the top
+of the script. It needs `curl`, `jq`, `timeout`, an authenticated `gh` and the skill installed.
 
-Also: claim/release specific tickets, move to a column/position, comment, edit with optimistic concurrency
-(`ifVersion`), filter tickets, and subscribe to `GET /api/events`.
+**Permissions:** the loop passes `--dangerously-skip-permissions`, so every run can execute any command, edit any
+file and use the network as your user without asking. Run it in a container, VM or as a dedicated user that only
+has access to this work (Claude Code may refuse the flag as root). `SKIP_PERMISSIONS=0` turns it off; then allow
+the tools the work needs in the project's `.claude/settings.json`.
+
+To keep it running, use a systemd user service. The loop logs to stdout, so its logs go to the journal
+(`journalctl --user -u ultrakanban-agent`):
+
+```ini
+# ~/.config/systemd/user/ultrakanban-agent.service
+[Unit]
+Description=ultrakanban agent loop
+
+[Service]
+WorkingDirectory=%h/code/my-app
+Environment=KANBAN=http://localhost:4317 BOARD=<board id>
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
+ExecStart=%h/ultrakanban/scripts/agent-loop.sh
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=default.target
+```
+
+```sh
+systemctl --user enable --now ultrakanban-agent
+loginctl enable-linger   # keep it running while you're logged out
+```
 
 ## Development
 

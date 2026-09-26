@@ -25,9 +25,9 @@ agents can work the same board safely.
   each agent's context small — never carry one agent through several tickets.
 - **Don't loop for days in one session.** A Claude Code process keeps growing in memory (and eventually swap)
   the longer it runs, even when its subagents are fresh, and only gives it back when it exits. To work a board
-  unattended, run the ultrakanban repository's `scripts/agent-loop.sh` in the project instead: it claims tickets
-  with curl and starts a new short-lived `claude -p` process for each one. Don't use `/loop` or a long-lived
-  orchestrator session for this.
+  unattended, run the ultrakanban repository's `scripts/agent-loop.sh` in the project instead: it watches the
+  board from outside Claude Code and starts a new short-lived `claude -p` for each ticket it claims and each time
+  one of its tickets gets feedback. Don't use `/loop` or a long-lived orchestrator session for this.
 - **Read before you write.** Ticket comments and pull request review comments are how humans steer you.
 - **Never move a ticket to the done column.** It moves there by itself when the pull request is merged.
 
@@ -86,9 +86,13 @@ This links the pull request, keeps the ticket yours and moves it to the review c
 ## 6. Answer review feedback
 
 After submitting, check both places for feedback until the pull request is merged or you are told to stop.
-In a non-interactive run (`claude -p`, e.g. started by `scripts/agent-loop.sh`), check once and then exit
-instead of waiting; a ticket sent back for changes comes back later with its pull request already linked, and
-you address the feedback on that pull request's branch.
+
+In a non-interactive run (`claude -p`, e.g. started by `scripts/agent-loop.sh`), don't wait: handle what is
+there, then exit. The loop starts a new run when there is a new ticket comment, pull request comment, review or
+inline comment, a failing check, or a merge conflict, and tells you which. Resolve conflicts by merging the base
+branch into the pull request's branch. Before exiting, re-read the ticket and pull request once more. Your
+**last** action must be a ticket comment summarising what you did, even if nothing needed changing: the loop
+treats feedback older than your last ticket action as handled.
 
 ```sh
 curl -s $KANBAN/api/tickets/$TICKET/activity   # new ticket comments
