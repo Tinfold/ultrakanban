@@ -15,6 +15,8 @@ priorities, due dates, checklists, comments and an activity log, backed by SQLit
   ticket and its activity
 - **Pull request workflow**: agents submit tickets for review with their GitHub pull request; tickets only enter
   Done once the pull request is merged and move there automatically when it is
+- **Overview**: a dashboard across all boards (`/overview`): which agents are working on what right now, time
+  worked and tickets completed per agent, activity and work time per day, per-board counts and a cross-board feed
 - **Live**: changes made by agents or other tabs show up right away (server-sent events)
 - **Responsive**: works with a mouse, keyboard or touch (long-press to drag); light, dark and system themes
 

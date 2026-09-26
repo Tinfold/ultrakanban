@@ -1,4 +1,5 @@
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import type { OverviewRange } from '@shared/domain'
 import { api } from '@/lib/api'
 
 export const queryKeys = {
@@ -9,6 +10,8 @@ export const queryKeys = {
   attachments: (ticketId: string) => ['attachments', ticketId] as const,
   allAttachments: ['attachments'] as const,
   github: ['github'] as const,
+  overview: (days: OverviewRange) => ['overview', days] as const,
+  allOverviews: ['overview'] as const,
 }
 
 export const useBoards = () => useQuery({ queryKey: queryKeys.boards, queryFn: api.listBoards })
@@ -24,3 +27,7 @@ export const useGitHubStatus = () =>
 
 export const useTicketAttachments = (ticketId: string) =>
   useQuery({ queryKey: queryKeys.attachments(ticketId), queryFn: () => api.listAttachments(ticketId) })
+
+/** Keeps showing the previous range while another one loads. */
+export const useOverview = (days: OverviewRange) =>
+  useQuery({ queryKey: queryKeys.overview(days), queryFn: () => api.overview(days), placeholderData: keepPreviousData })

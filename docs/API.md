@@ -183,6 +183,48 @@ interface Attachment {
 }
 ```
 
+## Overview
+
+`GET /overview?days=7|14|30` (default `14`) aggregates every board over the last `days` days:
+
+```ts
+interface Overview {
+  generatedAt: string
+  since: string // start of the range
+  days: 7 | 14 | 30
+  totals: { boards; open; working; review; completed; activeAgents; workedMs } // all numbers
+  agents: {
+    name: string
+    status: 'working' | 'review' | 'idle'
+    tickets: {
+      id
+      boardId
+      boardName
+      number
+      title
+      column
+      state: 'working' | 'review'
+      since: string
+      pullRequest: { url; state } | null
+    }[]
+    workedMs: number // within the range; ongoing work counts up to generatedAt
+    completed: number // tickets that reached the done column while assigned to it, within the range
+    actions: number // activity entries it authored within the range
+    lastActiveAt: string | null
+    agentOf: string[] // ids of boards whose host agent runs under this name
+  }[]
+  boards: { id; name; agentEnabled; agentName; open; working; review; completed; events; lastActivityAt }[]
+  events: { at: string; kind: 'created' | 'completed' | 'comment' | 'update'; actor: string; boardId: string }[]
+  sessions: { agent; ticketId; boardId; start: string; end: string | null }[] // clipped to the range
+  recent: (Activity & { ticket: { number; title; boardId; boardName } })[] // latest 30, newest first
+}
+```
+
+Agents are everyone holding a ticket that isn't done, everyone who worked within the range, and the host agent
+of every board that has it switched on. A ticket is being **worked** while it is assigned and outside the board's
+review and done columns (a board without a done column uses its last column), so claiming starts the clock and
+submitting for review, merging or releasing stops it. Work time is reconstructed from the activity log.
+
 ## Live updates
 
 `GET /events?board=:boardId` is a server-sent event stream. It emits `change` events with data `{ "boardId": "..." }`

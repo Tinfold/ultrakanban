@@ -6,6 +6,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { useLiveUpdates } from '@/hooks/use-live-updates'
 import { BoardPage } from '@/pages/BoardPage'
 import { HomePage } from '@/pages/HomePage'
+import { OverviewPage } from '@/pages/OverviewPage'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: true } },
@@ -17,6 +18,7 @@ function Routes() {
     <div className="flex h-dvh flex-col">
       <Switch>
         <Route path="/" component={HomePage} />
+        <Route path="/overview" component={OverviewPage} />
         <Route path="/b/:boardId">{({ boardId }) => <BoardPage key={boardId} boardId={boardId} />}</Route>
         <Route>
           <HomePage />

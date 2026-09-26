@@ -1,4 +1,4 @@
-import { CheckIcon, ChevronsUpDownIcon, PlusIcon, UploadIcon } from 'lucide-react'
+import { ChartColumnIcon, CheckIcon, ChevronsUpDownIcon, PlusIcon, UploadIcon } from 'lucide-react'
 import { useState } from 'react'
 import { useLocation } from 'wouter'
 import { Button } from '@/components/ui/button'
@@ -58,6 +58,10 @@ export function BoardSwitcher({ currentBoardId }: { currentBoardId?: string }) {
               </CommandGroup>
               <CommandSeparator />
               <CommandGroup>
+                <CommandItem onSelect={() => run(() => navigate('/overview'))}>
+                  <ChartColumnIcon />
+                  Overview
+                </CommandItem>
                 <CommandItem onSelect={() => run(() => setCreating(true))}>
                   <PlusIcon />
                   New board
