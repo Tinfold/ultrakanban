@@ -10,6 +10,8 @@ export const queryKeys = {
   attachments: (ticketId: string) => ['attachments', ticketId] as const,
   allAttachments: ['attachments'] as const,
   github: ['github'] as const,
+  mergePlan: (boardId: string) => ['merge-plan', boardId] as const,
+  mergeRun: (boardId: string) => ['merge-run', boardId] as const,
   overview: (days: OverviewRange) => ['overview', days] as const,
   allOverviews: ['overview'] as const,
 }
@@ -31,3 +33,23 @@ export const useTicketAttachments = (ticketId: string) =>
 /** Keeps showing the previous range while another one loads. */
 export const useOverview = (days: OverviewRange) =>
   useQuery({ queryKey: queryKeys.overview(days), queryFn: () => api.overview(days), placeholderData: keepPreviousData })
+
+/** Asks GitHub about every pull request in review, so it is only loaded while needed. */
+export const useMergePlan = (boardId: string, enabled: boolean) =>
+  useQuery({
+    queryKey: queryKeys.mergePlan(boardId),
+    queryFn: () => api.mergePlan(boardId),
+    enabled,
+    // Dropped once the dialog closes, so it never shows pull requests merged since.
+    gcTime: 0,
+    retry: false,
+  })
+
+/** The board's latest "merge all" run, followed closely while it runs. */
+export const useMergeRun = (boardId: string, enabled: boolean) =>
+  useQuery({
+    queryKey: queryKeys.mergeRun(boardId),
+    queryFn: () => api.mergeRun(boardId),
+    enabled,
+    refetchInterval: (query) => (query.state.data?.status === 'running' ? 1000 : false),
+  })

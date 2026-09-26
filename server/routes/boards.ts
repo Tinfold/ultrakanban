@@ -7,18 +7,19 @@ import {
   createTagSchema,
   createTicketSchema,
   listTicketsQuerySchema,
+  mergeRunSchema,
   updateBoardSchema,
 } from '../../shared/schemas.ts'
 import { transaction } from '../db.ts'
 import { actorOf, readJson } from '../http.ts'
-import type { PullRequestSync } from '../pull-request-sync.ts'
+import type { AppServices } from '../app.ts'
 import { createBoard, deleteBoard, getBoard, getBoardDetail, listBoards, updateBoard } from '../store/boards.ts'
 import { createColumn } from '../store/columns.ts'
 import { createTag } from '../store/tags.ts'
 import { claimNextTicket, createTicket, getTicketByNumber, listTickets } from '../store/tickets.ts'
 import { exportBoard, importBoard } from '../store/transfer.ts'
 
-export const boardRoutes = (pullRequests: PullRequestSync) =>
+export const boardRoutes = ({ pullRequests, mergeQueue }: AppServices) =>
   new Hono()
     .get('/', (c) => c.json(listBoards()))
     .post('/', async (c) => {
@@ -83,4 +84,10 @@ export const boardRoutes = (pullRequests: PullRequestSync) =>
     .post('/:boardId/tickets/claim-next', async (c) => {
       const input = await readJson(c, claimNextSchema)
       return c.json(transaction(() => claimNextTicket(c.req.param('boardId'), input)))
+    })
+    .get('/:boardId/merge-plan', async (c) => c.json(await mergeQueue.plan(c.req.param('boardId'))))
+    .get('/:boardId/merge-run', (c) => c.json(mergeQueue.latest(getBoard(c.req.param('boardId')).id)))
+    .post('/:boardId/merge-run', async (c) => {
+      const { method } = await readJson(c, mergeRunSchema)
+      return c.json(await mergeQueue.start(c.req.param('boardId'), method, actorOf(c)), 202)
     })
