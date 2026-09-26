@@ -55,6 +55,62 @@ export function parsePullRequestUrl(url: string) {
   }
 }
 
+export const MERGE_METHODS = ['merge', 'squash', 'rebase'] as const
+/** How GitHub merges a pull request: a merge commit, one squashed commit, or its commits rebased onto the base. */
+export type MergeMethod = (typeof MERGE_METHODS)[number]
+
+/** A pull request in the review column, in the order "merge all" merges them (`GET /boards/:id/merge-plan`). */
+export interface MergePlanItem {
+  ticketId: string
+  ticketNumber: number
+  ticketTitle: string
+  url: string
+  /** `owner/name` */
+  repo: string
+  number: number
+  title: string | null
+  /** Branch it merges into. */
+  base: string | null
+  /** Its own branch. */
+  head: string | null
+  /** Commit it merges; a run skips it if new commits arrive meanwhile. */
+  headSha: string | null
+  /** Tickets whose pull requests this one builds on (stacked on their branch or containing their commits). */
+  after: string[]
+  /** Other tickets in the plan whose pull requests change some of the same files. */
+  overlaps: string[]
+  /** Why it may not merge, e.g. required reviews or checks, though merging is still attempted. */
+  warning: string | null
+  /** Why it won't be merged at all (draft, conflicts, no longer open, unreadable). */
+  skip: string | null
+}
+
+export interface MergePlan {
+  items: MergePlanItem[]
+  /** Merge methods every repository in the plan allows. */
+  methods: MergeMethod[]
+}
+
+export type MergeStepStatus = 'pending' | 'merging' | 'merged' | 'skipped' | 'failed'
+
+export interface MergeRunStep extends MergePlanItem {
+  status: MergeStepStatus
+  /** Why it was skipped or failed. */
+  message: string | null
+}
+
+/** A "merge all" run: merges a board's reviewed pull requests one at a time, in plan order. */
+export interface MergeRun {
+  id: string
+  boardId: string
+  actor: string
+  method: MergeMethod
+  status: 'running' | 'finished'
+  startedAt: string
+  finishedAt: string | null
+  steps: MergeRunStep[]
+}
+
 /** Screenshots and screen recordings. SVG is excluded because it can carry scripts. */
 export const ATTACHMENT_TYPES = [
   'image/png',
@@ -256,6 +312,17 @@ export interface WorkSession {
   end: string | null
 }
 
+/** A ticket reaching the done column within the range. */
+export interface OverviewCompletion {
+  ticketId: string
+  boardId: string
+  at: string
+  /** From when work on it started (it was first assigned outside the review and done columns) to done. */
+  cycleMs: number | null
+  /** From when it last entered the review column to done, if it went straight from review to done. */
+  reviewMs: number | null
+}
+
 export type OverviewActivity = Activity & {
   ticket: { number: number; title: string; boardId: string; boardName: string }
 }
@@ -276,10 +343,14 @@ export interface Overview {
     workedMs: number
   }
   agents: OverviewAgent[]
+  /** Agents cleared from the overview that haven't done anything since; they aren't in `agents`. */
+  hiddenAgents: string[]
   boards: OverviewBoard[]
   /** Every activity entry within the range, oldest first. */
   events: OverviewEvent[]
   sessions: WorkSession[]
+  /** Tickets that reached the done column within the range, oldest first. */
+  completions: OverviewCompletion[]
   /** The latest activity entries across all boards, newest first. */
   recent: OverviewActivity[]
 }

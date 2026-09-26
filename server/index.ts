@@ -7,6 +7,7 @@ import { createApp } from './app.ts'
 import { closeDatabase, databasePath } from './db.ts'
 import { createAttachmentFiles } from './attachment-files.ts'
 import { createGitHubClient } from './github.ts'
+import { createMergeQueue } from './merge-queue.ts'
 import { createPullRequestSync } from './pull-request-sync.ts'
 import { listAttachmentIds } from './store/attachments.ts'
 
@@ -16,6 +17,7 @@ const clientDir = 'dist'
 const syncIntervalMs = Number(process.env.GITHUB_SYNC_INTERVAL ?? 60) * 1000
 
 const pullRequests = createPullRequestSync(createGitHubClient())
+const mergeQueue = createMergeQueue(pullRequests)
 /**
  * Attachment files live next to their database by default: the two belong together, and a stray
  * directory would be swept clean of files the database it belongs to doesn't know about.
@@ -27,7 +29,7 @@ const attachmentsDirectory =
     : join(dirname(databasePath), 'attachments'))
 
 const attachmentFiles = createAttachmentFiles(attachmentsDirectory)
-const app = createApp({ pullRequests, attachmentFiles })
+const app = createApp({ pullRequests, mergeQueue, attachmentFiles })
 pullRequests.start(syncIntervalMs)
 void attachmentFiles.sweep(listAttachmentIds())
 

@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { HttpError } from './errors.ts'
 import type { AttachmentFiles } from './attachment-files.ts'
 import { errorBody } from './http.ts'
+import type { MergeQueue } from './merge-queue.ts'
 import type { PullRequestSync } from './pull-request-sync.ts'
 import { attachmentRoutes } from './routes/attachments.ts'
 import { listAttachmentIds } from './store/attachments.ts'
@@ -18,6 +19,7 @@ const apiDocs = readFileSync(new URL('../docs/API.md', import.meta.url), 'utf8')
 
 export interface AppServices {
   pullRequests: PullRequestSync
+  mergeQueue: MergeQueue
   attachmentFiles: AttachmentFiles
 }
 
@@ -31,7 +33,7 @@ export function createApp(services: AppServices) {
     })
     .get('/', (c) => c.text(apiDocs, 200, { 'Content-Type': 'text/markdown; charset=utf-8' }))
     .get('/github', async (c) => c.json({ auth: await pullRequests.github.auth() }))
-    .route('/boards', boardRoutes(pullRequests))
+    .route('/boards', boardRoutes(services))
     .route('/columns', columnRoutes)
     .route('/tags', tagRoutes)
     .route('/tickets', ticketRoutes(services))

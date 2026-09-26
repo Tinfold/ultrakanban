@@ -13,6 +13,7 @@ JSON over HTTP. Base URL: `http://127.0.0.1:4317/api` (in development the Vite d
   - `409 version_conflict` - `ifVersion` did not match (`details.ticket` has its current state).
   - `409 tag_exists` - tag names are unique per board (case-insensitive).
   - `409 pull_request_not_merged` - the board's done column only accepts tickets whose pull request is merged.
+  - `409 merge_in_progress` - the board's pull requests are already being merged.
   - `413 payload_too_large` / `415 unsupported_media_type` - attachments must be PNG, JPEG, GIF, WebP, MP4 or WebM, up to 25 MB.
 
 Columns and tags can be referenced **by id or by name** (case-insensitive) wherever a request field says `ref`.
@@ -66,6 +67,62 @@ Boards without a review/done column (see board settings) have no pull request re
 - Moving a ticket into the done column without a merged pull request fails with `409 pull_request_not_merged`,
   whether through `move`, `claim`/`release` `moveTo`, or creating a ticket there. Humans can pass `force: true` to
   `move` or ticket creation to override it; agents should not.
+
+### Merging everything in review
+
+Humans can merge every open pull request in the review column at once (the merge button on the review column in the
+app). Agents should not: merging is the reviewer's call.
+
+| Method | Path                          | Body                                          | Returns                                                                              |
+| ------ | ----------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------ |
+| GET    | `/boards/:boardId/merge-plan` |                                               | `MergePlan`: the review column's open pull requests in merge order, read from GitHub |
+| POST   | `/boards/:boardId/merge-run`  | `{ method: "merge" \| "squash" \| "rebase" }` | `202 MergeRun`, then merges in the background; `409 merge_in_progress` if one runs   |
+| GET    | `/boards/:boardId/merge-run`  |                                               | the board's latest `MergeRun` since the server started, or `null`                    |
+
+- **Order:** a pull request that builds on another (its base is the other's branch, or it contains the other's
+  commits) merges after it; otherwise they merge in the review column's order, so dragging tickets there changes it.
+- **One at a time:** after each merge the server waits for GitHub to check the next pull request again. One that
+  has conflicts by then is skipped, and so is anything built on it; its agent sees the conflicts and resolves them.
+  The rest still merge. A stacked pull request is retargeted to the branch its base was merged into.
+- Drafts are skipped. Pull requests blocked by branch protection are still tried (admins may bypass it) and fail
+  with GitHub's message if refused, as does one that gets new commits after the run started.
+- Merged tickets move to the done column right away. Merging needs a GitHub token with write access (`400` without
+  one).
+
+```ts
+interface MergePlan {
+  items: MergePlanItem[] // in merge order
+  methods: ('merge' | 'squash' | 'rebase')[] // allowed by every repository in the plan
+}
+
+interface MergePlanItem {
+  ticketId: string
+  ticketNumber: number
+  ticketTitle: string
+  url: string
+  repo: string
+  number: number
+  title: string | null
+  base: string | null // branch it merges into
+  head: string | null
+  headSha: string | null
+  after: string[] // ticket ids whose pull requests it builds on
+  overlaps: string[] // ticket ids whose pull requests change some of the same files
+  warning: string | null // may be refused, e.g. required reviews or checks missing
+  skip: string | null // won't be merged: draft, conflicts, not open, built on one that won't be merged
+}
+
+interface MergeRun {
+  id: string
+  boardId: string
+  actor: string
+  method: 'merge' | 'squash' | 'rebase'
+  status: 'running' | 'finished'
+  startedAt: string
+  finishedAt: string | null
+  steps: (MergePlanItem & { status: 'pending' | 'merging' | 'merged' | 'skipped' | 'failed'; message: string | null })[]
+}
+```
 
 ## Types
 
@@ -234,9 +291,11 @@ interface Overview {
     lastActiveAt: string | null
     agentOf: string[] // ids of boards whose host agent runs under this name
   }[]
+  hiddenAgents: string[] // names cleared from `agents` (see below)
   boards: { id; name; agentEnabled; agentName; open; working; review; completed; events; lastActivityAt }[]
   events: { at: string; kind: 'created' | 'completed' | 'comment' | 'update'; actor: string; boardId: string }[]
   sessions: { agent; ticketId; boardId; start: string; end: string | null }[] // clipped to the range
+  completions: { ticketId; boardId; at: string; cycleMs: number | null; reviewMs: number | null }[] // oldest first
   recent: (Activity & { ticket: { number; title; boardId; boardName } })[] // latest 30, newest first
 }
 ```
@@ -244,7 +303,14 @@ interface Overview {
 Agents are everyone holding a ticket that isn't done, everyone who worked within the range, and the host agent
 of every board that has it switched on. A ticket is being **worked** while it is assigned and outside the board's
 review and done columns (a board without a done column uses its last column), so claiming starts the clock and
-submitting for review, merging or releasing stops it. Work time is reconstructed from the activity log.
+submitting for review, merging or releasing stops it. Work time is reconstructed from the activity log. Each
+completion's `cycleMs` runs from when work on the ticket started to done, and `reviewMs` from when it last entered
+the review column to done; either is `null` if the ticket skipped that step.
+
+Stale or duplicate agent names can be cleared from the list: `POST /overview/hidden-agents` with
+`{ "names": ["..."] }` (204) hides them until they next do something on a board (any new activity entry by that
+actor), and `DELETE /overview/hidden-agents` (204) lists every cleared agent again. Totals, charts and sessions still
+include their work.
 
 ## Live updates
 

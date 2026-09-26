@@ -5,6 +5,9 @@ import type {
   BoardDetail,
   BoardSummary,
   Column,
+  MergeMethod,
+  MergePlan,
+  MergeRun,
   Overview,
   OverviewRange,
   Tag,
@@ -96,7 +99,13 @@ export const api = {
   },
   deleteAttachment: (attachmentId: string) => request<void>('DELETE', `/attachments/${attachmentId}`),
   addComment: (ticketId: string, body: string) => request<Activity>('POST', `/tickets/${ticketId}/comments`, { body }),
+  mergePlan: (boardId: string) => request<MergePlan>('GET', `/boards/${boardId}/merge-plan`),
+  mergeRun: (boardId: string) => request<MergeRun | null>('GET', `/boards/${boardId}/merge-run`),
+  startMergeRun: (boardId: string, method: MergeMethod) =>
+    request<MergeRun>('POST', `/boards/${boardId}/merge-run`, { method }),
   overview: (days: OverviewRange) => request<Overview>('GET', `/overview${query({ days: String(days) })}`),
+  hideAgents: (names: string[]) => request<void>('POST', '/overview/hidden-agents', { names }),
+  showHiddenAgents: () => request<void>('DELETE', '/overview/hidden-agents'),
 }
 
 export const errorMessage = (error: unknown) => (error instanceof Error ? error.message : 'Something went wrong')

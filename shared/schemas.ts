@@ -2,6 +2,7 @@ import { z } from 'zod'
 import {
   AGENT_EFFORTS,
   COLORS,
+  MERGE_METHODS,
   OVERVIEW_RANGES,
   type OverviewRange,
   parsePullRequestUrl,
@@ -167,6 +168,8 @@ export const claimNextSchema = z.object({
   moveTo: ref.optional(),
 })
 
+export const mergeRunSchema = z.object({ method: z.enum(MERGE_METHODS) })
+
 export const commentSchema = z.object({ body: z.string().trim().min(1).max(20_000) })
 
 export const listTicketsQuerySchema = z.object({
@@ -184,6 +187,8 @@ export const overviewQuerySchema = z.object({
     .default('14')
     .transform((days) => Number(days) as OverviewRange),
 })
+
+export const hideAgentsSchema = z.object({ names: z.array(name).min(1).max(100) })
 
 export const BOARD_EXPORT_FORMAT = 'ultrakanban/board@1'
 
@@ -234,5 +239,6 @@ export type ClaimTicketInput = z.input<typeof claimTicketSchema>
 export type ReleaseTicketInput = z.input<typeof releaseTicketSchema>
 export type SubmitForReviewInput = z.input<typeof submitForReviewSchema>
 export type ClaimNextInput = z.input<typeof claimNextSchema>
+export type MergeRunInput = z.input<typeof mergeRunSchema>
 export type ListTicketsQuery = z.output<typeof listTicketsQuerySchema>
 export type BoardExport = z.output<typeof boardExportSchema>

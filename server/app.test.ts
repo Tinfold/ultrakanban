@@ -10,13 +10,16 @@ import {
   type Attachment,
   type BoardDetail,
   type BoardSummary,
+  type MergePlan,
+  type MergeRun,
   type Overview,
   type Ticket,
 } from '../shared/domain.ts'
 import { createApp } from './app.ts'
 import { createAttachmentFiles } from './attachment-files.ts'
+import { createMergeQueue } from './merge-queue.ts'
 import { subscribe } from './events.ts'
-import { type GitHubAuth, GitHubError, type NewRepository } from './github.ts'
+import { type GitHubAuth, GitHubError, type GitHubPullRequest, type NewRepository } from './github.ts'
 import { createPullRequestSync } from './pull-request-sync.ts'
 import { getOverview } from './store/overview.ts'
 import type { PullRequestStatus } from './store/tickets.ts'
@@ -24,23 +27,51 @@ import type { PullRequestStatus } from './store/tickets.ts'
 /** Fake GitHub: pull requests are open unless a test says otherwise. */
 const pullRequestStatuses = new Map<string, PullRequestStatus>()
 /** Fake GitHub signed in as "octocat"; repositories it has created, as owner/name. */
-const github = { auth: null as GitHubAuth, repos: new Set<string>(), created: [] as NewRepository[] }
+const github = { auth: 'env' as GitHubAuth, repos: new Set<string>(), created: [] as NewRepository[] }
+/** Fake GitHub pull requests for merging, by `owner/name#number`. */
+const pulls = new Map<string, GitHubPullRequest & { files: string[] }>()
+/** `head>base` pairs where `head` contains `base`'s commits. */
+const containing = new Set<string>()
+/** Called after the fake merges a pull request, to change the others the way GitHub would. */
+let afterMerge: (key: string) => void = () => {}
+const merges: string[] = []
+const pull = (repo: string, number: number) => {
+  const found = pulls.get(`${repo}#${number}`)
+  if (!found) throw new Error(`GitHub responded 404 for ${repo}#${number}`)
+  return found
+}
 const attachmentDir = mkdtempSync(join(tmpdir(), 'ultrakanban-attachments-'))
+const pullRequests = createPullRequestSync({
+  auth: async () => github.auth,
+  fetchPullRequestStatus: async (url) => pullRequestStatuses.get(url) ?? { state: 'open', title: 'Some PR' },
+  createRepository: async (input) => {
+    const repo = `${input.owner ?? 'octocat'}/${input.name}`
+    if (github.repos.has(repo)) {
+      throw new GitHubError(422, 'Repository creation failed.: name already exists on this account')
+    }
+    github.repos.add(repo)
+    github.created.push(input)
+    return { repo, url: `https://github.com/${repo}` }
+  },
+  getPullRequest: async (repo, number) => ({ ...pull(repo, number) }),
+  listPullRequestFiles: async (repo, number) => pull(repo, number).files,
+  containsCommit: async (_repo, head, base) => containing.has(`${head}>${base}`),
+  mergeMethods: async () => ['merge', 'squash'],
+  async mergePullRequest(repo, number, { method, sha }) {
+    const merging = pull(repo, number)
+    if (merging.mergeable === false) throw new Error('GitHub responded 405: Pull Request is not mergeable')
+    if (merging.headSha !== sha) throw new Error('GitHub responded 409: Head branch was modified')
+    Object.assign(merging, { merged: true, state: 'closed' })
+    pullRequestStatuses.set(`https://github.com/${repo}/pull/${number}`, { state: 'merged', title: merging.title })
+    merges.push(`${repo}#${number}:${method}`)
+    afterMerge(`${repo}#${number}`)
+  },
+  setPullRequestBase: async (repo, number, base) => void (pull(repo, number).base = base),
+})
 const app = createApp({
   attachmentFiles: createAttachmentFiles(attachmentDir),
-  pullRequests: createPullRequestSync({
-    auth: async () => github.auth,
-    fetchPullRequestStatus: async (url) => pullRequestStatuses.get(url) ?? { state: 'open', title: 'Some PR' },
-    createRepository: async (input) => {
-      const repo = `${input.owner ?? 'octocat'}/${input.name}`
-      if (github.repos.has(repo)) {
-        throw new GitHubError(422, 'Repository creation failed.: name already exists on this account')
-      }
-      github.repos.add(repo)
-      github.created.push(input)
-      return { repo, url: `https://github.com/${repo}` }
-    },
-  }),
+  pullRequests,
+  mergeQueue: createMergeQueue(pullRequests, { pollMs: 0 }),
 })
 
 async function call<T>(method: string, path: string, body?: unknown, actor = 'tester') {
@@ -375,7 +406,7 @@ describe('pull request workflow', () => {
       const { body: detail } = await call<BoardDetail>('GET', `/boards/${boardId}`)
       assert.equal(detail.board.githubRepo, 'acme/site')
     } finally {
-      github.auth = null
+      github.auth = 'env'
     }
   })
 
@@ -413,7 +444,7 @@ describe('pull request workflow', () => {
   test('overview shows who works on what, for how long, and what got done', async () => {
     const agent = 'overview-agent'
     const ticket = await addTicket({ title: 'A' })
-    await addTicket({ title: 'B' })
+    const other = await addTicket({ title: 'B' })
     await call('POST', `/boards/${boardId}/tickets/claim-next`, { agent, column: 'Todo', moveTo: 'In progress' })
 
     const { body: working } = await call<Overview>('GET', '/overview?days=7')
@@ -448,6 +479,14 @@ describe('pull request workflow', () => {
     assert.deepEqual([agentOf(done).status, agentOf(done).tickets.length, agentOf(done).completed], ['idle', 0, 1])
     assert.deepEqual([boardOf(done).open, boardOf(done).completed], [1, 1])
     assert.ok(done.events.some((event) => event.boardId === boardId && event.kind === 'completed'))
+    const completion = done.completions.find((entry) => entry.ticketId === ticket.id)!
+    assert.ok(completion.cycleMs !== null && completion.reviewMs !== null && completion.cycleMs >= completion.reviewMs)
+
+    // Tickets moved to done without being worked or reviewed have no cycle or review time.
+    await call('POST', `/tickets/${other.id}/move`, { column: 'Done', force: true })
+    const { body: moved } = await call<Overview>('GET', '/overview')
+    const skipped = moved.completions.find((entry) => entry.ticketId === other.id)!
+    assert.deepEqual([skipped.cycleMs, skipped.reviewMs], [null, null])
 
     assert.equal((await call('GET', '/overview?days=3')).status, 400)
   })
@@ -489,6 +528,28 @@ describe('pull request workflow', () => {
     await call('PATCH', `/boards/${boardId}`, { agentEnabled: false })
   })
 
+  test('overview hides cleared agents until they do something again', async () => {
+    const agent = 'stale-agent'
+    const ticket = await addTicket({ title: 'A' })
+    await call('POST', `/tickets/${ticket.id}/claim`, { agent }, agent)
+    const listed = async () => {
+      const { body } = await call<Overview>('GET', '/overview')
+      return [body.agents.some((entry) => entry.name === agent), body.hiddenAgents.includes(agent)]
+    }
+    assert.deepEqual(await listed(), [true, false])
+
+    assert.equal((await call('POST', '/overview/hidden-agents', { names: [agent] })).status, 204)
+    assert.deepEqual(await listed(), [false, true])
+    assert.equal((await call('POST', '/overview/hidden-agents', { names: [] })).status, 400)
+
+    await call('POST', `/tickets/${ticket.id}/comments`, { body: 'Still here' }, agent)
+    assert.deepEqual(await listed(), [true, false])
+
+    await call('POST', '/overview/hidden-agents', { names: [agent] })
+    assert.equal((await call('DELETE', '/overview/hidden-agents')).status, 204)
+    assert.deepEqual(await listed(), [true, false])
+  })
+
   test('deleting a column clears it from the workflow', async () => {
     const { body: board } = await call<BoardDetail>('GET', `/boards/${boardId}`)
     await call('DELETE', `/columns/${board.board.doneColumnId}`)
@@ -497,6 +558,142 @@ describe('pull request workflow', () => {
 
     assert.equal(after.board.doneColumnId, null)
     assert.equal(deleted.status, 204)
+  })
+})
+
+describe('merging all reviewed pull requests', () => {
+  const REPO = 'acme/app'
+  const url = (number: number) => `https://github.com/${REPO}/pull/${number}`
+
+  /** Adds a ticket in review with an open pull request on the fake GitHub. */
+  async function inReview(number: number, pullRequest: Partial<GitHubPullRequest> & { files?: string[] } = {}) {
+    pulls.set(`${REPO}#${number}`, {
+      state: 'open',
+      merged: false,
+      draft: false,
+      title: `PR ${number}`,
+      mergeable: true,
+      mergeableState: 'clean',
+      base: 'main',
+      head: `branch-${number}`,
+      headSha: `sha-${number}`,
+      files: [`file-${number}.ts`],
+      ...pullRequest,
+    })
+    const ticket = await addTicket({ title: `Ticket for ${number}`, column: 'Review', pullRequest: url(number) })
+    return ticket.id
+  }
+
+  async function runToEnd(method = 'merge') {
+    const started = await call<MergeRun>('POST', `/boards/${boardId}/merge-run`, { method })
+    assert.equal(started.status, 202)
+    for (;;) {
+      const { body: run } = await call<MergeRun>('GET', `/boards/${boardId}/merge-run`)
+      if (run.status === 'finished') return run
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+  }
+
+  beforeEach(async () => {
+    const { body } = await call<{ id: string }>('POST', '/boards', {
+      name: 'Merging',
+      columns: ['Todo', 'Review', 'Done'],
+      reviewColumn: 'Review',
+      doneColumn: 'Done',
+    })
+    boardId = body.id
+    for (const map of [pulls, pullRequestStatuses, containing]) map.clear()
+    merges.length = 0
+    afterMerge = () => {}
+  })
+
+  test('plans stacked pull requests after the ones they build on, otherwise in column order', async () => {
+    const independent = await inReview(1, { files: ['shared.ts'] })
+    const stacked = await inReview(2, { base: 'branch-3', files: ['b.ts', 'c.ts'] })
+    const base = await inReview(3, { files: ['c.ts'] })
+    const containsFirst = await inReview(4, { files: ['shared.ts', 'd.ts'] })
+    const draft = await inReview(5, { draft: true })
+    const blocked = await inReview(6, { mergeableState: 'blocked' })
+    containing.add('sha-4>sha-1')
+    await addTicket({ title: 'No pull request', column: 'Review' })
+
+    const { body: plan } = await call<MergePlan>('GET', `/boards/${boardId}/merge-plan`)
+
+    assert.deepEqual(
+      plan.items.map((item) => item.number),
+      [1, 3, 2, 4, 5, 6],
+    )
+    const byTicket = new Map(plan.items.map((item) => [item.ticketId, item]))
+    assert.deepEqual(byTicket.get(stacked)?.after, [base])
+    assert.deepEqual(byTicket.get(containsFirst)?.after, [independent])
+    assert.deepEqual(byTicket.get(independent)?.overlaps, [containsFirst])
+    assert.equal(byTicket.get(draft)?.skip, 'Still a draft')
+    assert.equal(byTicket.get(blocked)?.skip, null)
+    assert.match(byTicket.get(blocked)?.warning ?? '', /required reviews or checks/)
+    assert.deepEqual(plan.methods, ['merge', 'squash'])
+  })
+
+  test('merges in order, retargets stacked pull requests and moves the tickets to done', async () => {
+    const stacked = await inReview(1, { base: 'branch-2' })
+    const base = await inReview(2)
+    const draft = await inReview(3, { draft: true })
+
+    const run = await runToEnd('squash')
+    const done = (await ticketsIn('Done')).map((ticket) => ticket.id)
+
+    assert.deepEqual(merges, ['acme/app#2:squash', 'acme/app#1:squash'])
+    assert.equal(pull(REPO, 1).base, 'main')
+    assert.deepEqual(
+      run.steps.map((step) => [step.number, step.status]),
+      [
+        [2, 'merged'],
+        [1, 'merged'],
+        [3, 'skipped'],
+      ],
+    )
+    assert.deepEqual(done.sort(), [base, stacked].sort())
+    assert.equal((await ticketsIn('Review'))[0].id, draft)
+  })
+
+  test('skips pull requests that conflict after earlier merges, and the ones built on them', async () => {
+    await inReview(1, { files: ['same.ts'] })
+    const conflicting = await inReview(2, { files: ['same.ts'] })
+    await inReview(3, { base: 'branch-2' })
+    await inReview(4)
+    afterMerge = (key) => {
+      if (key === `${REPO}#1`) Object.assign(pull(REPO, 2), { mergeable: false, mergeableState: 'dirty' })
+    }
+
+    const run = await runToEnd()
+
+    assert.deepEqual(merges, ['acme/app#1:merge', 'acme/app#4:merge'])
+    assert.deepEqual(
+      run.steps.map((step) => [step.number, step.status, step.message]),
+      [
+        [1, 'merged', null],
+        [2, 'skipped', 'Has conflicts with main; its agent can resolve them'],
+        [3, 'skipped', "Builds on #2, which wasn't merged"],
+        [4, 'merged', null],
+      ],
+    )
+    assert.equal((await ticketsIn('Review'))[0].id, conflicting)
+  })
+
+  test('runs one at a time per board and needs a review column', async () => {
+    await inReview(1)
+    const [first, second] = await Promise.all([
+      call('POST', `/boards/${boardId}/merge-run`, { method: 'merge' }),
+      call<{ error: { code: string } }>('POST', `/boards/${boardId}/merge-run`, { method: 'merge' }),
+    ])
+    const invalid = await call('POST', `/boards/${boardId}/merge-run`, { method: 'fast-forward' })
+    await call('PATCH', `/boards/${boardId}`, { reviewColumn: null })
+    const noReview = await call('GET', `/boards/${boardId}/merge-plan`)
+
+    assert.equal(first.status, 202)
+    assert.equal(second.status, 409)
+    assert.equal(second.body.error.code, 'merge_in_progress')
+    assert.equal(invalid.status, 400)
+    assert.equal(noReview.status, 400)
   })
 })
 
