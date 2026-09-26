@@ -133,13 +133,23 @@ cd ~/code/my-app   # the repository the tickets are about
 KANBAN=http://localhost:4317 BOARD=$BOARD ~/ultrakanban/scripts/agent-loop.sh
 ```
 
-Each round, it first checks the tickets the agent holds and starts a run for one that has a new ticket comment,
-pull request comment, review or inline comment, a failing check or merge conflicts. Feedback counts as handled
-once the agent has acted on the ticket after it (every run ends with a ticket comment), so there is no state file.
-A pull request closed without merging releases its ticket to Todo. When none of its tickets needs work, it claims a
-new Todo ticket, and when there is nothing to do at all it waits `IDLE_SECONDS`. A failed run is retried with backoff (`RETRY_SECONDS`,
-doubling, up to `MAX_ATTEMPTS`); after that a new ticket comment retries it. Other settings are listed at the top
-of the script. It needs `curl`, `jq`, `timeout`, an authenticated `gh` and the skill installed.
+Each round, it first checks the tickets the agent holds and starts a run for one with new feedback: a ticket
+comment, a pull request comment, review or inline review comment, failing checks on the latest commit, or merge
+conflicts. The prompt lists exactly what is new. Bots and the agent's own replies don't count: the agent posts
+from the same GitHub account as you, so the skill makes it end every pull request comment with
+`<!-- ultrakanban:<agent> -->`, which the loop ignores. A pull request closed without merging moves its ticket to
+the `Cancelled` column (`CANCELLED_COLUMN`; add it to the board, the loop won't fall back to Todo) and unassigns
+it, so it is never picked up again. When none of its tickets needs work, it claims a new Todo ticket, and when
+there is nothing to do at all it waits `IDLE_SECONDS`.
+
+Nothing is missed, even while a run is going: before each run the loop notes the newest ticket activity id,
+pull request comment, review and inline comment ids, and the head commit's checks and conflict state. It saves
+that as the ticket's watermark (one small JSON file per ticket under `$XDG_STATE_HOME/ultrakanban-agent-loop/`,
+removed when the ticket is no longer the agent's) only after the run succeeds. Anything newer starts the next run.
+A failed run saves nothing and is retried with backoff (`RETRY_SECONDS`, doubling, up to `MAX_ATTEMPTS` in a row,
+then again when new feedback arrives). A missing or unreadable state file means everything is handed over again,
+never skipped. Other settings are listed at the top of the script. It needs `curl`, `jq`, `timeout`, an
+authenticated `gh` and the skill installed.
 
 **Permissions:** the loop passes `--dangerously-skip-permissions`, so every run can execute any command, edit any
 file and use the network as your user without asking. Run it in a container, VM or as a dedicated user that only

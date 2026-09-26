@@ -5,18 +5,22 @@
 # This loop runs outside Claude Code and starts a fresh, short-lived `claude -p` for every piece of work, so all
 # of that memory goes back to the OS after each run. The loop itself keeps no history, so it doesn't grow.
 #
-# Each round it first checks the tickets the agent already holds, and starts a run for the first one that needs
-# work:
-#   - a new ticket comment from someone else
-#   - a new pull request comment, review or inline review comment
-#   - a failing check on the pull request
+# Each round it first checks the tickets the agent holds, and starts a run for the first one with new feedback:
+#   - a ticket comment from someone else
+#   - a pull request comment, review or inline review comment (not from bots, and not the agent's own replies,
+#     which end with the marker line <!-- ultrakanban:AGENT -->)
+#   - failing checks on the pull request's latest commit
 #   - merge conflicts with the base branch
-# Feedback counts as handled once the agent has acted on the ticket after it (every run ends with a ticket
-# comment), so no state file is needed. A pull request closed without merging releases its ticket. Only when
-# nothing needs attention does it claim the next ticket from the todo column.
+# A pull request closed without merging moves its ticket to the cancelled column. Only when none of its tickets
+# needs work does it claim the next ticket from the todo column.
 #
-# A run that fails, or ends without the agent acting on the ticket, is retried after RETRY_SECONDS, doubling each
-# time. After MAX_ATTEMPTS failed runs it waits for new feedback, such as a ticket comment.
+# Before each run the loop takes a snapshot of what it hands over: the newest ticket activity id, the newest pull
+# request comment, review and inline comment ids, and the failing checks and conflict state of the pull request's
+# head commit. Only when the run exits successfully does it save that snapshot as the ticket's watermark, in a
+# small file per ticket under STATE_DIR. Feedback above the watermark, including anything that arrived during the
+# run, starts the next run. A failed run saves nothing and is retried after RETRY_SECONDS, doubling each time, up
+# to MAX_ATTEMPTS; new feedback resets the count. A missing or unreadable state file means handling everything
+# again, never skipping it.
 #
 # Run it from the repository the tickets are about, with the ultrakanban skill installed and gh authenticated:
 #
@@ -24,14 +28,16 @@
 #
 # Optional settings (environment variables):
 #   AGENT               name used for claims and the X-Actor header (default: claude)
-#   TODO_COLUMN         column to take new tickets from, and to release tickets to (default: Todo)
+#   TODO_COLUMN         column to take new tickets from (default: Todo)
 #   IN_PROGRESS_COLUMN  column to move claimed tickets to (default: In progress)
+#   CANCELLED_COLUMN    column for tickets whose pull request was closed without merging (default: Cancelled)
 #   IDLE_SECONDS        wait between rounds when there is nothing to do (default: 300)
 #   TICKET_TIMEOUT      stop a run that takes longer than this, as accepted by timeout(1) (default: 4h)
 #   RETRY_SECONDS       wait before retrying a failed run, doubled after each failure (default: 600)
 #   MAX_ATTEMPTS        failed runs in a row before waiting for new feedback (default: 3)
 #   SKIP_PERMISSIONS    1 passes --dangerously-skip-permissions to claude, 0 doesn't (default: 1)
 #   CLAUDE_ARGS         extra arguments for claude, e.g. "--model opus"
+#   STATE_DIR           where watermarks are kept (default: $XDG_STATE_HOME/ultrakanban-agent-loop/BOARD-AGENT)
 #
 # Requires curl, jq, gh, timeout (coreutils) and claude. Logs go to stdout. Stop it with Ctrl-C or SIGTERM.
 
@@ -41,46 +47,70 @@ set -uo pipefail
 : "${BOARD:?set BOARD to the board id}"
 AGENT=${AGENT:-claude}
 LOOP_ACTOR="$AGENT-loop"
+MARKER="<!-- ultrakanban:$AGENT -->"
 TODO_COLUMN=${TODO_COLUMN:-Todo}
 IN_PROGRESS_COLUMN=${IN_PROGRESS_COLUMN:-In progress}
+CANCELLED_COLUMN=${CANCELLED_COLUMN:-Cancelled}
 IDLE_SECONDS=${IDLE_SECONDS:-300}
 TICKET_TIMEOUT=${TICKET_TIMEOUT:-4h}
 RETRY_SECONDS=${RETRY_SECONDS:-600}
 MAX_ATTEMPTS=${MAX_ATTEMPTS:-3}
+STATE_DIR=${STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/ultrakanban-agent-loop/$BOARD-${AGENT//\//_}}
 read -r -a claude_args <<<"${CLAUDE_ARGS:-}"
-RETRY_NOTE="Unhandled feedback is retried with backoff, up to $MAX_ATTEMPTS runs in a row. Comment on the ticket to \
-retry after that, or to retry a new ticket's run."
 if [[ ${SKIP_PERMISSIONS:-1} == 1 ]]; then
   claude_args+=(--dangerously-skip-permissions)
 fi
+mkdir -p "$STATE_DIR" || exit 1
 
-# Decides whether a ticket needs a run. Input: the ticket's activity, then its open pull request, the newest
-# inline review comment on it and the base branch's head commit date if it has conflicts (each JSON or null).
-# Prints the reasons for a run, or nothing.
+# Finds a ticket's new feedback. Input: its activity, open pull request (gh pr view) or null, pull request
+# comments, reviews and inline comments (GitHub REST), and its saved state. Prints the snapshot to save after a
+# successful run, the items to hand over, their fingerprint, and whether to run now (backoff after failures).
 read -r -d '' TRIAGE <<'JQ'
-def ts: capture("^(?<s>[^.Z]+)(?<f>\\.[0-9]+)?Z$") | (.s + "Z" | fromdateiso8601) + ("0" + (.f // "") | tonumber);
-def failed: IN("FAILURE", "ERROR", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE");
-. as [$activity, $pr, $inline, $base]
-| ([$activity[] | select(.actor == $agent) | .createdAt | ts] | max // 0) as $handled
-| [ ($activity[] | select(.type == "comment" and .actor != $agent and .actor != $loop)
-      | {t: (.createdAt | ts), what: "a ticket comment from \(.actor)"}),
-    ($pr // {} | .comments // [] | .[] | {t: (.createdAt | ts), what: "a pull request comment from \(.author.login)"}),
-    ($pr // {} | .reviews // [] | .[] | select(.submittedAt)
-      | {t: (.submittedAt | ts), what: "a pull request review from \(.author.login)"}),
-    ($inline // empty | {t: (.created_at | ts), what: "an inline review comment from \(.user.login)"}),
-    ($pr // {} | .statusCheckRollup // [] | .[] | select((.conclusion // .state // "") | failed)
-      | (.completedAt // .startedAt // empty) as $at
-      | {t: ($at | ts), what: "failing check \(.name // .context)"}),
-    ($base // empty | {t: ts, what: "merge conflicts with the base branch"})
-  ]
-| map(select(.t > $handled))
-| select(length > 0)
-| (map(.t) | max) as $latest
-| [$activity[] | select(.actor == $loop and .type == "comment" and (.data.body | startswith("Agent run")))
-    | .createdAt | ts | select(. > $latest)] as $failures
-| select(($failures | length) < $max)
-| select(($failures | length) == 0 or $now >= ($failures | max) + $retry * pow(2; ($failures | length) - 1))
-| unique_by(.what) | map(.what) | join("; ")
+def bot: (.user.type // "") == "Bot" or ((.user.login // "") | endswith("[bot]"));
+def feedback: (bot | not) and ((.body // "") | contains($marker) | not);
+def clip: if length > 2000 then .[:2000] + " [...]" else . end;
+def failing: IN("FAILURE", "ERROR", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE");
+. as [$activity, $pr, $issue, $reviews, $inline, $s]
+| ($pr // {}) as $p
+| ([$p.statusCheckRollup // [] | .[] | select((.conclusion // .state // "") | failing) | .name // .context]
+    | unique) as $failed
+| (if $failed == [] then "" else "\($p.headRefOid):\($failed | join(","))" end) as $checks
+| (if $p.mergeable == "CONFLICTING" or $p.mergeStateStatus == "DIRTY" then "\($p.headRefOid):\($p.baseRefOid)"
+   else "" end) as $conflict
+| {
+    snapshot: {
+      activity: ([$activity[].id, $s.activity // 0] | max),
+      issue: ([$issue[].id, $s.issue // 0] | max),
+      review: ([$reviews[].id, $s.review // 0] | max),
+      inline: ([$inline[].id, $s.inline // 0] | max),
+      checks: $checks,
+      conflict: $conflict
+    },
+    items: [
+      (if $s.claim then {key: "claim", text: ("The previous run on this ticket didn't finish. "
+        + "Check what it got done and carry on from there.")} else empty end),
+      ($activity[] | select(.type == "comment" and .id > ($s.activity // 0) and .actor != $agent and .actor != $loop)
+        | {key: "t\(.id)", text: "Ticket comment from \(.actor):\n\(.data.body // "" | clip)"}),
+      ($issue[] | select(.id > ($s.issue // 0) and feedback)
+        | {key: "i\(.id)", text: "Pull request comment from \(.user.login) (\(.html_url)):\n\(.body // "" | clip)"}),
+      ($reviews[] | select(.id > ($s.review // 0) and feedback and .state != "PENDING")
+        | select(.state != "COMMENTED" or (.body // "") != "")
+        | {key: "r\(.id)",
+           text: "Pull request review (\(.state)) from \(.user.login) (\(.html_url)):\n\(.body // "" | clip)"}),
+      ($inline[] | select(.id > ($s.inline // 0) and feedback)
+        | {key: "c\(.id)", text: ("Inline review comment from \(.user.login) "
+           + "on \(.path):\(.line // .original_line // "?") (\(.html_url)):\n\(.body // "" | clip)")}),
+      (if $checks != "" and $checks != ($s.checks // "") then
+        {key: "checks \($checks)", text: "Failing checks on \($p.headRefOid[:7]): \($failed | join(", "))"}
+       else empty end),
+      (if $conflict != "" and $conflict != ($s.conflict // "") then
+        {key: "conflict \($conflict)", text: "The pull request has merge conflicts with \($p.baseRefName)"}
+       else empty end)
+    ]
+  }
+| .fingerprint = (.items | map(.key) | join(" "))
+| .run = (.items != [] and (($s.failedFor // null) != .fingerprint or (($s.failures // 0) < $max
+    and $now >= ($s.failedAt // 0) + $retry * pow(2; ($s.failures // 1) - 1))))
 JQ
 
 log() { printf '%s %s\n' "$(date '+%F %T')" "$*"; }
@@ -93,102 +123,150 @@ post() {
     -H 'Content-Type: application/json' -H "X-Actor: $AGENT" -d "$2"
 }
 
-# Comments on a ticket as the loop rather than the agent, so it doesn't count as handling feedback.
+# Comments on a ticket as the loop rather than the agent.
 note() {
   curl -s -o /dev/null -X POST "$KANBAN/api/tickets/$1/comments" \
     -H 'Content-Type: application/json' -H "X-Actor: $LOOP_ACTOR" -d "$(jq -nc --arg body "$2" '{body: $body}')"
 }
 
-last_agent_action() {
-  get "/tickets/$1/activity" | jq -r --arg agent "$AGENT" '[.[] | select(.actor == $agent) | .createdAt] | max // ""'
+# All pages of a GitHub REST list as one array.
+gh_list() { gh api --paginate "$1" </dev/null | jq -cs 'add // []'; }
+
+state_file() { printf '%s/%s.json' "$STATE_DIR" "$1"; }
+
+# A ticket's saved state, or {} if it is missing or unreadable (which means handling everything again).
+read_state() {
+  jq -cs '.[0] | if type == "object" then . else {} end' "$(state_file "$1")" 2>/dev/null || echo '{}'
+}
+
+write_state() {
+  local file
+  file=$(state_file "$1")
+  printf '%s\n' "$2" >"$file.tmp" && mv "$file.tmp" "$file"
 }
 
 run_claude() {
-  timeout --foreground "$TICKET_TIMEOUT" claude -p "$1" ${claude_args[@]+"${claude_args[@]}"} </dev/null
+  timeout --foreground "$TICKET_TIMEOUT" claude -p ${claude_args[@]+"${claude_args[@]}"} <<<"$1"
 }
 
-# Runs claude on a ticket and records a failure (which starts the backoff) unless the agent acted on the ticket.
+# Runs claude on a ticket. On success saves the snapshot as the ticket's watermark; on failure keeps the old one
+# and counts the failure for the backoff.
 run_on_ticket() {
-  local id=$1 prompt=$2 before code
-  before=$(last_agent_action "$id")
+  local id=$1 prompt=$2 snapshot=$3 fingerprint=$4 code
   run_claude "$prompt"
   code=$?
-  if [[ $code != 0 ]]; then
-    log "claude exited with status $code on $id"
-    note "$id" "Agent run stopped with exit status $code (124 means it hit the $TICKET_TIMEOUT timeout). $RETRY_NOTE"
-  elif [[ $(last_agent_action "$id") == "$before" ]]; then
-    log "claude finished without acting on $id"
-    note "$id" "Agent run finished without commenting on the ticket. $RETRY_NOTE"
+  if [[ $code == 0 ]]; then
+    write_state "$id" "$snapshot"
+    return 0
   fi
+  log "claude exited with status $code on $id"
+  write_state "$id" "$(read_state "$id" | jq -c --arg fp "$fingerprint" --argjson now "$(date +%s)" \
+    '. + {failures: (if .failedFor == $fp then (.failures // 0) + 1 else 1 end), failedAt: $now, failedFor: $fp}')"
+  note "$id" "Agent run stopped with exit status $code (124 means it hit the $TICKET_TIMEOUT timeout). It is \
+retried with backoff, up to $MAX_ATTEMPTS runs in a row; after that, new feedback such as a ticket comment retries it."
 }
 
 intro() {
   printf '%s' "Use the ultrakanban skill. KANBAN=$KANBAN, BOARD=$BOARD.
 Your name (agent field and X-Actor header): $AGENT.
 This is a non-interactive run started by scripts/agent-loop.sh: do the work, then exit. Don't wait for review; the loop
-starts a new run when feedback arrives. If you need an answer from a human, ask in a ticket comment and exit."
+starts a new run when feedback arrives. If you need an answer from a human, ask in a ticket comment and exit.
+End every pull request comment, review and inline reply you post with this exact line, so the loop doesn't mistake
+your own replies for feedback:
+$MARKER"
+}
+
+# Moves a ticket whose pull request was closed without merging to the cancelled column.
+cancel() {
+  local id=$1 number=$2 pr_url=$3 cancelled=$4 response
+  if [[ -z $cancelled ]]; then
+    log "error: ticket #$number ($id): $pr_url was closed without merging, but the board has no \
+\"$CANCELLED_COLUMN\" column; leaving the ticket alone"
+    return 1
+  fi
+  response=$(post "/tickets/$id/release" "$(jq -nc --arg agent "$AGENT" --arg moveTo "$cancelled" \
+    '{agent: $agent, moveTo: $moveTo}')")
+  if [[ ${response##*$'\n'} != 200 ]]; then
+    log "error: ticket #$number ($id): can't move it to $CANCELLED_COLUMN: ${response%$'\n'*}"
+    return 1
+  fi
+  note "$id" "Pull request $pr_url was closed without merging, so the ticket moved to $CANCELLED_COLUMN."
+  rm -f "$(state_file "$id")"
+  log "ticket #$number ($id): $pr_url was closed without merging; moved it to $CANCELLED_COLUMN"
 }
 
 # Checks the tickets the agent holds and handles the first one that needs work. Returns 1 if none did.
 handle_feedback() {
-  local board review done_column tickets id number column pr_url repo pr_number pr state release inline base activity \
-    reasons
+  local board review cancelled tickets file id number column pr_url repo pr_number pr issue reviews inline activity \
+    state triage items
   board=$(get "/boards/$BOARD") || { log "can't read board $BOARD"; return 1; }
   review=$(jq -r '.board.reviewColumnId // ""' <<<"$board")
-  done_column=$(jq -r '.board.doneColumnId // ""' <<<"$board")
-  tickets=$(jq -r --arg agent "$AGENT" --arg done "$done_column" '.tickets[]
-    | select(.assignee == $agent and .columnId != $done)
+  cancelled=$(jq -r --arg name "$CANCELLED_COLUMN" \
+    '[.columns[] | select((.name | ascii_downcase) == ($name | ascii_downcase)) | .id][0] // ""' <<<"$board")
+  tickets=$(jq -r --arg agent "$AGENT" --arg cancelled "$cancelled" '(.board.doneColumnId // "") as $done
+    | .tickets[] | select(.assignee == $agent and .columnId != $done and .columnId != $cancelled)
     | [.id, .number, .columnId, .pullRequest.url // "-", .pullRequest.repo // "-", .pullRequest.number // "-"] | @tsv' \
     <<<"$board")
   board=
 
+  # Forget tickets the agent no longer holds.
+  for file in "$STATE_DIR"/*.json; do
+    [[ -e $file ]] || continue
+    id=${file##*/}
+    id=${id%.json}
+    [[ $'\n'$tickets == *$'\n'"$id"$'\t'* ]] || rm -f "$file"
+  done
+
   while IFS=$'\t' read -r -u 3 id number column pr_url repo pr_number; do
-    pr=null inline=null base=null
+    [[ -n $id ]] || continue
+    pr=null issue='[]' reviews='[]' inline='[]'
     if [[ $pr_url != - ]]; then
-      pr=$(gh pr view "$pr_url" --json state,mergeable,mergeStateStatus,baseRefName,comments,reviews,statusCheckRollup \
-        </dev/null) || { log "can't read $pr_url"; continue; }
-      state=$(jq -r .state <<<"$pr")
-      if [[ $state == CLOSED && $column == "$review" ]]; then
-        release=$(post "/tickets/$id/release" "$(jq -nc --arg agent "$AGENT" --arg moveTo "$TODO_COLUMN" \
-          '{agent: $agent, moveTo: $moveTo}')")
-        if [[ ${release##*$'\n'} != 200 ]]; then
-          log "ticket #$number ($id): can't release it after $pr_url was closed: ${release%$'\n'*}"
-          continue
-        fi
-        log "ticket #$number ($id): $pr_url was closed without merging; released it to $TODO_COLUMN"
-        note "$id" "Pull request $pr_url was closed without merging, so the ticket went back to $TODO_COLUMN. \
-See the pull request for why."
-        return 0
-      elif [[ $state != OPEN ]]; then
-        pr=null
-      else
-        inline=$(gh api "repos/$repo/pulls/$pr_number/comments?sort=created&direction=desc&per_page=1" </dev/null |
-          jq '.[0]') || { log "can't read review comments on $pr_url"; continue; }
-        # A conflict has no timestamp of its own; it appeared no earlier than the base branch's newest commit.
-        if jq -e '.mergeable == "CONFLICTING" or .mergeStateStatus == "DIRTY"' >/dev/null <<<"$pr"; then
-          base=$(gh api "repos/$repo/commits/$(jq -r .baseRefName <<<"$pr")" </dev/null |
-            jq '.commit.committer.date') || base=null
-        fi
-      fi
+      pr=$(gh pr view "$pr_url" \
+        --json state,mergeable,mergeStateStatus,headRefOid,baseRefOid,baseRefName,statusCheckRollup </dev/null) ||
+        { log "can't read $pr_url"; continue; }
+      case $(jq -r .state <<<"$pr") in
+        OPEN)
+          issue=$(gh_list "repos/$repo/issues/$pr_number/comments?per_page=100") &&
+            reviews=$(gh_list "repos/$repo/pulls/$pr_number/reviews?per_page=100") &&
+            inline=$(gh_list "repos/$repo/pulls/$pr_number/comments?per_page=100") ||
+            { log "can't read the comments on $pr_url"; continue; }
+          ;;
+        CLOSED)
+          if [[ $column == "$review" ]]; then
+            cancel "$id" "$number" "$pr_url" "$cancelled" && return 0
+            continue
+          fi
+          pr=null
+          ;;
+        *) pr=null ;;
+      esac
     fi
 
     activity=$(get "/tickets/$id/activity") || { log "can't read the activity of $id"; continue; }
-    reasons=$(printf '%s\n' "$activity" "$pr" "$inline" "$base" |
-      jq -rs --arg agent "$AGENT" --arg loop "$LOOP_ACTOR" --argjson now "$(date +%s)" \
-        --argjson retry "$RETRY_SECONDS" --argjson max "$MAX_ATTEMPTS" "$TRIAGE")
-    activity= pr= inline=
-    [[ -n $reasons ]] || continue
+    state=$(read_state "$id")
+    triage=$(printf '%s\n' "$activity" "$pr" "$issue" "$reviews" "$inline" "$state" |
+      jq -cs --arg agent "$AGENT" --arg loop "$LOOP_ACTOR" --arg marker "$MARKER" --argjson now "$(date +%s)" \
+        --argjson retry "$RETRY_SECONDS" --argjson max "$MAX_ATTEMPTS" "$TRIAGE") ||
+      { log "can't triage $id"; continue; }
+    activity= pr= issue= reviews= inline=
+    [[ $(jq -r .run <<<"$triage") == true ]] || continue
 
-    log "ticket #$number ($id): $reasons"
+    items=$(jq -r '.items | map(.text) | join("\n\n---\n\n")' <<<"$triage")
+    log "ticket #$number ($id): $(jq -r '.items | map(.text | split("\n")[0] | rtrimstr(":")) | join("; ")' \
+      <<<"$triage")"
     run_on_ticket "$id" "$(intro)
-Ticket $id is already yours. This run was started because of: $reasons.
-Read the ticket's activity and, if it has a pull request, the pull request's comments, reviews, inline review comments
-and checks. Act on everything new: answer questions, make the requested changes, fix failing checks, and resolve merge
-conflicts by merging the base branch into the pull request's branch. Push to that branch and reply on the pull request.
+
+Ticket $id is already yours. The loop started this run for this new feedback:
+
+$items
+
+Read the ticket's activity and, if it has a pull request, its comments, reviews, inline review comments and checks,
+then address everything above: answer questions, make the requested changes, fix failing checks, and resolve merge
+conflicts by merging the base branch into the pull request's branch. Commit and push to that branch.
+Reply where each piece of feedback was given: on the pull request for pull request feedback (with the marker line).
 If the ticket isn't in review yet, keep working it and submit it for review.
-Before finishing, re-read the ticket activity and pull request comments for anything that arrived meanwhile.
-Your last action must be a comment on the ticket summarising what you did, even if nothing needed changing: that is how
-the loop knows this feedback is handled."
+Finish with a ticket comment summarising what you did, then exit." \
+      "$(jq -c .snapshot <<<"$triage")" "$(jq -r .fingerprint <<<"$triage")"
     return 0
   done 3<<<"$tickets"
   return 1
@@ -196,7 +274,7 @@ the loop knows this feedback is handled."
 
 # Claims the next ticket from the todo column and works it. Returns 1 if there was nothing to claim.
 claim_next() {
-  local response status ticket id
+  local response status ticket id snapshot
   response=$(post "/boards/$BOARD/tickets/claim-next" "$(jq -nc --arg agent "$AGENT" --arg column "$TODO_COLUMN" \
     --arg moveTo "$IN_PROGRESS_COLUMN" '{agent: $agent, column: $column, moveTo: $moveTo}')")
   status=${response##*$'\n'}
@@ -208,17 +286,29 @@ claim_next() {
 
   id=$(jq -r .id <<<"$ticket")
   log "ticket #$(jq -r .number <<<"$ticket") ($id): claimed: $(jq -r .title <<<"$ticket")"
+  # Everything on the ticket so far is handed to this run. Until it succeeds, the claim itself counts as feedback,
+  # so a failed or interrupted run is retried with backoff.
+  snapshot=$(get "/tickets/$id/activity" | jq -c '{activity: (map(.id) | max // 0)}') || snapshot='{}'
+  write_state "$id" "$(jq -c '. + {claim: true}' <<<"$snapshot")"
   run_on_ticket "$id" "$(intro)
+
 Ticket $id is already claimed for you and in progress. Work only this ticket; do not claim another.
-If it links a pull request that was closed without merging, find out why from the ticket and pull request comments
-before starting again.
-Take it through to review and exit after submitting it."
+Take it through to review and exit after submitting it." "$snapshot" "claim"
   return 0
 }
 
-trap 'log "stopped"; exit 0' INT TERM
+# Waits in the background so a signal ends the wait at once.
+idle() {
+  sleep "$IDLE_SECONDS" &
+  sleeper=$!
+  wait "$sleeper"
+  sleeper=
+}
+
+sleeper=
+trap 'log "stopped"; [[ -n $sleeper ]] && kill "$sleeper" 2>/dev/null; exit 0' INT TERM
 
 log "working board $BOARD as $AGENT"
 while true; do
-  handle_feedback || claim_next || sleep "$IDLE_SECONDS"
+  handle_feedback || claim_next || idle
 done

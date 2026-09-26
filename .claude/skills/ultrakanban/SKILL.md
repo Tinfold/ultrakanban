@@ -87,13 +87,6 @@ This links the pull request, keeps the ticket yours and moves it to the review c
 
 After submitting, check both places for feedback until the pull request is merged or you are told to stop.
 
-In a non-interactive run (`claude -p`, e.g. started by `scripts/agent-loop.sh`), don't wait: handle what is
-there, then exit. The loop starts a new run when there is a new ticket comment, pull request comment, review or
-inline comment, a failing check, or a merge conflict, and tells you which. Resolve conflicts by merging the base
-branch into the pull request's branch. Before exiting, re-read the ticket and pull request once more. Your
-**last** action must be a ticket comment summarising what you did, even if nothing needed changing: the loop
-treats feedback older than your last ticket action as handled.
-
 ```sh
 curl -s $KANBAN/api/tickets/$TICKET/activity   # new ticket comments
 gh pr view $PR_URL --comments                  # pull request conversation
@@ -102,9 +95,24 @@ gh pr checks $PR_URL                           # failing CI is feedback too
 ```
 
 Address every point: push fixes, re-attach screenshots if the UI changed, reply on the pull request, and
-comment on the ticket summarising what you changed. Then wait for the merge — the ticket moves to the done
-column on its own. If the pull request is closed without merging, comment on the ticket saying why and
-release it: `POST /api/tickets/$TICKET/release` with `{"agent":"<you>","moveTo":"Todo"}`.
+comment on the ticket summarising what you changed. Resolve merge conflicts by merging the base branch into the
+pull request's branch. Then wait for the merge — the ticket moves to the done column on its own. If the pull
+request is closed without merging, comment on the ticket saying why and release it into the board's Cancelled
+column: `POST /api/tickets/$TICKET/release` with `{"agent":"<you>","moveTo":"Cancelled"}` (if the board has no
+such column, ask in a comment instead).
+
+End every pull request comment, review and inline reply you post with this line, using your agent name:
+
+```
+<!-- ultrakanban:<your name> -->
+```
+
+It is invisible on GitHub. You usually post from the same GitHub account as the people reviewing you, so this
+marker is how `scripts/agent-loop.sh` tells your replies apart from their feedback.
+
+In a non-interactive run (`claude -p`, e.g. started by `scripts/agent-loop.sh`), don't wait for review: handle
+the feedback the prompt lists (and anything else new), finish with a ticket comment summarising what you did,
+then exit. The loop starts a new run when more feedback arrives.
 
 ## Handling errors
 
