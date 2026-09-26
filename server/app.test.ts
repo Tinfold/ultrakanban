@@ -442,6 +442,28 @@ describe('pull request workflow', () => {
     await call('PATCH', `/boards/${boardId}`, { agentEnabled: false })
   })
 
+  test('overview hides cleared agents until they do something again', async () => {
+    const agent = 'stale-agent'
+    const ticket = await addTicket({ title: 'A' })
+    await call('POST', `/tickets/${ticket.id}/claim`, { agent }, agent)
+    const listed = async () => {
+      const { body } = await call<Overview>('GET', '/overview')
+      return [body.agents.some((entry) => entry.name === agent), body.hiddenAgents.includes(agent)]
+    }
+    assert.deepEqual(await listed(), [true, false])
+
+    assert.equal((await call('POST', '/overview/hidden-agents', { names: [agent] })).status, 204)
+    assert.deepEqual(await listed(), [false, true])
+    assert.equal((await call('POST', '/overview/hidden-agents', { names: [] })).status, 400)
+
+    await call('POST', `/tickets/${ticket.id}/comments`, { body: 'Still here' }, agent)
+    assert.deepEqual(await listed(), [true, false])
+
+    await call('POST', '/overview/hidden-agents', { names: [agent] })
+    assert.equal((await call('DELETE', '/overview/hidden-agents')).status, 204)
+    assert.deepEqual(await listed(), [true, false])
+  })
+
   test('deleting a column clears it from the workflow', async () => {
     const { body: board } = await call<BoardDetail>('GET', `/boards/${boardId}`)
     await call('DELETE', `/columns/${board.board.doneColumnId}`)

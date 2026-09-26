@@ -94,6 +94,8 @@ export const api = {
   deleteAttachment: (attachmentId: string) => request<void>('DELETE', `/attachments/${attachmentId}`),
   addComment: (ticketId: string, body: string) => request<Activity>('POST', `/tickets/${ticketId}/comments`, { body }),
   overview: (days: OverviewRange) => request<Overview>('GET', `/overview${query({ days: String(days) })}`),
+  hideAgents: (names: string[]) => request<void>('POST', '/overview/hidden-agents', { names }),
+  showHiddenAgents: () => request<void>('DELETE', '/overview/hidden-agents'),
 }
 
 export const errorMessage = (error: unknown) => (error instanceof Error ? error.message : 'Something went wrong')

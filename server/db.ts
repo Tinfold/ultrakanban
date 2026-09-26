@@ -101,6 +101,13 @@ const MIGRATIONS = [
   `
   ALTER TABLE tickets ADD COLUMN agent_effort TEXT;
   `,
+  `
+  -- Agents cleared from the overview, with the newest activity entry at the time: they reappear once they act again.
+  CREATE TABLE hidden_agents (
+    name TEXT PRIMARY KEY,
+    last_activity_id INTEGER NOT NULL
+  );
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'
