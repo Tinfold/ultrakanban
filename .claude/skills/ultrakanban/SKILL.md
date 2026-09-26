@@ -25,9 +25,10 @@ agents can work the same board safely.
   each agent's context small — never carry one agent through several tickets.
 - **Don't loop for days in one session.** A Claude Code process keeps growing in memory (and eventually swap)
   the longer it runs, even when its subagents are fresh, and only gives it back when it exits. To work a board
-  unattended, run the ultrakanban repository's `scripts/agent-loop.sh` in the project instead: it watches the
-  board from outside Claude Code and starts a new short-lived `claude -p` for each ticket it claims and each time
-  one of its tickets gets feedback. Don't use `/loop` or a long-lived orchestrator session for this.
+  unattended, switch on the board's agent instead (Board settings, with the services from the ultrakanban
+  repository's `scripts/install-services.sh` installed): it runs `scripts/agent-loop.sh` outside Claude Code, which
+  starts a new short-lived `claude -p` for each ticket it claims and each time one of its tickets gets feedback.
+  Don't use `/loop` or a long-lived orchestrator session for this.
 - **Read before you write.** Ticket comments and pull request review comments are how humans steer you.
 - **Never move a ticket to the done column.** It moves there by itself when the pull request is merged.
 
@@ -112,7 +113,9 @@ marker is how `scripts/agent-loop.sh` tells your replies apart from their feedba
 
 In a non-interactive run (`claude -p`, e.g. started by `scripts/agent-loop.sh`), don't wait for review: handle
 the feedback the prompt lists (and anything else new), finish with a ticket comment summarising what you did,
-then exit. The loop starts a new run when more feedback arrives.
+then exit. The loop starts a new run when more feedback arrives. In the agent's own clone, the loop starts each run
+on a freshly fetched checkout with no local changes: the default branch for a new ticket (create your branch from
+it), or the pull request's branch for feedback on a pull request (commit on top of it and push).
 
 Failing CI isn't always about the code. Before fixing a failing check, read the failing job's log
 (`gh run view <run id> --log-failed`). If the failure doesn't come from the code (billing or spending limits,

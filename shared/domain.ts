@@ -72,6 +72,12 @@ export interface BoardSummary {
   reviewColumnId: string | null
   /** Column that only accepts tickets whose pull request is merged; merged tickets move here automatically. */
   doneColumnId: string | null
+  /** GitHub repository (`owner/name`) the board's tickets are about. */
+  githubRepo: string | null
+  /** Whether the host's agent supervisor runs an agent loop for this board (see scripts/agent-supervisor.sh). */
+  agentEnabled: boolean
+  /** Name the agent claims tickets under; `claude` when not set. */
+  agentName: string | null
   ticketCount: number
   createdAt: string
   updatedAt: string

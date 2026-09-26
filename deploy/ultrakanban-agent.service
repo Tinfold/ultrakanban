@@ -1,0 +1,15 @@
+# Starts an agent loop for every board with its agent switched on (scripts/agent-supervisor.sh).
+# Installed by scripts/install-services.sh. The agents run `claude --dangerously-skip-permissions` as you.
+[Unit]
+Description=UltraKanban agent supervisor
+After=ultrakanban.service
+
+[Service]
+Environment=KANBAN=http://localhost:4317
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/share/ultrakanban-agent/bin/agent-supervisor.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

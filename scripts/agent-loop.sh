@@ -44,6 +44,9 @@
 #   SKIP_PERMISSIONS    1 passes --dangerously-skip-permissions to claude, 0 doesn't (default: 1)
 #   CLAUDE_ARGS         extra arguments for claude, e.g. "--model opus"
 #   STATE_DIR           where watermarks are kept (default: $XDG_STATE_HOME/ultrakanban-agent-loop/BOARD-AGENT)
+#   AGENT_LOOP_CLEAN    1 when running in a dedicated clone: before each run the loop fetches, discards local
+#                       changes and checks out the default branch (or the pull request's branch for feedback runs).
+#                       agent-board.sh sets it. Leave it unset in a working copy of your own.
 #
 # Requires curl, jq, gh, timeout (coreutils) and claude. Logs go to stdout. Stop it with Ctrl-C or SIGTERM.
 
@@ -204,7 +207,7 @@ ci_status() {
           text+=" $(gh api "repos/$repo/check-runs/$id/annotations" </dev/null | jq -r '[.[].message] | join(" ")')"
         fi
         if grep -qiE "$INFRA_PATTERN" <<<"$text"; then
-          why=$(grep -oiE ".{0,60}($INFRA_PATTERN).{0,60}" <<<"$text" | head -1)
+          why=$(grep -oiE "[^.]*($INFRA_PATTERN)[^.]*" <<<"$text" | head -1)
         elif [[ $app == github-actions ]] && job=$(gh api "repos/$repo/actions/jobs/$id" </dev/null) &&
           ! jq -e 'any(.steps[]?; .conclusion == "failure")' >/dev/null <<<"$job"; then
           why="no step ran and failed"
@@ -225,6 +228,27 @@ ci_status() {
        infra: [.[] | select(.[0] == "infra") | {name: .[1], why: (.[2] | gsub("^\\s+|\\s+$"; ""))}]}'
 }
 
+# In a dedicated clone (AGENT_LOOP_CLEAN=1, set by agent-board.sh), puts the checkout on an up-to-date branch: the
+# given one (a pull request's branch) if it exists on origin, otherwise the default branch. Local changes are
+# discarded, so this never happens in a normal working copy. Prints the branch.
+checkout() {
+  local branch=$1 default
+  if [[ ${AGENT_LOOP_CLEAN:-0} != 1 ]]; then
+    git branch --show-current 2>/dev/null
+    return 0
+  fi
+  git fetch --prune --quiet origin || return 1
+  default=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null) ||
+    { git remote set-head origin --auto >/dev/null && default=$(git symbolic-ref --short refs/remotes/origin/HEAD); } ||
+    return 1
+  default=${default#origin/}
+  [[ -n $branch ]] && git rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null || branch=$default
+  git rebase --abort >/dev/null 2>&1
+  git merge --abort >/dev/null 2>&1
+  git reset --quiet --hard && git clean -fdq && git checkout --quiet -B "$branch" "origin/$branch" || return 1
+  printf '%s\n' "$branch"
+}
+
 run_claude() {
   timeout --foreground "$TICKET_TIMEOUT" claude -p ${claude_args[@]+"${claude_args[@]}"} <<<"$1"
 }
@@ -232,9 +256,19 @@ run_claude() {
 # Runs claude on a ticket. On success saves the snapshot as the ticket's watermark; on failure keeps the old one
 # and counts the failure for the backoff.
 run_on_ticket() {
-  local id=$1 prompt=$2 snapshot=$3 fingerprint=$4 ci_runs=${5:-0} code
-  run_claude "$prompt"
-  code=$?
+  local id=$1 prompt=$2 snapshot=$3 fingerprint=$4 ci_runs=${5:-0} branch=${6:-} code
+  if branch=$(checkout "$branch"); then
+    [[ -n $branch ]] && prompt+="
+
+The repository is checked out on $branch, freshly updated from origin$(
+      [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]] && printf '%s' " with no local changes")."
+    run_claude "$prompt"
+    code=$?
+    checkout "" >/dev/null # back to the default branch between runs
+  else
+    code=1
+    log "can't update the checkout for $id"
+  fi
   if [[ $code == 0 ]]; then
     write_state "$id" "$snapshot"
     return 0
@@ -278,7 +312,7 @@ cancel() {
 
 # Checks the tickets the agent holds and handles the first one that needs work. Returns 1 if none did.
 handle_feedback() {
-  local board review cancelled tickets file id number column pr_url repo pr_number pr ci issue reviews inline \
+  local board review cancelled tickets file id number column pr_url repo pr_number pr branch ci issue reviews inline \
     activity state triage items ci_note
   board=$(get "/boards/$BOARD") || { log "can't read board $BOARD"; return 1; }
   review=$(jq -r '.board.reviewColumnId // ""' <<<"$board")
@@ -300,13 +334,14 @@ handle_feedback() {
 
   while IFS=$'\t' read -r -u 3 id number column pr_url repo pr_number; do
     [[ -n $id ]] || continue
-    pr=null ci=null issue='[]' reviews='[]' inline='[]'
+    pr=null branch= ci=null issue='[]' reviews='[]' inline='[]'
     if [[ $pr_url != - ]]; then
       pr=$(gh pr view "$pr_url" \
-        --json state,mergeable,mergeStateStatus,headRefOid,baseRefOid,baseRefName </dev/null) ||
+        --json state,mergeable,mergeStateStatus,headRefOid,headRefName,baseRefOid,baseRefName </dev/null) ||
         { log "can't read $pr_url"; continue; }
       case $(jq -r .state <<<"$pr") in
         OPEN)
+          branch=$(jq -r .headRefName <<<"$pr")
           issue=$(gh_list "repos/$repo/issues/$pr_number/comments?per_page=100") &&
             reviews=$(gh_list "repos/$repo/pulls/$pr_number/reviews?per_page=100") &&
             inline=$(gh_list "repos/$repo/pulls/$pr_number/comments?per_page=100") ||
@@ -367,7 +402,7 @@ Failing CI started this run. First find out from the failing job's log whether t
 doesn't (billing or spending limits, runners or infrastructure, a flaky test unrelated to the change, missing
 secrets), don't push anything: explain what you found in the ticket comment and exit.")
 Finish with a ticket comment summarising what you did, then exit." \
-      "$(jq -c .snapshot <<<"$triage")" "$(jq -r .fingerprint <<<"$triage")" "$(jq -r .ciRuns <<<"$triage")"
+      "$(jq -c .snapshot <<<"$triage")" "$(jq -r .fingerprint <<<"$triage")" "$(jq -r .ciRuns <<<"$triage")" "$branch"
     return 0
   done 3<<<"$tickets"
   return 1

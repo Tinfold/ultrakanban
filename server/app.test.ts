@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, test } from 'node:test'
-import type { Activity, Attachment, BoardDetail, Ticket } from '../shared/domain.ts'
+import type { Activity, Attachment, BoardDetail, BoardSummary, Ticket } from '../shared/domain.ts'
 import { createApp } from './app.ts'
 import { createAttachmentFiles } from './attachment-files.ts'
 import { subscribe } from './events.ts'
@@ -278,6 +278,34 @@ describe('pull request workflow', () => {
       ],
     )
     pullRequestStatuses.clear()
+  })
+
+  test('board agent settings', async () => {
+    const {
+      body: { board: initial },
+    } = await call<BoardDetail>('GET', `/boards/${boardId}`)
+    assert.deepEqual([initial.githubRepo, initial.agentEnabled, initial.agentName], [null, false, null])
+
+    const off = await call('PATCH', `/boards/${boardId}`, { agentEnabled: true })
+    assert.equal(off.status, 400, 'the agent needs a repository')
+    assert.equal((await call('PATCH', `/boards/${boardId}`, { githubRepo: 'not a repo' })).status, 400)
+    assert.equal((await call('PATCH', `/boards/${boardId}`, { agentName: 'has space' })).status, 400)
+
+    const { body: on } = await call<BoardSummary>('PATCH', `/boards/${boardId}`, {
+      githubRepo: 'acme/app',
+      agentEnabled: true,
+      agentName: 'claude-2',
+    })
+    assert.deepEqual([on.githubRepo, on.agentEnabled, on.agentName], ['acme/app', true, 'claude-2'])
+    const { body: boards } = await call<BoardSummary[]>('GET', '/boards')
+    assert.ok(boards.some((board) => board.id === boardId && board.agentEnabled))
+
+    const { body: cleared } = await call<BoardSummary>('PATCH', `/boards/${boardId}`, {
+      agentEnabled: false,
+      githubRepo: null,
+      agentName: null,
+    })
+    assert.deepEqual([cleared.githubRepo, cleared.agentEnabled, cleared.agentName], [null, false, null])
   })
 
   test('review needs a configured review column', async () => {
