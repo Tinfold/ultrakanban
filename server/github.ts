@@ -5,6 +5,14 @@ import type { PullRequestStatus } from './store/tickets.ts'
 
 export type GitHubAuth = 'env' | 'gh' | null
 
+export interface NewRepository {
+  /** User or organization to create it under; the signed-in user when omitted. */
+  owner?: string
+  name: string
+  description?: string
+  private: boolean
+}
+
 /** What merging needs to know about a pull request. */
 export interface GitHubPullRequest {
   state: 'open' | 'closed'
@@ -24,6 +32,8 @@ export interface GitHubClient {
   /** Where the API token comes from; `null` means unauthenticated (public repos only, 60 requests/hour). */
   auth: () => Promise<GitHubAuth>
   fetchPullRequestStatus: (url: string) => Promise<PullRequestStatus>
+  /** Creates a repository with an initial commit, so it has a default branch to clone and branch from. */
+  createRepository: (input: NewRepository) => Promise<{ repo: string; url: string }>
   getPullRequest: (repo: string, number: number) => Promise<GitHubPullRequest>
   /** Paths the pull request changes (at most the first 300). */
   listPullRequestFiles: (repo: string, number: number) => Promise<string[]>
@@ -35,6 +45,16 @@ export interface GitHubClient {
   mergePullRequest: (repo: string, number: number, options: { method: MergeMethod; sha: string }) => Promise<void>
   /** Changes the branch the pull request merges into. */
   setPullRequestBase: (repo: string, number: number, base: string) => Promise<void>
+}
+
+/** A request GitHub answered with an error status; `message` includes GitHub's reasons. */
+export class GitHubError extends Error {
+  readonly status: number
+
+  constructor(status: number, message: string) {
+    super(message)
+    this.status = status
+  }
 }
 
 async function resolveToken(): Promise<{ token: string | null; auth: GitHubAuth }> {
@@ -86,11 +106,26 @@ export function createGitHubClient(): GitHubClient {
       signal: AbortSignal.timeout(15_000),
     })
     if (!response.ok) {
-      const data = (await response.json().catch(() => null)) as { message?: string } | null
-      throw new Error(`GitHub responded ${response.status} for ${path}${data?.message ? `: ${data.message}` : ''}`)
+      const data = (await response.json().catch(() => null)) as {
+        message?: string
+        errors?: ({ message?: string } | string)[]
+      } | null
+      const reasons = (data?.errors ?? []).map((error) => (typeof error === 'string' ? error : error.message))
+      const message = [data?.message ?? `GitHub responded ${response.status}`, ...reasons.filter(Boolean)].join(': ')
+      throw new GitHubError(response.status, `${message} (${method} ${path})`)
     }
     return (await response.json()) as T
   }
+
+  let login: Promise<string> | undefined
+  const getLogin = () =>
+    (login ??= request<{ login: string }>('GET', '/user').then(
+      (user) => user.login,
+      (error: unknown) => {
+        login = undefined
+        throw error
+      },
+    ))
 
   async function getPullRequest(repo: string, number: number): Promise<GitHubPullRequest> {
     const data = await request<PullRequestResponse>('GET', `/repos/${repo}/pulls/${number}`)
@@ -116,6 +151,16 @@ export function createGitHubClient(): GitHubClient {
       const data = await getPullRequest(pullRequest.repo, pullRequest.number)
       const state = data.merged ? 'merged' : data.state === 'closed' ? 'closed' : data.draft ? 'draft' : 'open'
       return { state, title: data.title }
+    },
+
+    async createRepository({ owner, name, description, private: isPrivate }) {
+      const forUser = !owner || owner.toLowerCase() === (await getLogin()).toLowerCase()
+      const created = await request<{ full_name: string; html_url: string }>(
+        'POST',
+        forUser ? '/user/repos' : `/orgs/${encodeURIComponent(owner)}/repos`,
+        { name, description, private: isPrivate, auto_init: true },
+      )
+      return { repo: created.full_name, url: created.html_url }
     },
 
     getPullRequest,

@@ -4,6 +4,7 @@ import {
   claimNextSchema,
   createBoardSchema,
   createColumnSchema,
+  createGitHubRepoSchema,
   createTagSchema,
   createTicketSchema,
   listTicketsQuerySchema,
@@ -11,6 +12,8 @@ import {
   updateBoardSchema,
 } from '../../shared/schemas.ts'
 import { transaction } from '../db.ts'
+import { HttpError } from '../errors.ts'
+import { GitHubError } from '../github.ts'
 import { actorOf, readJson } from '../http.ts'
 import type { AppServices } from '../app.ts'
 import { createBoard, deleteBoard, getBoard, getBoardDetail, listBoards, updateBoard } from '../store/boards.ts'
@@ -18,6 +21,12 @@ import { createColumn } from '../store/columns.ts'
 import { createTag } from '../store/tags.ts'
 import { claimNextTicket, createTicket, getTicketByNumber, listTickets } from '../store/tickets.ts'
 import { exportBoard, importBoard } from '../store/transfer.ts'
+
+/** GitHub turning a request down (name taken, no access, missing scope) is the caller's to fix; anything else isn't. */
+const gitHubFailure = (error: unknown) =>
+  error instanceof GitHubError && error.status < 500
+    ? new HttpError(400, 'github_error', error.message)
+    : new HttpError(502, 'github_error', `Could not reach GitHub: ${(error as Error).message}`)
 
 export const boardRoutes = ({ pullRequests, mergeQueue }: AppServices) =>
   new Hono()
@@ -44,6 +53,25 @@ export const boardRoutes = ({ pullRequests, mergeQueue }: AppServices) =>
     .delete('/:boardId', (c) => {
       transaction(() => deleteBoard(c.req.param('boardId')))
       return c.body(null, 204)
+    })
+    .post('/:boardId/github-repo', async (c) => {
+      const boardId = getBoard(c.req.param('boardId')).id
+      const input = await readJson(c, createGitHubRepoSchema)
+      const { github } = pullRequests
+      if (!(await github.auth())) {
+        throw new HttpError(
+          400,
+          'github_unauthenticated',
+          'Not signed in to GitHub. Set GITHUB_TOKEN or run gh auth login, then restart the server',
+        )
+      }
+      const created = await github.createRepository(input).catch((error: unknown) => {
+        throw gitHubFailure(error)
+      })
+      return c.json(
+        transaction(() => updateBoard(boardId, { githubRepo: created.repo })),
+        201,
+      )
     })
     .get('/:boardId/export', (c) => c.json(exportBoard(c.req.param('boardId'))))
     .post('/:boardId/columns', async (c) => {

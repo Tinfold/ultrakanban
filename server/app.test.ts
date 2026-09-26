@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { beforeEach, describe, test } from 'node:test'
 import {
   type Activity,
+  type ApiErrorBody,
   agentWorkerName,
   type Attachment,
   type BoardDetail,
@@ -16,15 +17,17 @@ import {
 } from '../shared/domain.ts'
 import { createApp } from './app.ts'
 import { createAttachmentFiles } from './attachment-files.ts'
-import type { GitHubPullRequest } from './github.ts'
 import { createMergeQueue } from './merge-queue.ts'
 import { subscribe } from './events.ts'
+import { type GitHubAuth, GitHubError, type GitHubPullRequest, type NewRepository } from './github.ts'
 import { createPullRequestSync } from './pull-request-sync.ts'
 import { getOverview } from './store/overview.ts'
 import type { PullRequestStatus } from './store/tickets.ts'
 
 /** Fake GitHub: pull requests are open unless a test says otherwise. */
 const pullRequestStatuses = new Map<string, PullRequestStatus>()
+/** Fake GitHub signed in as "octocat"; repositories it has created, as owner/name. */
+const github = { auth: 'env' as GitHubAuth, repos: new Set<string>(), created: [] as NewRepository[] }
 /** Fake GitHub pull requests for merging, by `owner/name#number`. */
 const pulls = new Map<string, GitHubPullRequest & { files: string[] }>()
 /** `head>base` pairs where `head` contains `base`'s commits. */
@@ -39,8 +42,17 @@ const pull = (repo: string, number: number) => {
 }
 const attachmentDir = mkdtempSync(join(tmpdir(), 'ultrakanban-attachments-'))
 const pullRequests = createPullRequestSync({
-  auth: async () => 'env',
+  auth: async () => github.auth,
   fetchPullRequestStatus: async (url) => pullRequestStatuses.get(url) ?? { state: 'open', title: 'Some PR' },
+  createRepository: async (input) => {
+    const repo = `${input.owner ?? 'octocat'}/${input.name}`
+    if (github.repos.has(repo)) {
+      throw new GitHubError(422, 'Repository creation failed.: name already exists on this account')
+    }
+    github.repos.add(repo)
+    github.created.push(input)
+    return { repo, url: `https://github.com/${repo}` }
+  },
   getPullRequest: async (repo, number) => ({ ...pull(repo, number) }),
   listPullRequestFiles: async (repo, number) => pull(repo, number).files,
   containsCommit: async (_repo, head, base) => containing.has(`${head}>${base}`),
@@ -362,6 +374,40 @@ describe('pull request workflow', () => {
       [cleared.githubRepo, cleared.agentEnabled, cleared.agentName, cleared.agentModel, cleared.agentEffort],
       [null, false, null, null, null],
     )
+  })
+
+  test('creates a GitHub repository and links it to the board', async () => {
+    const create = (body: unknown) => call<BoardSummary & ApiErrorBody>('POST', `/boards/${boardId}/github-repo`, body)
+
+    github.auth = null
+    const signedOut = await create({ name: 'app' })
+    assert.equal(signedOut.status, 400)
+    assert.equal(signedOut.body.error.code, 'github_unauthenticated')
+
+    github.auth = 'gh'
+    try {
+      assert.equal((await create({ name: 'has space' })).status, 400)
+      assert.equal((await create({ name: 'app', owner: 'not/an-owner' })).status, 400)
+      assert.equal((await call('POST', '/boards/missing/github-repo', { name: 'app' })).status, 404)
+
+      const mine = await create({ name: 'app', description: 'The app' })
+      assert.equal(mine.status, 201)
+      assert.equal(mine.body.githubRepo, 'octocat/app')
+      assert.deepEqual(github.created.at(-1), { name: 'app', description: 'The app', private: true })
+
+      const taken = await create({ name: 'app' })
+      assert.equal(taken.status, 400)
+      assert.equal(taken.body.error.code, 'github_error')
+      assert.match(taken.body.error.message, /already exists/)
+
+      const org = await create({ owner: 'acme', name: 'site', private: false })
+      assert.equal(org.body.githubRepo, 'acme/site')
+      assert.equal(github.created.at(-1)?.private, false)
+      const { body: detail } = await call<BoardDetail>('GET', `/boards/${boardId}`)
+      assert.equal(detail.board.githubRepo, 'acme/site')
+    } finally {
+      github.auth = 'env'
+    }
   })
 
   test('tickets can set the effort the agent works them at', async () => {
