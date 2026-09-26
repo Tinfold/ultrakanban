@@ -39,6 +39,7 @@ export function subscribeStorage(listener: () => void) {
 export const storageKeys = {
   actor: 'ultrakanban:actor',
   lastBoard: 'ultrakanban:last-board',
+  mergeMethod: 'ultrakanban:merge-method',
   overviewRange: 'ultrakanban:overview-range',
   theme: 'ultrakanban:theme',
   view: (boardId: string) => `ultrakanban:view:${boardId}`,

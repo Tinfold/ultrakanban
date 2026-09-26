@@ -2,6 +2,7 @@ import {
   ArrowLeftIcon,
   ArrowRightIcon,
   GaugeIcon,
+  GitMergeIcon,
   MoreHorizontalIcon,
   PaletteIcon,
   PencilIcon,
@@ -29,6 +30,7 @@ import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { useBoardContext } from './board-context'
 import { DeleteColumnDialog } from './DeleteColumnDialog'
+import { MergeAllDialog } from './MergeAllDialog'
 
 const WIP_LIMITS = [1, 2, 3, 4, 5, 6, 8, 10, 15, 20]
 
@@ -44,8 +46,16 @@ export function ColumnHeader({ column, ticketCount, onAddTicket, handleProps }: 
   const { detail, actions } = useBoardContext()
   const [renaming, setRenaming] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [merging, setMerging] = useState(false)
   const index = detail.columns.findIndex((other) => other.id === column.id)
   const overLimit = column.wipLimit !== null && ticketCount > column.wipLimit
+  const canMergeAll =
+    column.id === detail.board.reviewColumnId &&
+    detail.tickets.some(
+      (ticket) =>
+        ticket.columnId === column.id &&
+        (ticket.pullRequest?.state === 'open' || ticket.pullRequest?.state === 'unknown'),
+    )
 
   const rename = (name: string) => {
     setRenaming(false)
@@ -91,6 +101,17 @@ export function ColumnHeader({ column, ticketCount, onAddTicket, handleProps }: 
         </span>
       </div>
 
+      {canMergeAll && (
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          aria-label="Merge all pull requests"
+          title="Merge all pull requests"
+          onClick={() => setMerging(true)}
+        >
+          <GitMergeIcon />
+        </Button>
+      )}
       <Button size="icon-xs" variant="ghost" aria-label={`Add ticket to ${column.name}`} onClick={onAddTicket}>
         <PlusIcon />
       </Button>
@@ -156,6 +177,8 @@ export function ColumnHeader({ column, ticketCount, onAddTicket, handleProps }: 
         </DropdownMenuContent>
       </DropdownMenu>
       <DeleteColumnDialog column={column} ticketCount={ticketCount} open={deleting} onOpenChange={setDeleting} />
+      {/* Stays open after the last pull request merged and left the column, to show how it went. */}
+      {(canMergeAll || merging) && <MergeAllDialog open={merging} onOpenChange={setMerging} />}
     </header>
   )
 }
