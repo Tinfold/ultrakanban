@@ -38,7 +38,7 @@ function Stat({ label, value, detail }: { label: string; value: ReactNode; detai
 
 function Section({ title, children, className }: { title: string; children: ReactNode; className?: string }) {
   return (
-    <section className={cn('grid content-start gap-3', className)}>
+    <section className={cn('grid grid-cols-1 content-start gap-3', className)}>
       <h2 className="text-sm font-medium">{title}</h2>
       {children}
     </section>
@@ -92,8 +92,8 @@ export function OverviewPage() {
     }))
 
     content = (
-      <div className={cn('grid gap-6 transition-opacity', isPlaceholderData && 'opacity-60')}>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+      <div className={cn('grid grid-cols-1 gap-6 transition-opacity', isPlaceholderData && 'opacity-60')}>
+        <div className="grid grid-cols-2 gap-3 *:last:col-span-2 md:grid-cols-3 md:*:last:col-span-1 xl:grid-cols-5">
           <Stat
             label="Agents working"
             value={totals.activeAgents}
@@ -105,7 +105,7 @@ export function OverviewPage() {
           <Stat label="Time worked" value={formatDuration(workedMs)} detail={`Last ${days} days, all agents`} />
         </div>
 
-        <div className="grid gap-3 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           <ColumnChart
             title="Activity"
             description={`Board events per day, across ${totals.boards} ${totals.boards === 1 ? 'board' : 'boards'}`}
@@ -127,8 +127,8 @@ export function OverviewPage() {
           />
         </div>
 
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
-          <div className="grid content-start gap-6">
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
+          <div className="grid grid-cols-1 content-start gap-6">
             <Section title="Agents">
               <AgentList agents={agents} boards={overview.boards} worked={worked} now={now} />
             </Section>
@@ -148,7 +148,7 @@ export function OverviewPage() {
     <>
       <AppHeader />
       <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto grid max-w-7xl gap-5 p-4 sm:p-6">
+        <div className="mx-auto grid max-w-7xl grid-cols-1 gap-5 p-4 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h1 className="text-lg font-semibold tracking-tight">Overview</h1>

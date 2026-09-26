@@ -64,7 +64,7 @@ export function BoardToolbar({
       <span className="ml-auto hidden text-xs text-muted-foreground tabular-nums md:inline">
         {visibleCount === totalCount ? `${totalCount} tickets` : `${visibleCount} of ${totalCount} tickets`}
       </span>
-      <Button size="sm" className="ml-auto md:ml-0" onClick={onNewTicket}>
+      <Button size="sm" className="ml-auto md:ml-0" onClick={onNewTicket} aria-label="New ticket">
         <PlusIcon />
         <span className="hidden sm:inline">New ticket</span>
         <Kbd className="hidden bg-primary-foreground/15 text-primary-foreground sm:inline-flex">C</Kbd>

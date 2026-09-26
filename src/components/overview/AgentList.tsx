@@ -68,7 +68,7 @@ export function AgentList({ agents, boards, worked, now }: AgentListProps) {
   }
 
   return (
-    <ul className="grid gap-3">
+    <ul className="grid grid-cols-1 gap-3">
       {agents.map((agent) => (
         <li key={agent.name} className="rounded-xl border bg-card p-3">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-1">
@@ -109,7 +109,7 @@ export function AgentList({ agents, boards, worked, now }: AgentListProps) {
             </dl>
           </div>
           {agent.tickets.length > 0 && (
-            <ul className="mt-2 grid border-t pt-2">
+            <ul className="mt-2 grid grid-cols-1 border-t pt-2">
               {agent.tickets.map((ticket) => (
                 <TicketRow key={ticket.id} ticket={ticket} now={now} />
               ))}

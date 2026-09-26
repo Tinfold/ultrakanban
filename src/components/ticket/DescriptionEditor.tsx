@@ -58,7 +58,7 @@ export function DescriptionEditor({
     contentType: 'markdown',
     autofocus: autoFocus ? 'end' : false,
     shouldRerenderOnTransaction: false,
-    editorProps: { attributes: { class: 'prose-ticket min-h-28 px-3 py-2.5 outline-none' } },
+    editorProps: { attributes: { class: 'prose-ticket min-h-28 px-3 py-2.5 text-base outline-none md:text-sm' } },
     onUpdate: ({ editor }) => onChange(editor.getMarkdown()),
     onBlur: () => onBlur?.(),
   })

@@ -17,7 +17,10 @@ export function BoardTable({ boards }: { boards: OverviewBoard[] }) {
       <table className="w-full text-[13px]">
         <thead className="text-xs text-muted-foreground">
           <tr className="border-b">
-            <th scope="col" className="px-3 py-2 text-left font-medium">
+            <th
+              scope="col"
+              className="sticky left-0 bg-card px-3 py-2 text-left font-medium sm:static sm:bg-transparent"
+            >
               Board
             </th>
             {COUNTS.map(([key, label]) => (
@@ -33,7 +36,10 @@ export function BoardTable({ boards }: { boards: OverviewBoard[] }) {
         <tbody>
           {boards.map((board) => (
             <tr key={board.id} className="border-b last:border-0 hover:bg-muted/50">
-              <th scope="row" className="px-3 py-2 text-left font-medium">
+              <th
+                scope="row"
+                className="sticky left-0 bg-card px-3 py-2 text-left font-medium sm:static sm:bg-transparent"
+              >
                 <Link href={`/b/${board.id}`} className="inline-flex items-center gap-1.5 hover:underline">
                   {board.name}
                   {board.agentEnabled && (
