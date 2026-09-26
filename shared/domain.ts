@@ -343,6 +343,8 @@ export interface Overview {
     workedMs: number
   }
   agents: OverviewAgent[]
+  /** Agents cleared from the overview that haven't done anything since; they aren't in `agents`. */
+  hiddenAgents: string[]
   boards: OverviewBoard[]
   /** Every activity entry within the range, oldest first. */
   events: OverviewEvent[]

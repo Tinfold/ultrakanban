@@ -101,6 +101,8 @@ export const api = {
   startMergeRun: (boardId: string, method: MergeMethod) =>
     request<MergeRun>('POST', `/boards/${boardId}/merge-run`, { method }),
   overview: (days: OverviewRange) => request<Overview>('GET', `/overview${query({ days: String(days) })}`),
+  hideAgents: (names: string[]) => request<void>('POST', '/overview/hidden-agents', { names }),
+  showHiddenAgents: () => request<void>('DELETE', '/overview/hidden-agents'),
 }
 
 export const errorMessage = (error: unknown) => (error instanceof Error ? error.message : 'Something went wrong')

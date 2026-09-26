@@ -1,8 +1,9 @@
-import { BotIcon } from 'lucide-react'
+import { BotIcon, XIcon } from 'lucide-react'
 import { Link } from 'wouter'
 import type { Color, OverviewAgent, OverviewBoard, OverviewTicket } from '@shared/domain'
 import { PullRequestIcon } from '@/components/common/PullRequestIcon'
 import { UserAvatar } from '@/components/common/UserAvatar'
+import { Button } from '@/components/ui/button'
 import { swatch } from '@/lib/colors'
 import { formatDateTime, formatDuration, formatRelative, ticketRef } from '@/lib/format'
 import { ticketHref } from '@/lib/overview'
@@ -53,10 +54,21 @@ interface AgentListProps {
   boards: OverviewBoard[]
   worked: Map<string, number>
   now: number
+  /** How many agents are cleared from the list. */
+  hidden: number
+  onHide: (names: string[]) => void
 }
 
-export function AgentList({ agents, boards, worked, now }: AgentListProps) {
+export function AgentList({ agents, boards, worked, now, hidden, onHide }: AgentListProps) {
   const boardNames = new Map(boards.map((board) => [board.id, board.name]))
+
+  if (!agents.length && hidden) {
+    return (
+      <p className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+        Every agent is cleared. They come back once they do something on a board.
+      </p>
+    )
+  }
 
   if (!agents.length) {
     return (
@@ -107,6 +119,16 @@ export function AgentList({ agents, boards, worked, now }: AgentListProps) {
                 </dd>
               </div>
             </dl>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label={`Clear ${agent.name}`}
+              title="Clear from the overview until it does something again"
+              className="-mr-1 self-start text-muted-foreground"
+              onClick={() => onHide([agent.name])}
+            >
+              <XIcon />
+            </Button>
           </div>
           {agent.tickets.length > 0 && (
             <ul className="mt-2 grid grid-cols-1 border-t pt-2">

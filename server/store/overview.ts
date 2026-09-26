@@ -230,11 +230,11 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
     return { at: entry.createdAt, kind, actor: entry.actor, boardId: row.board_id }
   })
 
-  const lastActive = new Map(
-    sql
-      .all<{ actor: string; at: string }>('SELECT actor, max(created_at) AS at FROM activity GROUP BY actor')
-      .map((row) => [row.actor, row.at]),
+  const lastActivity = sql.all<{ actor: string; at: string; id: number }>(
+    'SELECT actor, max(created_at) AS at, max(id) AS id FROM activity GROUP BY actor',
   )
+  const lastActive = new Map(lastActivity.map((row) => [row.actor, row.at]))
+  const lastActivityId = new Map(lastActivity.map((row) => [row.actor, row.id]))
   const boardLastActivity = new Map(
     sql
       .all<{ board_id: string; at: string }>(
@@ -256,9 +256,22 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
     }
   }
 
+  // Cleared agents stay out of the list until they do something again.
+  const hiddenUntil = new Map(
+    sql
+      .all<{ name: string; last_activity_id: number }>('SELECT name, last_activity_id FROM hidden_agents')
+      .map((row) => [row.name, row.last_activity_id]),
+  )
+  const isHidden = (name: string) => {
+    const hidden = hiddenUntil.get(name)
+    return hidden !== undefined && (lastActivityId.get(name) ?? 0) <= hidden
+  }
+
   const statusRank = { working: 0, review: 1, idle: 2 }
   const agentNames = new Set([...hostAgents, ...holdings.keys(), ...workedMs.keys()])
+  const hiddenAgents = [...agentNames].filter(isHidden).sort()
   const agents = [...agentNames]
+    .filter((name) => !isHidden(name))
     .map((name): OverviewAgent => {
       const held = (holdings.get(name) ?? []).sort(
         (a, b) => statusRank[a.state] - statusRank[b.state] || a.since.localeCompare(b.since),
@@ -319,6 +332,7 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
       workedMs: sum(workedMs.values()),
     },
     agents,
+    hiddenAgents,
     boards: overviewBoards,
     events,
     sessions: clipped,
@@ -326,3 +340,19 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
     recent,
   }
 }
+
+/** Clears agents from the overview until they next do something on a board. */
+export function hideAgents(names: string[]) {
+  const { id } = sql.get<{ id: number | null }>('SELECT max(id) AS id FROM activity')!
+  for (const name of names) {
+    sql.run(
+      `INSERT INTO hidden_agents (name, last_activity_id) VALUES (?, ?)
+       ON CONFLICT (name) DO UPDATE SET last_activity_id = excluded.last_activity_id`,
+      name,
+      id ?? 0,
+    )
+  }
+}
+
+/** Lists every cleared agent in the overview again. */
+export const showHiddenAgents = () => sql.run('DELETE FROM hidden_agents')

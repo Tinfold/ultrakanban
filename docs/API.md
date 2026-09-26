@@ -282,6 +282,7 @@ interface Overview {
     lastActiveAt: string | null
     agentOf: string[] // ids of boards whose host agent runs under this name
   }[]
+  hiddenAgents: string[] // names cleared from `agents` (see below)
   boards: { id; name; agentEnabled; agentName; open; working; review; completed; events; lastActivityAt }[]
   events: { at: string; kind: 'created' | 'completed' | 'comment' | 'update'; actor: string; boardId: string }[]
   sessions: { agent; ticketId; boardId; start: string; end: string | null }[] // clipped to the range
@@ -296,6 +297,11 @@ review and done columns (a board without a done column uses its last column), so
 submitting for review, merging or releasing stops it. Work time is reconstructed from the activity log. Each
 completion's `cycleMs` runs from when work on the ticket started to done, and `reviewMs` from when it last entered
 the review column to done; either is `null` if the ticket skipped that step.
+
+Stale or duplicate agent names can be cleared from the list: `POST /overview/hidden-agents` with
+`{ "names": ["..."] }` (204) hides them until they next do something on a board (any new activity entry by that
+actor), and `DELETE /overview/hidden-agents` (204) lists every cleared agent again. Totals, charts and sessions still
+include their work.
 
 ## Live updates
 

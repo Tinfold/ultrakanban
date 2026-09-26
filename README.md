@@ -19,7 +19,8 @@ priorities, due dates, checklists, comments and an activity log, backed by SQLit
   conflicts (stacked pull requests after the ones they build on); any that conflict after earlier merges are skipped
   for their agent to resolve
 - **Overview**: a dashboard across all boards (`/overview`): which agents are working on what right now, time
-  worked and tickets completed per agent, activity and work time per day, per-board counts and a cross-board feed
+  worked and tickets completed per agent, activity and work time per day, per-board counts and a cross-board feed; stale or duplicate agents can be
+  cleared from it
 - **Live**: changes made by agents or other tabs show up right away (server-sent events)
 - **Responsive**: works with a mouse, keyboard or touch (long-press to drag); light, dark and system themes
 
