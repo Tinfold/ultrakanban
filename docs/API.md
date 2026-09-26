@@ -44,6 +44,8 @@ Unknown tag names are created automatically when creating or updating tickets.
 
 Work **one ticket per agent, one agent at a time**: claim a ticket, finish it, then start a fresh agent for the
 next one. Parallel agents produce conflicting branches, and reusing one agent across tickets fills its context.
+For unattended work, start each agent as its own process from an external loop (the repository has one in
+`scripts/agent-loop.sh`) rather than keeping one long-lived agent session looping over the board.
 A ready-made Claude Code skill for this workflow lives in the repository at `.claude/skills/ultrakanban/`.
 
 Boards without a review/done column (see board settings) have no pull request requirement: finish tickets with
@@ -100,6 +102,9 @@ interface BoardSummary {
   description: string
   reviewColumnId: string | null // where POST /tickets/:id/review moves tickets
   doneColumnId: string | null // only accepts tickets with a merged pull request
+  githubRepo: string | null // "owner/name" the board's tickets are about
+  agentEnabled: boolean // the host's agent supervisor runs an agent loop for this board
+  agentName: string | null // name that agent claims tickets under ("claude" when null)
   ticketCount: number
   createdAt: string
   updatedAt: string
@@ -108,15 +113,18 @@ interface BoardSummary {
 
 ## Boards
 
-| Method | Path                      | Body / query                                                                       | Returns                                        |
-| ------ | ------------------------- | ---------------------------------------------------------------------------------- | ---------------------------------------------- |
-| GET    | `/boards`                 |                                                                                    | `BoardSummary[]` (most recently updated first) |
-| POST   | `/boards`                 | `{ name, description?, columns?: string[], reviewColumn?: ref, doneColumn?: ref }` | `BoardSummary`                                 |
-| GET    | `/boards/:boardId`        |                                                                                    | `{ board, columns, tags, tickets }`            |
-| PATCH  | `/boards/:boardId`        | `{ name?, description?, reviewColumn?: ref \| null, doneColumn?: ref \| null }`    | `BoardSummary`                                 |
-| DELETE | `/boards/:boardId`        |                                                                                    | `204`                                          |
-| GET    | `/boards/:boardId/export` |                                                                                    | portable board JSON                            |
-| POST   | `/boards/import`          | portable board JSON                                                                | `BoardSummary`                                 |
+| Method | Path                      | Body / query                                                                                                                                                     | Returns                                        |
+| ------ | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| GET    | `/boards`                 |                                                                                                                                                                  | `BoardSummary[]` (most recently updated first) |
+| POST   | `/boards`                 | `{ name, description?, columns?: string[], reviewColumn?: ref, doneColumn?: ref, githubRepo?, agentEnabled?, agentName? }`                                       | `BoardSummary`                                 |
+| GET    | `/boards/:boardId`        |                                                                                                                                                                  | `{ board, columns, tags, tickets }`            |
+| PATCH  | `/boards/:boardId`        | `{ name?, description?, reviewColumn?: ref \| null, doneColumn?: ref \| null, githubRepo?: string \| null, agentEnabled?: boolean, agentName?: string \| null }` | `BoardSummary`                                 |
+| DELETE | `/boards/:boardId`        |                                                                                                                                                                  | `204`                                          |
+| GET    | `/boards/:boardId/export` |                                                                                                                                                                  | portable board JSON                            |
+| POST   | `/boards/import`          | portable board JSON                                                                                                                                              | `BoardSummary`                                 |
+
+`agentEnabled` can only be switched on once `githubRepo` is set (`400` otherwise). It is read by
+`scripts/agent-supervisor.sh`, which runs on the host and keeps one agent loop per enabled board; see the README.
 
 ## Columns and tags
 

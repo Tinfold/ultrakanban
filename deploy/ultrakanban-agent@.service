@@ -1,0 +1,20 @@
+# The agent loop for one board (%i is the board id), run in the board's own clone of its repository.
+# Started and stopped by ultrakanban-agent.service; stopping or restarting that one does the same to these.
+[Unit]
+Description=UltraKanban agent loop for board %i
+PartOf=ultrakanban-agent.service
+After=ultrakanban-agent.service
+StartLimitIntervalSec=0
+
+[Service]
+Environment=KANBAN=http://localhost:4317
+# Seconds between checks of the board and GitHub when there is nothing to do.
+Environment=IDLE_SECONDS=60
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/share/ultrakanban-agent/bin/agent-board.sh %i
+# Restart a loop that dies, waiting longer after each failure (30 s up to 15 min).
+Restart=always
+RestartSec=30
+RestartSteps=6
+RestartMaxDelaySec=15min
+TimeoutStopSec=30

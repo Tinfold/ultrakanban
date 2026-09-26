@@ -121,6 +121,78 @@ its comments, attach screenshots, submit the pull request, and answer review fee
 Also: claim/release specific tickets, move to a column/position, comment, edit with optimistic concurrency
 (`ifVersion`), filter tickets, and subscribe to `GET /api/events`.
 
+### Running agents unattended
+
+Don't leave one Claude Code session looping on the board for days: the Claude Code process grows in memory (and
+swap) over a long session and only gives it back when it exits, and nothing in this project can change that.
+Instead, [`scripts/agent-loop.sh`](scripts/agent-loop.sh) runs the loop outside Claude Code and starts a fresh,
+short-lived `claude -p` for each piece of work, so memory goes back to the OS after every run.
+
+**Set up once, then nothing to do:**
+
+```sh
+scripts/install-services.sh
+```
+
+It installs and enables two systemd user services that start at login: `ultrakanban` (the board, as in
+[Running with Docker](#running-with-docker)) and `ultrakanban-agent`, the agent supervisor. It copies the agent
+scripts and the skill to `~/.local/share/ultrakanban-agent`, so run it again after updating. To keep everything
+running while you are logged out, also run `loginctl enable-linger`.
+
+Then, per board, open **Board menu → Board settings**, set the **GitHub repository** (`owner/name`) and switch on
+**Run the agent on this board** (or `PATCH /api/boards/:id` with `githubRepo` and `agentEnabled`). The supervisor
+([`scripts/agent-supervisor.sh`](scripts/agent-supervisor.sh)) checks the boards every 30 seconds and keeps one
+`ultrakanban-agent@<board>` unit running per enabled board. It stops the loop when the board is switched off or
+deleted, and systemd restarts a loop that dies, with backoff up to 15 minutes. Each board gets its own clone,
+made with `gh repo clone`, under `~/.local/share/ultrakanban-agent/boards/<board>/repo`; your own working copies
+are never touched. Before every run the loop fetches and checks out the default branch (or, for feedback on a
+pull request, its branch) with no local changes, and goes back to the default branch afterwards. Logs:
+`journalctl --user -u ultrakanban-agent -u 'ultrakanban-agent@*' -f`.
+
+Running the services on the host, not in the containers, is deliberate: the agents use your `claude` login, your
+`gh` auth and git.
+
+**What the loop does.** Each round, it first checks the tickets the agent holds and starts a run for one with new
+feedback: a ticket comment, a pull request comment, review or inline review comment, a check on the latest commit
+that ran and failed, or merge conflicts. The prompt lists exactly what is new. Bots and the agent's own replies
+don't count: the agent posts from the same GitHub account as you, so the skill makes it end every pull request
+comment with `<!-- ultrakanban:<agent> -->`, which the loop ignores. A pull request closed without merging moves
+its ticket to the `Cancelled` column (`CANCELLED_COLUMN`; add it to the board, the loop won't fall back to Todo)
+and unassigns it, so it is never picked up again. When none of its tickets needs work, it claims a new Todo ticket,
+and when there is nothing to do at all it waits `IDLE_SECONDS` (60 under the supervisor).
+
+Nothing is missed, even while a run is going: before each run the loop notes the newest ticket activity id,
+pull request comment, review and inline comment ids, and the head commit's checks and conflict state. It saves
+that as the ticket's watermark (one small JSON file per ticket, removed when the ticket is no longer the agent's)
+only after the run succeeds. Anything newer starts the next run. A missing or unreadable state file means everything
+is handed over again, never skipped.
+
+CI failing for reasons other than the code can't make it loop. A failing check counts once per commit and check
+name, so re-running CI doesn't start a run. Checks that never ran or failed around the code (`startup_failure`,
+`action_required`, `timed_out`, billing or spending-limit messages, jobs where no step failed) never start a run;
+the loop leaves one ticket note per commit saying CI isn't running. Cancelled, skipped and neutral checks are
+ignored. On top of that, after `MAX_CI_RUNS` (default 2) runs in a row started only by CI, it stops starting CI runs
+for the ticket, with a note, until someone comments. And the agent is told not to push anything when a failure
+isn't from the code.
+
+A failed run saves nothing and is retried with backoff (`RETRY_SECONDS`, doubling, up to `MAX_ATTEMPTS` in a row,
+then again when new feedback arrives). Other settings are listed at the top of the script. It needs `curl`, `jq`,
+`timeout`, git, an authenticated `gh` and the skill.
+
+**Permissions:** the loop passes `--dangerously-skip-permissions`, so with the agent switched on, `claude` runs
+automatically as your user on the host and can execute any command, edit any file and use the network without
+asking. Run it on a machine, VM or user account that only has access to this work (Claude Code may refuse the flag
+as root). `SKIP_PERMISSIONS=0` turns it off; then allow the tools the work needs in the project's
+`.claude/settings.json`.
+
+To run the loop by hand instead, start it in a dedicated clone of the repository:
+
+```sh
+KANBAN=http://localhost:4317 BOARD=$BOARD AGENT_LOOP_CLEAN=1 ~/ultrakanban/scripts/agent-loop.sh
+```
+
+`AGENT_LOOP_CLEAN=1` lets it reset the checkout before each run; leave it out in a working copy of your own.
+
 ## Development
 
 ```sh

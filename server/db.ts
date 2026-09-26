@@ -89,6 +89,11 @@ const MIGRATIONS = [
   );
   CREATE INDEX attachments_ticket ON attachments(ticket_id, created_at);
   `,
+  `
+  ALTER TABLE boards ADD COLUMN github_repo TEXT;
+  ALTER TABLE boards ADD COLUMN agent_enabled INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE boards ADD COLUMN agent_name TEXT;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

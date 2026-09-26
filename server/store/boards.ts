@@ -1,7 +1,7 @@
 import type { BoardDetail, BoardSummary } from '../../shared/domain.ts'
 import type { CreateBoardInput, UpdateBoardInput } from '../../shared/schemas.ts'
 import { newId, now, sql, touchBoard, updateRow } from '../db.ts'
-import { notFound } from '../errors.ts'
+import { badRequest, notFound } from '../errors.ts'
 import { createColumn, listColumns, resolveColumn } from './columns.ts'
 import { listTags } from './tags.ts'
 import { listTickets } from './tickets.ts'
@@ -12,6 +12,9 @@ interface BoardRow {
   description: string
   review_column_id: string | null
   done_column_id: string | null
+  github_repo: string | null
+  agent_enabled: number
+  agent_name: string | null
   ticket_count: number
   created_at: string
   updated_at: string
@@ -27,6 +30,9 @@ const toBoard = (row: BoardRow): BoardSummary => ({
   description: row.description,
   reviewColumnId: row.review_column_id,
   doneColumnId: row.done_column_id,
+  githubRepo: row.github_repo,
+  agentEnabled: row.agent_enabled === 1,
+  agentName: row.agent_name,
   ticketCount: row.ticket_count,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -58,7 +64,8 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     timestamp,
   )
   for (const name of input.columns ?? []) createColumn(id, { name })
-  return updateBoard(id, { reviewColumn: input.reviewColumn, doneColumn: input.doneColumn })
+  const { reviewColumn, doneColumn, githubRepo, agentEnabled, agentName } = input
+  return updateBoard(id, { reviewColumn, doneColumn, githubRepo, agentEnabled, agentName })
 }
 
 export function updateBoard(id: string, input: UpdateBoardInput): BoardSummary {
@@ -69,8 +76,15 @@ export function updateBoard(id: string, input: UpdateBoardInput): BoardSummary {
     description: input.description,
     review_column_id: columnId(input.reviewColumn),
     done_column_id: columnId(input.doneColumn),
+    github_repo: input.githubRepo,
+    agent_enabled: input.agentEnabled === undefined ? undefined : Number(input.agentEnabled),
+    agent_name: input.agentName,
   })
-  return getBoard(id)
+  const board = getBoard(id)
+  if (board.agentEnabled && !board.githubRepo) {
+    throw badRequest('Set the GitHub repository before switching the agent on')
+  }
+  return board
 }
 
 export function deleteBoard(id: string) {

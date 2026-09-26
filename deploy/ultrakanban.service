@@ -1,0 +1,14 @@
+# The board itself (app + nginx containers). Installed by scripts/install-services.sh, which fills in the paths.
+[Unit]
+Description=UltraKanban
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+ExecStart=@COMPOSE@ -f @REPO@/docker-compose.yml up -d
+ExecStop=@COMPOSE@ -f @REPO@/docker-compose.yml down
+
+[Install]
+WantedBy=default.target

@@ -8,7 +8,12 @@ import {
   type Ticket,
 } from '@shared/domain'
 
-export type BoardPatch = Partial<Pick<BoardSummary, 'name' | 'description' | 'reviewColumnId' | 'doneColumnId'>>
+export type BoardPatch = Partial<
+  Pick<
+    BoardSummary,
+    'name' | 'description' | 'reviewColumnId' | 'doneColumnId' | 'githubRepo' | 'agentEnabled' | 'agentName'
+  >
+>
 export type TicketPatch = Partial<
   Pick<Ticket, 'title' | 'description' | 'priority' | 'assignee' | 'dueDate' | 'tagIds'>
 >

@@ -17,6 +17,16 @@ const pullRequestUrl = z
     (url) => parsePullRequestUrl(url),
     'Must be a GitHub pull request URL, e.g. https://github.com/owner/repo/pull/123',
   )
+const githubRepo = z
+  .string()
+  .trim()
+  .regex(/^[\w.-]+\/[\w.-]+$/, 'Must be a GitHub repository as owner/name')
+  .nullable()
+const agentName = z
+  .string()
+  .trim()
+  .regex(/^[\w.-]{1,64}$/, 'Use letters, digits, ".", "_" and "-" only')
+  .nullable()
 /** Skips the merged-pull-request requirement of the board's done column. Meant for humans, not agents. */
 const force = z.boolean().optional()
 
@@ -26,6 +36,9 @@ export const createBoardSchema = z.object({
   columns: z.array(name).max(50).optional(),
   reviewColumn: ref.optional(),
   doneColumn: ref.optional(),
+  githubRepo: githubRepo.optional(),
+  agentEnabled: z.boolean().optional(),
+  agentName: agentName.optional(),
 })
 
 export const updateBoardSchema = z.object({
@@ -33,6 +46,9 @@ export const updateBoardSchema = z.object({
   description: z.string().max(5000).optional(),
   reviewColumn: ref.nullable().optional(),
   doneColumn: ref.nullable().optional(),
+  githubRepo: githubRepo.optional(),
+  agentEnabled: z.boolean().optional(),
+  agentName: agentName.optional(),
 })
 
 export const createColumnSchema = z.object({

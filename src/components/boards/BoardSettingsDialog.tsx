@@ -73,11 +73,15 @@ export function BoardSettingsDialog({ open, onOpenChange }: { open: boolean; onO
       const value = String(data.get(field) ?? NONE)
       return value === NONE ? null : value
     }
+    const text = (field: string) => String(data.get(field) ?? '').trim() || null
     void actions.updateBoard({
       name,
       description: String(data.get('description') ?? ''),
       reviewColumnId: columnId('reviewColumn'),
       doneColumnId: columnId('doneColumn'),
+      githubRepo: text('githubRepo'),
+      agentName: text('agentName'),
+      agentEnabled: data.get('agentEnabled') === 'on',
     })
     onOpenChange(false)
   }
@@ -125,6 +129,49 @@ export function BoardSettingsDialog({ open, onOpenChange }: { open: boolean; onO
               </div>
             </div>
             <GitHubStatus />
+          </fieldset>
+
+          <fieldset className="grid gap-3 border-t pt-4">
+            <legend className="sr-only">Agent</legend>
+            <div className="grid gap-1">
+              <h3 className="text-sm font-medium">Agent</h3>
+              <p className="text-xs text-muted-foreground">
+                When on, the agent service on the host works this board: it claims tickets, opens pull requests in its
+                own clone of the repository and answers review feedback. It runs Claude Code without permission prompts.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-2">
+                <Label htmlFor="board-settings-repo">GitHub repository</Label>
+                <Input
+                  id="board-settings-repo"
+                  name="githubRepo"
+                  defaultValue={detail.board.githubRepo ?? ''}
+                  placeholder="owner/name"
+                  pattern="[\w.\-]+/[\w.\-]+"
+                  title="owner/name"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="board-settings-agent-name">Agent name</Label>
+                <Input
+                  id="board-settings-agent-name"
+                  name="agentName"
+                  defaultValue={detail.board.agentName ?? ''}
+                  placeholder="claude"
+                  pattern="[\w.\-]{1,64}"
+                />
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                name="agentEnabled"
+                defaultChecked={detail.board.agentEnabled}
+                className="size-4 accent-primary"
+              />
+              Run the agent on this board
+            </label>
           </fieldset>
 
           <DialogFooter>
