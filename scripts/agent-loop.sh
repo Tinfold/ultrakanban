@@ -9,7 +9,7 @@
 #   - a ticket comment from someone else
 #   - a pull request comment, review or inline review comment (not from bots, and not the agent's own replies,
 #     which end with the marker line <!-- ultrakanban:AGENT -->)
-#   - failing checks on the pull request's latest commit
+#   - checks on the pull request's latest commit that ran and failed (see ci_status for what counts)
 #   - merge conflicts with the base branch
 # A pull request closed without merging moves its ticket to the cancelled column. Only when none of its tickets
 # needs work does it claim the next ticket from the todo column.
@@ -21,6 +21,11 @@
 # run, starts the next run. A failed run saves nothing and is retried after RETRY_SECONDS, doubling each time, up
 # to MAX_ATTEMPTS; new feedback resets the count. A missing or unreadable state file means handling everything
 # again, never skipping it.
+#
+# CI can fail for reasons that aren't the code, and a fix can fail again. So a failing check counts once per commit
+# and check name (re-running CI on the same commit doesn't start a run), checks that never ran or failed for billing,
+# runner or approval reasons never start a run (the loop notes them on the ticket once per commit), and after
+# MAX_CI_RUNS runs in a row started only by CI, it stops starting CI runs for the ticket until a human comments.
 #
 # Run it from the repository the tickets are about, with the ultrakanban skill installed and gh authenticated:
 #
@@ -35,6 +40,7 @@
 #   TICKET_TIMEOUT      stop a run that takes longer than this, as accepted by timeout(1) (default: 4h)
 #   RETRY_SECONDS       wait before retrying a failed run, doubled after each failure (default: 600)
 #   MAX_ATTEMPTS        failed runs in a row before waiting for new feedback (default: 3)
+#   MAX_CI_RUNS         runs in a row started only by failing CI, with no human feedback between (default: 2)
 #   SKIP_PERMISSIONS    1 passes --dangerously-skip-permissions to claude, 0 doesn't (default: 1)
 #   CLAUDE_ARGS         extra arguments for claude, e.g. "--model opus"
 #   STATE_DIR           where watermarks are kept (default: $XDG_STATE_HOME/ultrakanban-agent-loop/BOARD-AGENT)
@@ -55,6 +61,10 @@ IDLE_SECONDS=${IDLE_SECONDS:-300}
 TICKET_TIMEOUT=${TICKET_TIMEOUT:-4h}
 RETRY_SECONDS=${RETRY_SECONDS:-600}
 MAX_ATTEMPTS=${MAX_ATTEMPTS:-3}
+MAX_CI_RUNS=${MAX_CI_RUNS:-2}
+# Check output or annotations that mean CI itself didn't run, not that the code failed.
+INFRA_PATTERN='billing|spending limit|payments have failed|account is locked|account has been locked'
+INFRA_PATTERN+='|was not started|minutes quota|exceeded .*(minutes|quota)'
 STATE_DIR=${STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/ultrakanban-agent-loop/$BOARD-${AGENT//\//_}}
 read -r -a claude_args <<<"${CLAUDE_ARGS:-}"
 if [[ ${SKIP_PERMISSIONS:-1} == 1 ]]; then
@@ -62,51 +72,66 @@ if [[ ${SKIP_PERMISSIONS:-1} == 1 ]]; then
 fi
 mkdir -p "$STATE_DIR" || exit 1
 
-# Finds a ticket's new feedback. Input: its activity, open pull request (gh pr view) or null, pull request
-# comments, reviews and inline comments (GitHub REST), and its saved state. Prints the snapshot to save after a
-# successful run, the items to hand over, their fingerprint, and whether to run now (backoff after failures).
+# Finds a ticket's new feedback. Input: its activity, open pull request (gh pr view) or null, the classified checks
+# of its head commit (ci_status) or null, pull request comments, reviews and inline comments (GitHub REST), and its
+# saved state. Prints the snapshot to save after a successful run, the items to hand over, their fingerprint,
+# whether to run now (backoff after failures), and which notes to leave (CI not running, CI run cap reached).
 read -r -d '' TRIAGE <<'JQ'
 def bot: (.user.type // "") == "Bot" or ((.user.login // "") | endswith("[bot]"));
 def feedback: (bot | not) and ((.body // "") | contains($marker) | not);
 def clip: if length > 2000 then .[:2000] + " [...]" else . end;
-def failing: IN("FAILURE", "ERROR", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE");
-. as [$activity, $pr, $issue, $reviews, $inline, $s]
+. as [$activity, $pr, $ci, $issue, $reviews, $inline, $s]
 | ($pr // {}) as $p
-| ([$p.statusCheckRollup // [] | .[] | select((.conclusion // .state // "") | failing) | .name // .context]
-    | unique) as $failed
-| (if $failed == [] then "" else "\($p.headRefOid):\($failed | join(","))" end) as $checks
+| ($s.checks | if type == "object" then . else {} end) as $seen
+| (if $ci != null and $seen.sha == $ci.sha then $seen.names // [] else [] end) as $handedOver
+| (($ci.code // []) - $handedOver) as $newFailures
 | (if $p.mergeable == "CONFLICTING" or $p.mergeStateStatus == "DIRTY" then "\($p.headRefOid):\($p.baseRefOid)"
    else "" end) as $conflict
+| [ ($activity[] | select(.type == "comment" and .id > ($s.activity // 0) and .actor != $agent and .actor != $loop)
+      | {key: "t\(.id)", text: "Ticket comment from \(.actor):\n\(.data.body // "" | clip)"}),
+    ($issue[] | select(.id > ($s.issue // 0) and feedback)
+      | {key: "i\(.id)", text: "Pull request comment from \(.user.login) (\(.html_url)):\n\(.body // "" | clip)"}),
+    ($reviews[] | select(.id > ($s.review // 0) and feedback and .state != "PENDING")
+      | select(.state != "COMMENTED" or (.body // "") != "")
+      | {key: "r\(.id)",
+         text: "Pull request review (\(.state)) from \(.user.login) (\(.html_url)):\n\(.body // "" | clip)"}),
+    ($inline[] | select(.id > ($s.inline // 0) and feedback)
+      | {key: "c\(.id)", text: ("Inline review comment from \(.user.login) "
+         + "on \(.path):\(.line // .original_line // "?") (\(.html_url)):\n\(.body // "" | clip)")})
+  ] as $human
+| [ if $newFailures != [] then
+      {key: "checks \($ci.sha):\($newFailures | join(","))",
+       text: "Failing checks on \($ci.sha[:7]): \($newFailures | join(", "))"}
+    else empty end ] as $ciItems
+| (($s.ciRuns // 0) >= $maxci and $human == [] and $ciItems != []) as $capped
+| (if $capped then [] else $ciItems end) as $ciUsed
+| (if $human != [] then 0 elif $ciUsed != [] then ($s.ciRuns // 0) + 1 else ($s.ciRuns // 0) end) as $ciRuns
+| ($ci != null and $ci.infra != [] and $s.infraNoted != $ci.sha) as $infraNote
+| ($capped and ($s.capNoted | not)) as $capNote
 | {
-    snapshot: {
+    snapshot: ({
       activity: ([$activity[].id, $s.activity // 0] | max),
       issue: ([$issue[].id, $s.issue // 0] | max),
       review: ([$reviews[].id, $s.review // 0] | max),
       inline: ([$inline[].id, $s.inline // 0] | max),
-      checks: $checks,
-      conflict: $conflict
-    },
-    items: [
+      checks: (if $ci == null or $capped then $seen else {sha: $ci.sha, names: ($handedOver + $ci.code | unique)} end),
+      conflict: $conflict,
+      ciRuns: $ciRuns,
+      infraNoted: (if $infraNote then $ci.sha else $s.infraNoted end),
+      capNoted: (if $ciRuns != 0 and ($capNote or $s.capNoted == true) then true else null end)
+    } | with_entries(select(.value != null))),
+    items: ([
       (if $s.claim then {key: "claim", text: ("The previous run on this ticket didn't finish. "
         + "Check what it got done and carry on from there.")} else empty end),
-      ($activity[] | select(.type == "comment" and .id > ($s.activity // 0) and .actor != $agent and .actor != $loop)
-        | {key: "t\(.id)", text: "Ticket comment from \(.actor):\n\(.data.body // "" | clip)"}),
-      ($issue[] | select(.id > ($s.issue // 0) and feedback)
-        | {key: "i\(.id)", text: "Pull request comment from \(.user.login) (\(.html_url)):\n\(.body // "" | clip)"}),
-      ($reviews[] | select(.id > ($s.review // 0) and feedback and .state != "PENDING")
-        | select(.state != "COMMENTED" or (.body // "") != "")
-        | {key: "r\(.id)",
-           text: "Pull request review (\(.state)) from \(.user.login) (\(.html_url)):\n\(.body // "" | clip)"}),
-      ($inline[] | select(.id > ($s.inline // 0) and feedback)
-        | {key: "c\(.id)", text: ("Inline review comment from \(.user.login) "
-           + "on \(.path):\(.line // .original_line // "?") (\(.html_url)):\n\(.body // "" | clip)")}),
-      (if $checks != "" and $checks != ($s.checks // "") then
-        {key: "checks \($checks)", text: "Failing checks on \($p.headRefOid[:7]): \($failed | join(", "))"}
-       else empty end),
+      $human[], $ciUsed[],
       (if $conflict != "" and $conflict != ($s.conflict // "") then
         {key: "conflict \($conflict)", text: "The pull request has merge conflicts with \($p.baseRefName)"}
        else empty end)
-    ]
+    ]),
+    ci: ($ciUsed != []),
+    ciRuns: $ciRuns,
+    infraNote: (if $infraNote then $ci else null end),
+    capNote: $capNote
   }
 | .fingerprint = (.items | map(.key) | join(" "))
 | .run = (.items != [] and (($s.failedFor // null) != .fingerprint or (($s.failures // 0) < $max
@@ -145,6 +170,61 @@ write_state() {
   printf '%s\n' "$2" >"$file.tmp" && mv "$file.tmp" "$file"
 }
 
+# Applies a jq filter to a ticket's saved state; $v in the filter is the third argument.
+update_state() {
+  write_state "$1" "$(read_state "$1" | jq -c --arg v "${3:-}" "$2")"
+}
+
+# Classifies the checks on a commit that didn't pass. Only checks that ran and failed are "code" failures, which
+# count as feedback. "infra" ones never start a run: startup_failure, action_required, timed_out (usually a hung
+# runner, and retrying it tends to loop), failures whose output or annotations mention billing, spending limits or a
+# job that was not started, and GitHub Actions jobs in which no step failed (e.g. no step ran at all). Cancelled,
+# skipped, neutral and stale checks are ignored. Legacy commit statuses count as code failures for "failure" and as
+# infra for "error". Prints {sha, code: [names], infra: [{name, why}]}.
+ci_status() {
+  local repo=$1 sha=$2 runs statuses id name conclusion app count text why job
+  runs=$(gh api --paginate "repos/$repo/commits/$sha/check-runs?filter=latest&per_page=100" </dev/null |
+    jq -rs '[.[].check_runs[]] | group_by(.name) | map(max_by(.id))[]
+      | select(.status == "completed")
+      | select(.conclusion | IN("failure", "timed_out", "startup_failure", "action_required"))
+      | [.id, .name, .conclusion, .app.slug // "", .output.annotations_count // 0,
+         ([.output.title, .output.summary, .output.text] | map(select(.)) | join(" ") | gsub("[\t\n\r]"; " "))]
+      | @tsv') || return 1
+  statuses=$(gh api "repos/$repo/commits/$sha/status" </dev/null |
+    jq -r '.statuses[]? | select(.state == "failure" or .state == "error")
+      | [.context, .state, (.description // "" | gsub("[\t\n\r]"; " "))] | @tsv') || return 1
+  {
+    while IFS=$'\t' read -r -u 4 id name conclusion app count text; do
+      [[ -n $id ]] || continue
+      why=
+      if [[ $conclusion != failure ]]; then
+        why=$conclusion
+      else
+        if [[ $count != 0 ]]; then
+          text+=" $(gh api "repos/$repo/check-runs/$id/annotations" </dev/null | jq -r '[.[].message] | join(" ")')"
+        fi
+        if grep -qiE "$INFRA_PATTERN" <<<"$text"; then
+          why=$(grep -oiE ".{0,60}($INFRA_PATTERN).{0,60}" <<<"$text" | head -1)
+        elif [[ $app == github-actions ]] && job=$(gh api "repos/$repo/actions/jobs/$id" </dev/null) &&
+          ! jq -e 'any(.steps[]?; .conclusion == "failure")' >/dev/null <<<"$job"; then
+          why="no step ran and failed"
+        fi
+      fi
+      if [[ -n $why ]]; then printf 'infra\t%s\t%s\n' "$name" "$why"; else printf 'code\t%s\n' "$name"; fi
+    done 4<<<"$runs"
+    while IFS=$'\t' read -r -u 4 name conclusion text; do
+      [[ -n $name ]] || continue
+      if [[ $conclusion == error ]] || grep -qiE "$INFRA_PATTERN" <<<"$text"; then
+        printf 'infra\t%s\t%s\n' "$name" "status $conclusion: $text"
+      else
+        printf 'code\t%s\n' "$name"
+      fi
+    done 4<<<"$statuses"
+  } | jq -Rn --arg sha "$sha" '[inputs | split("\t")]
+    | {sha: $sha, code: ([.[] | select(.[0] == "code") | .[1]] | unique),
+       infra: [.[] | select(.[0] == "infra") | {name: .[1], why: (.[2] | gsub("^\\s+|\\s+$"; ""))}]}'
+}
+
 run_claude() {
   timeout --foreground "$TICKET_TIMEOUT" claude -p ${claude_args[@]+"${claude_args[@]}"} <<<"$1"
 }
@@ -152,7 +232,7 @@ run_claude() {
 # Runs claude on a ticket. On success saves the snapshot as the ticket's watermark; on failure keeps the old one
 # and counts the failure for the backoff.
 run_on_ticket() {
-  local id=$1 prompt=$2 snapshot=$3 fingerprint=$4 code
+  local id=$1 prompt=$2 snapshot=$3 fingerprint=$4 ci_runs=${5:-0} code
   run_claude "$prompt"
   code=$?
   if [[ $code == 0 ]]; then
@@ -161,7 +241,8 @@ run_on_ticket() {
   fi
   log "claude exited with status $code on $id"
   write_state "$id" "$(read_state "$id" | jq -c --arg fp "$fingerprint" --argjson now "$(date +%s)" \
-    '. + {failures: (if .failedFor == $fp then (.failures // 0) + 1 else 1 end), failedAt: $now, failedFor: $fp}')"
+    --argjson ci "$ci_runs" '. + {failures: (if .failedFor == $fp then (.failures // 0) + 1 else 1 end),
+      failedAt: $now, failedFor: $fp, ciRuns: $ci} | if $ci == 0 then del(.capNoted) else . end')"
   note "$id" "Agent run stopped with exit status $code (124 means it hit the $TICKET_TIMEOUT timeout). It is \
 retried with backoff, up to $MAX_ATTEMPTS runs in a row; after that, new feedback such as a ticket comment retries it."
 }
@@ -197,8 +278,8 @@ cancel() {
 
 # Checks the tickets the agent holds and handles the first one that needs work. Returns 1 if none did.
 handle_feedback() {
-  local board review cancelled tickets file id number column pr_url repo pr_number pr issue reviews inline activity \
-    state triage items
+  local board review cancelled tickets file id number column pr_url repo pr_number pr ci issue reviews inline \
+    activity state triage items ci_note
   board=$(get "/boards/$BOARD") || { log "can't read board $BOARD"; return 1; }
   review=$(jq -r '.board.reviewColumnId // ""' <<<"$board")
   cancelled=$(jq -r --arg name "$CANCELLED_COLUMN" \
@@ -219,10 +300,10 @@ handle_feedback() {
 
   while IFS=$'\t' read -r -u 3 id number column pr_url repo pr_number; do
     [[ -n $id ]] || continue
-    pr=null issue='[]' reviews='[]' inline='[]'
+    pr=null ci=null issue='[]' reviews='[]' inline='[]'
     if [[ $pr_url != - ]]; then
       pr=$(gh pr view "$pr_url" \
-        --json state,mergeable,mergeStateStatus,headRefOid,baseRefOid,baseRefName,statusCheckRollup </dev/null) ||
+        --json state,mergeable,mergeStateStatus,headRefOid,baseRefOid,baseRefName </dev/null) ||
         { log "can't read $pr_url"; continue; }
       case $(jq -r .state <<<"$pr") in
         OPEN)
@@ -230,6 +311,8 @@ handle_feedback() {
             reviews=$(gh_list "repos/$repo/pulls/$pr_number/reviews?per_page=100") &&
             inline=$(gh_list "repos/$repo/pulls/$pr_number/comments?per_page=100") ||
             { log "can't read the comments on $pr_url"; continue; }
+          ci=$(ci_status "$repo" "$(jq -r .headRefOid <<<"$pr")") ||
+            { log "can't read the checks on $pr_url"; continue; }
           ;;
         CLOSED)
           if [[ $column == "$review" ]]; then
@@ -244,11 +327,25 @@ handle_feedback() {
 
     activity=$(get "/tickets/$id/activity") || { log "can't read the activity of $id"; continue; }
     state=$(read_state "$id")
-    triage=$(printf '%s\n' "$activity" "$pr" "$issue" "$reviews" "$inline" "$state" |
+    triage=$(printf '%s\n' "$activity" "$pr" "$ci" "$issue" "$reviews" "$inline" "$state" |
       jq -cs --arg agent "$AGENT" --arg loop "$LOOP_ACTOR" --arg marker "$MARKER" --argjson now "$(date +%s)" \
-        --argjson retry "$RETRY_SECONDS" --argjson max "$MAX_ATTEMPTS" "$TRIAGE") ||
+        --argjson retry "$RETRY_SECONDS" --argjson max "$MAX_ATTEMPTS" --argjson maxci "$MAX_CI_RUNS" "$TRIAGE") ||
       { log "can't triage $id"; continue; }
-    activity= pr= issue= reviews= inline=
+    activity= pr= ci= issue= reviews= inline=
+
+    if [[ $(jq -r '.infraNote != null' <<<"$triage") == true ]]; then
+      ci_note=$(jq -r '.infraNote | "CI on \(.sha[:7]) didn'"'"'t run properly, so no agent run was started for it: "
+        + (.infra | map("\(.name) (\(.why))") | join("; "))' <<<"$triage")
+      log "ticket #$number ($id): $ci_note"
+      note "$id" "$ci_note. Someone needs to check CI (billing and spending limits, runners, approvals)."
+      update_state "$id" '.infraNoted = $v' "$(jq -r .infraNote.sha <<<"$triage")"
+    fi
+    if [[ $(jq -r .capNote <<<"$triage") == true ]]; then
+      log "ticket #$number ($id): $MAX_CI_RUNS runs in a row for failing CI; not starting more until a human comments"
+      note "$id" "The agent made $MAX_CI_RUNS runs in a row for failing CI with no human feedback in between, so the \
+loop stopped starting runs for CI on this ticket. Comment on the ticket to let it try again."
+      update_state "$id" '.capNoted = true'
+    fi
     [[ $(jq -r .run <<<"$triage") == true ]] || continue
 
     items=$(jq -r '.items | map(.text) | join("\n\n---\n\n")' <<<"$triage")
@@ -264,9 +361,13 @@ Read the ticket's activity and, if it has a pull request, its comments, reviews,
 then address everything above: answer questions, make the requested changes, fix failing checks, and resolve merge
 conflicts by merging the base branch into the pull request's branch. Commit and push to that branch.
 Reply where each piece of feedback was given: on the pull request for pull request feedback (with the marker line).
-If the ticket isn't in review yet, keep working it and submit it for review.
+If the ticket isn't in review yet, keep working it and submit it for review.$(
+      [[ $(jq -r .ci <<<"$triage") == true ]] && printf '%s' "
+Failing CI started this run. First find out from the failing job's log whether the failure comes from the code. If it
+doesn't (billing or spending limits, runners or infrastructure, a flaky test unrelated to the change, missing
+secrets), don't push anything: explain what you found in the ticket comment and exit.")
 Finish with a ticket comment summarising what you did, then exit." \
-      "$(jq -c .snapshot <<<"$triage")" "$(jq -r .fingerprint <<<"$triage")"
+      "$(jq -c .snapshot <<<"$triage")" "$(jq -r .fingerprint <<<"$triage")" "$(jq -r .ciRuns <<<"$triage")"
     return 0
   done 3<<<"$tickets"
   return 1

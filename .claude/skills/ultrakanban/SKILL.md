@@ -114,6 +114,12 @@ In a non-interactive run (`claude -p`, e.g. started by `scripts/agent-loop.sh`),
 the feedback the prompt lists (and anything else new), finish with a ticket comment summarising what you did,
 then exit. The loop starts a new run when more feedback arrives.
 
+Failing CI isn't always about the code. Before fixing a failing check, read the failing job's log
+(`gh run view <run id> --log-failed`). If the failure doesn't come from the code (billing or spending limits,
+runners that didn't start or were lost, infrastructure, a flaky test unrelated to the change, missing secrets),
+don't push anything, not even an empty commit to re-trigger CI: explain what you found in a ticket comment and
+stop there. A human has to fix CI.
+
 ## Handling errors
 
 | Response                      | Meaning                                                                    |

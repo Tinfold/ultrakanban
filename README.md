@@ -134,8 +134,8 @@ KANBAN=http://localhost:4317 BOARD=$BOARD ~/ultrakanban/scripts/agent-loop.sh
 ```
 
 Each round, it first checks the tickets the agent holds and starts a run for one with new feedback: a ticket
-comment, a pull request comment, review or inline review comment, failing checks on the latest commit, or merge
-conflicts. The prompt lists exactly what is new. Bots and the agent's own replies don't count: the agent posts
+comment, a pull request comment, review or inline review comment, a check on the latest commit that ran and failed,
+or merge conflicts. The prompt lists exactly what is new. Bots and the agent's own replies don't count: the agent posts
 from the same GitHub account as you, so the skill makes it end every pull request comment with
 `<!-- ultrakanban:<agent> -->`, which the loop ignores. A pull request closed without merging moves its ticket to
 the `Cancelled` column (`CANCELLED_COLUMN`; add it to the board, the loop won't fall back to Todo) and unassigns
@@ -146,6 +146,14 @@ Nothing is missed, even while a run is going: before each run the loop notes the
 pull request comment, review and inline comment ids, and the head commit's checks and conflict state. It saves
 that as the ticket's watermark (one small JSON file per ticket under `$XDG_STATE_HOME/ultrakanban-agent-loop/`,
 removed when the ticket is no longer the agent's) only after the run succeeds. Anything newer starts the next run.
+CI failing for reasons other than the code can't make it loop. A failing check counts once per commit and check
+name, so re-running CI doesn't start a run. Checks that never ran or failed around the code (`startup_failure`,
+`action_required`, `timed_out`, billing or spending-limit messages, jobs where no step failed) never start a run;
+the loop leaves one ticket note per commit saying CI isn't running. Cancelled, skipped and neutral checks are
+ignored. On top of that, after `MAX_CI_RUNS` (default 2) runs in a row started only by CI, it stops starting CI runs
+for the ticket, with a note, until someone comments. And the agent is told not to push anything when a failure
+isn't from the code.
+
 A failed run saves nothing and is retried with backoff (`RETRY_SECONDS`, doubling, up to `MAX_ATTEMPTS` in a row,
 then again when new feedback arrives). A missing or unreadable state file means everything is handed over again,
 never skipped. Other settings are listed at the top of the script. It needs `curl`, `jq`, `timeout`, an
