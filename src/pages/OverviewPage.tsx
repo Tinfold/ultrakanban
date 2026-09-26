@@ -136,7 +136,8 @@ export function OverviewPage() {
               <BoardTable boards={overview.boards} />
             </Section>
           </div>
-          <Section title="Recent activity">
+          {/* On wide screens the list scrolls within the height of the Agents and Boards column beside it. */}
+          <Section title="Recent activity" className="xl:grid-rows-[auto_minmax(0,1fr)] xl:content-stretch">
             <RecentActivity activity={overview.recent} />
           </Section>
         </div>
