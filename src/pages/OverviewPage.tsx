@@ -100,9 +100,19 @@ function formatMedian(values: number[]) {
   return value === null ? '—' : formatDuration(value)
 }
 
-function Section({ id, title, children }: { id: SectionId; title: string; children: ReactNode }) {
+function Section({
+  id,
+  title,
+  children,
+  className,
+}: {
+  id: SectionId
+  title: string
+  children: ReactNode
+  className?: string
+}) {
   return (
-    <section id={id} className="grid scroll-mt-4 grid-cols-1 content-start gap-3">
+    <section id={id} className={cn('grid scroll-mt-4 grid-cols-1 content-start gap-3', className)}>
       <h2 className="text-sm font-medium">{title}</h2>
       {children}
     </section>
@@ -250,11 +260,17 @@ export function OverviewPage() {
               <BoardTable boards={overview.boards} />
             </Section>
           </div>
-          <div className="grid grid-cols-1 content-start gap-6">
+          {/* On wide screens Recent activity takes what's left of the height of the Agents and Boards column
+              beside it, and its list scrolls within that. */}
+          <div className="grid grid-cols-1 content-start gap-6 xl:grid-rows-[auto_minmax(0,1fr)] xl:content-stretch">
             <Section id={SECTIONS.attention} title="Needs attention">
               <NeedsAttention review={attention.review} stalled={attention.stalled} now={now} />
             </Section>
-            <Section id={SECTIONS.recent} title="Recent activity">
+            <Section
+              id={SECTIONS.recent}
+              title="Recent activity"
+              className="xl:grid-rows-[auto_minmax(0,1fr)] xl:content-stretch"
+            >
               <RecentActivity activity={overview.recent} />
             </Section>
           </div>
