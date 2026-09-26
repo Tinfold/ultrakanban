@@ -15,6 +15,7 @@ export function useLiveUpdates() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.board(boardId) })
       void queryClient.invalidateQueries({ queryKey: queryKeys.allActivity })
       void queryClient.invalidateQueries({ queryKey: queryKeys.allAttachments })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.allOverviews })
     })
     let connected = false
     source.addEventListener('open', () => {

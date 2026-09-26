@@ -1,4 +1,15 @@
-import type { Activity, ApiErrorBody, Attachment, BoardDetail, BoardSummary, Column, Tag, Ticket } from '@shared/domain'
+import type {
+  Activity,
+  ApiErrorBody,
+  Attachment,
+  BoardDetail,
+  BoardSummary,
+  Column,
+  Overview,
+  OverviewRange,
+  Tag,
+  Ticket,
+} from '@shared/domain'
 import type {
   BoardExport,
   CreateBoardInput,
@@ -82,6 +93,7 @@ export const api = {
   },
   deleteAttachment: (attachmentId: string) => request<void>('DELETE', `/attachments/${attachmentId}`),
   addComment: (ticketId: string, body: string) => request<Activity>('POST', `/tickets/${ticketId}/comments`, { body }),
+  overview: (days: OverviewRange) => request<Overview>('GET', `/overview${query({ days: String(days) })}`),
 }
 
 export const errorMessage = (error: unknown) => (error instanceof Error ? error.message : 'Something went wrong')

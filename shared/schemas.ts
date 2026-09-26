@@ -1,5 +1,13 @@
 import { z } from 'zod'
-import { AGENT_EFFORTS, COLORS, parsePullRequestUrl, PRIORITIES, PULL_REQUEST_STATES } from './domain.ts'
+import {
+  AGENT_EFFORTS,
+  COLORS,
+  OVERVIEW_RANGES,
+  type OverviewRange,
+  parsePullRequestUrl,
+  PRIORITIES,
+  PULL_REQUEST_STATES,
+} from './domain.ts'
 
 const name = z.string().trim().min(1).max(200)
 const color = z.enum(COLORS)
@@ -151,6 +159,13 @@ export const listTicketsQuerySchema = z.object({
   tag: z.array(ref).optional(),
   priority: z.array(priority).optional(),
   q: z.string().trim().min(1).optional(),
+})
+
+export const overviewQuerySchema = z.object({
+  days: z
+    .enum(OVERVIEW_RANGES.map(String) as [`${OverviewRange}`])
+    .default('14')
+    .transform((days) => Number(days) as OverviewRange),
 })
 
 export const BOARD_EXPORT_FORMAT = 'ultrakanban/board@1'

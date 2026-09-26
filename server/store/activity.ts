@@ -1,7 +1,7 @@
 import type { Activity, ActivityType } from '../../shared/domain.ts'
 import { now, sql } from '../db.ts'
 
-interface ActivityRow {
+export interface ActivityRow {
   id: number
   ticket_id: string
   actor: string
@@ -15,7 +15,7 @@ type ActivityData<T extends ActivityType> = Extract<Activity, { type: T }>['data
 /** Consecutive edits by the same actor within this window are merged into one entry. */
 const MERGE_WINDOW_MS = 10 * 60 * 1000
 
-const toActivity = (row: ActivityRow) =>
+export const toActivity = (row: ActivityRow) =>
   ({
     id: row.id,
     ticketId: row.ticket_id,

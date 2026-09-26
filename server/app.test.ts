@@ -9,12 +9,14 @@ import {
   type Attachment,
   type BoardDetail,
   type BoardSummary,
+  type Overview,
   type Ticket,
 } from '../shared/domain.ts'
 import { createApp } from './app.ts'
 import { createAttachmentFiles } from './attachment-files.ts'
 import { subscribe } from './events.ts'
 import { createPullRequestSync } from './pull-request-sync.ts'
+import { getOverview } from './store/overview.ts'
 import type { PullRequestStatus } from './store/tickets.ts'
 
 /** Fake GitHub: pull requests are open unless a test says otherwise. */
@@ -359,6 +361,64 @@ describe('pull request workflow', () => {
 
     assert.deepEqual(reexported, exported)
     assert.ok(imported.doneColumnId)
+  })
+
+  test('overview shows who works on what, for how long, and what got done', async () => {
+    const agent = 'overview-agent'
+    const ticket = await addTicket({ title: 'A' })
+    await addTicket({ title: 'B' })
+    await call('POST', `/boards/${boardId}/tickets/claim-next`, { agent, column: 'Todo', moveTo: 'In progress' })
+
+    const { body: working } = await call<Overview>('GET', '/overview?days=7')
+    const agentOf = (overview: Overview) => overview.agents.find((entry) => entry.name === agent)!
+    const boardOf = (overview: Overview) => overview.boards.find((entry) => entry.id === boardId)!
+    assert.equal(working.days, 7)
+    assert.equal(agentOf(working).status, 'working')
+    assert.deepEqual(
+      agentOf(working).tickets.map((held) => [held.id, held.column, held.state]),
+      [[ticket.id, 'In progress', 'working']],
+    )
+    assert.deepEqual([boardOf(working).open, boardOf(working).working, boardOf(working).review], [2, 1, 0])
+    assert.equal(working.recent[0].ticket.boardId, boardId)
+
+    // Ongoing work counts up to the time of the overview.
+    const hourLater = getOverview(7, new Date(Date.now() + 60 * 60 * 1000))
+    assert.ok(Math.abs(agentOf(hourLater).workedMs - 60 * 60 * 1000) < 60 * 1000)
+
+    await call('POST', `/tickets/${ticket.id}/review`, { agent, pullRequest: PR })
+    const { body: inReview } = await call<Overview>('GET', '/overview')
+    assert.equal(inReview.days, 14)
+    assert.equal(agentOf(inReview).status, 'review')
+    assert.deepEqual(
+      inReview.sessions.filter((session) => session.agent === agent).map((session) => session.end !== null),
+      [true],
+    )
+
+    pullRequestStatuses.set(PR, { state: 'merged', title: 'Some PR' })
+    await call('POST', `/tickets/${ticket.id}/pull-request/sync`)
+    pullRequestStatuses.clear()
+    const { body: done } = await call<Overview>('GET', '/overview')
+    assert.deepEqual([agentOf(done).status, agentOf(done).tickets.length, agentOf(done).completed], ['idle', 0, 1])
+    assert.deepEqual([boardOf(done).open, boardOf(done).completed], [1, 1])
+    assert.ok(done.events.some((event) => event.boardId === boardId && event.kind === 'completed'))
+
+    assert.equal((await call('GET', '/overview?days=3')).status, 400)
+  })
+
+  test('overview lists enabled board agents under their worker names', async () => {
+    await call('PATCH', `/boards/${boardId}`, { githubRepo: 'acme/app', agentEnabled: true, agentName: 'idle-agent' })
+    const { body: idle } = await call<Overview>('GET', '/overview')
+    const agent = idle.agents.find((entry) => entry.name === 'idle-agent/opus/high')
+    assert.deepEqual([agent?.status, agent?.agentOf], ['idle', [boardId]])
+    assert.ok(!idle.agents.some((entry) => entry.name === 'idle-agent' || entry.name === 'idle-agent/opus/max'))
+
+    // A ticket's own effort runs under its own worker name, which still counts as the board's host agent.
+    await addTicket({ title: 'A' })
+    await call('POST', `/boards/${boardId}/tickets/claim-next`, { agent: 'idle-agent/opus/max', column: 'Todo' })
+    const { body: working } = await call<Overview>('GET', '/overview')
+    const variant = working.agents.find((entry) => entry.name === 'idle-agent/opus/max')
+    assert.deepEqual([variant?.status, variant?.agentOf], ['working', [boardId]])
+    await call('PATCH', `/boards/${boardId}`, { agentEnabled: false })
   })
 
   test('deleting a column clears it from the workflow', async () => {

@@ -180,3 +180,106 @@ export interface ApiErrorBody {
 export interface BoardChangeEvent {
   boardId: string
 }
+
+/** Day ranges `GET /api/overview` accepts. */
+export const OVERVIEW_RANGES = [7, 14, 30] as const
+export type OverviewRange = (typeof OVERVIEW_RANGES)[number]
+
+/**
+ * `working` while a ticket is assigned and outside the board's review and done columns, `review` while it waits
+ * in the review column.
+ */
+export type WorkState = 'working' | 'review'
+
+export interface OverviewTicket {
+  id: string
+  boardId: string
+  boardName: string
+  number: number
+  title: string
+  column: string
+  state: WorkState
+  /** When the ticket entered its current state. */
+  since: string
+  pullRequest: Pick<PullRequest, 'url' | 'state'> | null
+}
+
+export interface OverviewAgent {
+  name: string
+  /** `working` if any of its tickets is being worked, `review` if all of them wait for review, else `idle`. */
+  status: WorkState | 'idle'
+  /** Assigned tickets that aren't done, working ones first. */
+  tickets: OverviewTicket[]
+  /** Time spent working tickets within the range, in milliseconds (ongoing work counts up to `generatedAt`). */
+  workedMs: number
+  /** Tickets that reached the done column while assigned to it, within the range. */
+  completed: number
+  /** Activity entries it authored within the range. */
+  actions: number
+  lastActiveAt: string | null
+  /** Boards whose host agent runs under this name. */
+  agentOf: string[]
+}
+
+export interface OverviewBoard {
+  id: string
+  name: string
+  agentEnabled: boolean
+  agentName: string | null
+  /** Tickets outside the done column. */
+  open: number
+  working: number
+  review: number
+  /** Tickets that reached the done column within the range. */
+  completed: number
+  /** Activity entries within the range. */
+  events: number
+  lastActivityAt: string | null
+}
+
+/** How an activity entry counts in the overview's timeline. */
+export type OverviewEventKind = 'created' | 'completed' | 'comment' | 'update'
+
+export interface OverviewEvent {
+  at: string
+  kind: OverviewEventKind
+  actor: string
+  boardId: string
+}
+
+/** A stretch of time an agent spent working a ticket, clipped to the range; `end` is null while ongoing. */
+export interface WorkSession {
+  agent: string
+  ticketId: string
+  boardId: string
+  start: string
+  end: string | null
+}
+
+export type OverviewActivity = Activity & {
+  ticket: { number: number; title: string; boardId: string; boardName: string }
+}
+
+export interface Overview {
+  generatedAt: string
+  /** Start of the range. */
+  since: string
+  days: OverviewRange
+  totals: {
+    boards: number
+    open: number
+    working: number
+    review: number
+    completed: number
+    /** Agents with a ticket being worked right now. */
+    activeAgents: number
+    workedMs: number
+  }
+  agents: OverviewAgent[]
+  boards: OverviewBoard[]
+  /** Every activity entry within the range, oldest first. */
+  events: OverviewEvent[]
+  sessions: WorkSession[]
+  /** The latest activity entries across all boards, newest first. */
+  recent: OverviewActivity[]
+}
