@@ -256,6 +256,17 @@ export interface WorkSession {
   end: string | null
 }
 
+/** A ticket reaching the done column within the range. */
+export interface OverviewCompletion {
+  ticketId: string
+  boardId: string
+  at: string
+  /** From when work on it started (it was first assigned outside the review and done columns) to done. */
+  cycleMs: number | null
+  /** From when it last entered the review column to done, if it went straight from review to done. */
+  reviewMs: number | null
+}
+
 export type OverviewActivity = Activity & {
   ticket: { number: number; title: string; boardId: string; boardName: string }
 }
@@ -280,6 +291,8 @@ export interface Overview {
   /** Every activity entry within the range, oldest first. */
   events: OverviewEvent[]
   sessions: WorkSession[]
+  /** Tickets that reached the done column within the range, oldest first. */
+  completions: OverviewCompletion[]
   /** The latest activity entries across all boards, newest first. */
   recent: OverviewActivity[]
 }

@@ -6,6 +6,7 @@ import {
   type OverviewActivity,
   type OverviewAgent,
   type OverviewBoard,
+  type OverviewCompletion,
   type OverviewEventKind,
   type OverviewRange,
   type OverviewTicket,
@@ -106,6 +107,7 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
     since,
   )
   const sessions: WorkSession[] = []
+  const completions: OverviewCompletion[] = []
   const completedBy = new Map<string, number>()
   const completedOn = new Map<string, number>()
   /** When each ticket entered its current state. */
@@ -126,6 +128,9 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
     let pullRequestClosed = false
     let state: WorkState | null = null
     let session: WorkSession | null = null
+    /** When work on the ticket started and when it entered the review column, for its cycle and review times. */
+    let startedAt: string | null = null
+    let reviewSince: string | null = null
     for (const entry of entries) {
       if (entry.type === 'created') column = key(entry.data.column)
       if (entry.type === 'moved') {
@@ -133,7 +138,18 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
         if (column === workflow.doneName && entry.createdAt >= since) {
           increment(completedOn, ticket.board_id)
           if (assignee) increment(completedBy, assignee)
+          const at = Date.parse(entry.createdAt)
+          completions.push({
+            ticketId: ticket.id,
+            boardId: ticket.board_id,
+            at: entry.createdAt,
+            cycleMs: startedAt ? at - Date.parse(startedAt) : null,
+            reviewMs: reviewSince ? at - Date.parse(reviewSince) : null,
+          })
         }
+        // Reopened tickets start over.
+        if (column === workflow.doneName) startedAt = null
+        reviewSince = column === workflow.reviewName ? (reviewSince ?? entry.createdAt) : null
       }
       if (entry.type === 'claimed') assignee = entry.data.assignee
       if (entry.type === 'released') assignee = null
@@ -150,6 +166,7 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
       if (worker && !session) {
         session = { agent: worker, ticketId: ticket.id, boardId: ticket.board_id, start: entry.createdAt, end: null }
         sessions.push(session)
+        startedAt ??= entry.createdAt
       }
       // Pull request updates don't move the ticket, so only count when they change its state.
       if (entry.type !== 'pull_request' || state !== previous) stateSince.set(ticket.id, entry.createdAt)
@@ -305,6 +322,7 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
     boards: overviewBoards,
     events,
     sessions: clipped,
+    completions: completions.sort((a, b) => a.at.localeCompare(b.at)),
     recent,
   }
 }

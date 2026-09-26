@@ -26,6 +26,7 @@ interface ColumnChartProps {
   formatTick?: (value: number) => string
   /** Smallest gridline step, e.g. 1 for counts. */
   minStep?: number
+  id?: string
   className?: string
 }
 
@@ -51,6 +52,7 @@ export function ColumnChart({
   formatValue,
   formatTick = formatValue,
   minStep = 0,
+  id,
   className,
 }: ColumnChartProps) {
   const totals = columns.map((column) => sum(column.values))
@@ -61,7 +63,7 @@ export function ColumnChart({
   const [open, setOpen] = useState<number | null>(null)
 
   return (
-    <figure className={cn('relative grid gap-4 rounded-xl border bg-card p-4', className)}>
+    <figure id={id} className={cn('relative grid gap-4 rounded-xl border bg-card p-4', className)}>
       <figcaption className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
         <div>
           <h2 className="text-sm font-medium">{title}</h2>

@@ -228,6 +228,7 @@ interface Overview {
   boards: { id; name; agentEnabled; agentName; open; working; review; completed; events; lastActivityAt }[]
   events: { at: string; kind: 'created' | 'completed' | 'comment' | 'update'; actor: string; boardId: string }[]
   sessions: { agent; ticketId; boardId; start: string; end: string | null }[] // clipped to the range
+  completions: { ticketId; boardId; at: string; cycleMs: number | null; reviewMs: number | null }[] // oldest first
   recent: (Activity & { ticket: { number; title; boardId; boardName } })[] // latest 30, newest first
 }
 ```
@@ -235,7 +236,9 @@ interface Overview {
 Agents are everyone holding a ticket that isn't done, everyone who worked within the range, and the host agent
 of every board that has it switched on. A ticket is being **worked** while it is assigned and outside the board's
 review and done columns (a board without a done column uses its last column), so claiming starts the clock and
-submitting for review, merging or releasing stops it. Work time is reconstructed from the activity log.
+submitting for review, merging or releasing stops it. Work time is reconstructed from the activity log. Each
+completion's `cycleMs` runs from when work on the ticket started to done, and `reviewMs` from when it last entered
+the review column to done; either is `null` if the ticket skipped that step.
 
 ## Live updates
 

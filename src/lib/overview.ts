@@ -1,5 +1,5 @@
 import { addDays, differenceInCalendarDays, startOfDay } from 'date-fns'
-import type { Overview, OverviewEventKind, WorkSession } from '@shared/domain'
+import type { Overview, OverviewAgent, OverviewEventKind, WorkSession } from '@shared/domain'
 
 export interface Day {
   start: Date
@@ -44,3 +44,27 @@ export function workedByAgent(sessions: WorkSession[], from: Date, now: number) 
 
 /** Opens a ticket on its board. */
 export const ticketHref = (ticket: { id: string; boardId: string }) => `/b/${ticket.boardId}?ticket=${ticket.id}`
+
+/**
+ * The middle value, or null without any. With an even count it's the lower of the two middle values rather than
+ * their average, so it's always a real duration, and review wait never looks longer than the cycle it's part of.
+ */
+export function median(values: number[]) {
+  if (!values.length) return null
+  return values.toSorted((a, b) => a - b)[Math.floor((values.length - 1) / 2)]
+}
+
+/** How long a ticket can be worked without moving before it's worth a look. */
+export const STALLED_MS = 24 * 60 * 60 * 1000
+
+/** Held tickets someone should look at: those waiting in review, then those worked for long without moving. */
+export function needsAttention(agents: OverviewAgent[], now: number) {
+  const tickets = agents.flatMap((agent) => agent.tickets.map((ticket) => ({ ...ticket, agent: agent.name })))
+  const oldest = (a: { since: string }, b: { since: string }) => a.since.localeCompare(b.since)
+  return {
+    review: tickets.filter((ticket) => ticket.state === 'review').sort(oldest),
+    stalled: tickets
+      .filter((ticket) => ticket.state === 'working' && now - Date.parse(ticket.since) >= STALLED_MS)
+      .sort(oldest),
+  }
+}
