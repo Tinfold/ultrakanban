@@ -61,6 +61,9 @@ post() {
     -H 'Content-Type: application/json' -H "X-Actor: ${3:-$worker}" -d "$2"
 }
 
+# Tells the board the agent is working on a ticket right now.
+heartbeat() { curl -s -o /dev/null -X POST "$KANBAN/api/tickets/$1/heartbeat" -H "X-Actor: $worker"; }
+
 # Comments on a ticket as the loop rather than the agent.
 note() {
   curl -s -o /dev/null -X POST "$KANBAN/api/tickets/$1/comments" \

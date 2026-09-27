@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict'
-import { describe, test } from 'node:test'
-import { type Activity, type ApiErrorBody, type BoardDetail, type Ticket } from '../shared/domain.ts'
+import { describe, mock, test } from 'node:test'
+import {
+  type Activity,
+  AGENT_IDLE_MINUTES,
+  type ApiErrorBody,
+  type BoardDetail,
+  type Ticket,
+} from '../shared/domain.ts'
 import { subscribe } from './events.ts'
 import { addTicket, boardId, call, ticketsIn } from './test-app.ts'
 
@@ -169,6 +175,76 @@ describe('agent claiming', () => {
       body.map((entry) => entry.type),
       ['created', 'claimed', 'moved', 'comment'],
     )
+  })
+})
+
+describe('idle tickets', () => {
+  /** Runs `fn` with the clock moved forward by the given minutes. */
+  async function later<T>(minutes: number, fn: () => Promise<T>) {
+    mock.timers.enable({ apis: ['Date'], now: Date.now() + minutes * 60_000 })
+    try {
+      return await fn()
+    } finally {
+      mock.timers.reset()
+    }
+  }
+
+  const doingColumn = async () =>
+    (await call<BoardDetail>('GET', `/boards/${boardId}`)).body.columns.find((column) => column.name === 'Doing')!
+
+  test('lists tickets without a recent heartbeat or activity, and moves them back unassigned', async () => {
+    const idle = await addTicket({ title: 'Idle' })
+    const running = await addTicket({ title: 'Running' })
+    const discussed = await addTicket({ title: 'Discussed' })
+    for (const ticket of [idle, running, discussed]) {
+      await call('POST', `/tickets/${ticket.id}/claim`, { agent: 'alpha', moveTo: 'Doing' })
+    }
+    const column = await doingColumn()
+
+    const fresh = await call<Ticket[]>('GET', `/columns/${column.id}/idle-tickets`)
+    assert.deepEqual(fresh.body, [])
+
+    const minutes = AGENT_IDLE_MINUTES + 1
+    const released = await later(minutes, async () => {
+      assert.equal((await call('POST', `/tickets/${running.id}/heartbeat`, undefined, 'alpha')).status, 204)
+      await call('POST', `/tickets/${discussed.id}/comments`, { body: 'Still on it' }, 'alpha')
+      const listed = await call<Ticket[]>('GET', `/columns/${column.id}/idle-tickets`)
+      assert.deepEqual(
+        listed.body.map((ticket) => ticket.title),
+        ['Idle'],
+      )
+      return call<Ticket[]>('POST', `/columns/${column.id}/release-idle`, { moveTo: 'Todo' })
+    })
+
+    assert.equal(released.status, 200)
+    assert.deepEqual(
+      released.body.map((ticket) => [ticket.title, ticket.assignee]),
+      [['Idle', null]],
+    )
+    assert.deepEqual(
+      (await ticketsIn('Todo')).map((ticket) => ticket.title),
+      ['Idle'],
+    )
+    const { body: activity } = await call<Activity[]>('GET', `/tickets/${idle.id}/activity`)
+    assert.deepEqual(
+      activity.slice(-2).map((entry) => entry.type),
+      ['released', 'moved'],
+    )
+  })
+
+  test('a heartbeat is not a change to the ticket', async () => {
+    const ticket = await addTicket({ title: 'A' })
+    await call('POST', `/tickets/${ticket.id}/heartbeat`)
+    const { body } = await call<Ticket>('GET', `/tickets/${ticket.id}`)
+
+    assert.equal(body.version, ticket.version)
+    assert.equal((await call('POST', '/tickets/missing/heartbeat')).status, 404)
+  })
+
+  test('refuses to move idle tickets into their own column', async () => {
+    const column = await doingColumn()
+    const res = await call('POST', `/columns/${column.id}/release-idle`, { moveTo: 'Doing' })
+    assert.equal(res.status, 400)
   })
 })
 

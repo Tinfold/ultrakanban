@@ -27,6 +27,7 @@ import {
   deleteTicket,
   getTicket,
   moveTicket,
+  recordHeartbeat,
   releaseTicket,
   submitForReview,
   updateTicket,
@@ -120,6 +121,10 @@ export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles }: AppS
     .post('/:ticketId/release', async (c) => {
       const input = await readJson(c, releaseTicketSchema)
       return c.json(transaction(() => releaseTicket(c.req.param('ticketId'), input)))
+    })
+    .post('/:ticketId/heartbeat', (c) => {
+      recordHeartbeat(c.req.param('ticketId'))
+      return c.body(null, 204)
     })
     .get('/:ticketId/activity', (c) => {
       const ticket = getTicket(c.req.param('ticketId'))

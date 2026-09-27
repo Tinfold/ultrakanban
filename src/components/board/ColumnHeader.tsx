@@ -2,6 +2,7 @@ import {
   ArrowLeftIcon,
   ArrowRightIcon,
   GaugeIcon,
+  ListRestartIcon,
   GitMergeIcon,
   MoreHorizontalIcon,
   PaletteIcon,
@@ -27,12 +28,18 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
+import { useIdleTickets } from '@/hooks/queries'
 import { cn } from '@/lib/utils'
 import { useBoardContext } from './board-context'
 import { DeleteColumnDialog } from './DeleteColumnDialog'
 import { MergeAllDialog } from './MergeAllDialog'
+import { ReleaseIdleDialog } from './ReleaseIdleDialog'
 
 const WIP_LIMITS = [1, 2, 3, 4, 5, 6, 8, 10, 15, 20]
+
+/** Columns agents work tickets in, whose idle tickets can be moved back to the todo column. */
+const WORKING_COLUMN = /progress|doing/i
+const TODO_COLUMN = /^to ?do$/i
 
 interface ColumnHeaderProps {
   column: Column
@@ -47,6 +54,7 @@ export function ColumnHeader({ column, ticketCount, onAddTicket, handleProps }: 
   const [renaming, setRenaming] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [merging, setMerging] = useState(false)
+  const [releasing, setReleasing] = useState(false)
   const index = detail.columns.findIndex((other) => other.id === column.id)
   const overLimit = column.wipLimit !== null && ticketCount > column.wipLimit
   const canMergeAll =
@@ -56,6 +64,13 @@ export function ColumnHeader({ column, ticketCount, onAddTicket, handleProps }: 
         ticket.columnId === column.id &&
         (ticket.pullRequest?.state === 'open' || ticket.pullRequest?.state === 'unknown'),
     )
+
+  // Idle tickets go back to the todo column, or else the column before this one.
+  const idleTarget = WORKING_COLUMN.test(column.name)
+    ? (detail.columns.find((other) => TODO_COLUMN.test(other.name)) ?? detail.columns[index - 1])
+    : undefined
+  const { data: idleTickets = [] } = useIdleTickets(column.id, !!idleTarget && ticketCount > 0)
+  const canRelease = !!idleTarget && ticketCount > 0 && idleTickets.length > 0
 
   const rename = (name: string) => {
     setRenaming(false)
@@ -110,6 +125,19 @@ export function ColumnHeader({ column, ticketCount, onAddTicket, handleProps }: 
           onClick={() => setMerging(true)}
         >
           <GitMergeIcon />
+        </Button>
+      )}
+      {canRelease && (
+        <Button
+          size="xs"
+          variant="ghost"
+          className="gap-1 px-1.5 text-muted-foreground"
+          aria-label={`Move ${idleTickets.length} idle ticket${idleTickets.length === 1 ? '' : 's'} back to ${idleTarget.name}`}
+          title={`Move idle tickets back to ${idleTarget.name}`}
+          onClick={() => setReleasing(true)}
+        >
+          <ListRestartIcon />
+          <span className="tabular-nums">{idleTickets.length}</span>
         </Button>
       )}
       <Button size="icon-xs" variant="ghost" aria-label={`Add ticket to ${column.name}`} onClick={onAddTicket}>
@@ -179,6 +207,15 @@ export function ColumnHeader({ column, ticketCount, onAddTicket, handleProps }: 
       <DeleteColumnDialog column={column} ticketCount={ticketCount} open={deleting} onOpenChange={setDeleting} />
       {/* Stays open after the last pull request merged and left the column, to show how it went. */}
       {(canMergeAll || merging) && <MergeAllDialog open={merging} onOpenChange={setMerging} />}
+      {idleTarget && (
+        <ReleaseIdleDialog
+          column={column}
+          target={idleTarget}
+          tickets={idleTickets}
+          open={releasing}
+          onOpenChange={setReleasing}
+        />
+      )}
     </header>
   )
 }

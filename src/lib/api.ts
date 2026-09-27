@@ -78,6 +78,9 @@ export const api = {
     request<Column>('POST', `/columns/${columnId}/move`, { position }),
   deleteColumn: (columnId: string, moveTicketsTo?: string) =>
     request<void>('DELETE', `/columns/${columnId}${query({ moveTicketsTo })}`),
+  idleTickets: (columnId: string) => request<Ticket[]>('GET', `/columns/${columnId}/idle-tickets`),
+  releaseIdleTickets: (columnId: string, moveTo: string) =>
+    request<Ticket[]>('POST', `/columns/${columnId}/release-idle`, { moveTo }),
 
   createTag: (boardId: string, input: CreateTagInput) => request<Tag>('POST', `/boards/${boardId}/tags`, input),
   updateTag: (tagId: string, input: UpdateTagInput) => request<Tag>('PATCH', `/tags/${tagId}`, input),

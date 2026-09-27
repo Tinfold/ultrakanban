@@ -22,6 +22,12 @@ export const AGENT_DEFAULTS = { name: 'claude', model: 'opus', effort: 'medium',
 export const AGENT_MAX_CONCURRENCY = 8
 
 /**
+ * A ticket counts as idle (no agent is working on it) when no agent has sent a heartbeat for it
+ * (`POST /tickets/:id/heartbeat`) and nothing has happened on it for this long.
+ */
+export const AGENT_IDLE_MINUTES = 10
+
+/**
  * Name a board's agent claims tickets under: `<agent>/<model>/<effort>`, e.g. `claude/opus/high`. The agent name
  * itself belongs to the board's controller (scripts/agent-loop.sh), which starts one of these workers per run.
  */

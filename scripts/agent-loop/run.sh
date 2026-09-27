@@ -71,12 +71,15 @@ taken_away() {
 }
 
 # Checks a run's ticket every TICKET_CHECK_SECONDS while the run (process pid) goes on, and stops the run if someone
-# takes the ticket away from the agent, writing why to the given file.
+# takes the ticket away from the agent, writing why to the given file. Each check also tells the board the agent is
+# working on the ticket, so the board doesn't count it as idle.
 watch_run() {
   local id=$1 pid=$2 file=$3 idle= why
   trap - INT TERM
   if [[ -n $lock_fd ]]; then exec {lock_fd}>&-; fi
+  heartbeat "$id"
   while sleep "$TICKET_CHECK_SECONDS" && kill -0 "$pid" 2>/dev/null; do
+    heartbeat "$id"
     [[ -n $idle ]] || idle=$(idle_columns) || { idle=; continue; }
     why=$(taken_away "$id" "$idle") || continue
     printf '%s\n' "$why" >"$file"

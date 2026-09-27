@@ -1,4 +1,5 @@
 import {
+  AGENT_IDLE_MINUTES,
   type AgentEffort,
   type Column,
   parsePullRequestUrl,
@@ -16,6 +17,7 @@ import type {
   CreateTicketInput,
   ListTicketsQuery,
   MoveTicketInput,
+  ReleaseIdleInput,
   ReleaseTicketInput,
   SubmitForReviewInput,
   UpdateTicketInput,
@@ -361,6 +363,46 @@ export function releaseTicket(id: string, input: ReleaseTicketInput): Ticket {
   if (input.moveTo) relocate(ticket, input.moveTo, undefined, input.agent)
   bumpVersion(id)
   return getTicket(id)
+}
+
+/** Notes that an agent is working on the ticket right now. Not a change to the ticket: nothing is logged or bumped. */
+export function recordHeartbeat(id: string) {
+  const { changes } = sql.run('UPDATE tickets SET agent_seen_at = ? WHERE id = ?', now(), id)
+  if (!changes) throw notFound('Ticket', id)
+}
+
+/**
+ * Tickets of a column no agent is working on: none has sent a heartbeat for them, and nothing has happened on them,
+ * for `AGENT_IDLE_MINUTES`. In board order.
+ */
+export function listIdleTickets(columnId: string): Ticket[] {
+  getColumn(columnId)
+  const since = new Date(Date.now() - AGENT_IDLE_MINUTES * 60_000).toISOString()
+  return sql
+    .all<TicketRow>(
+      `${SELECT_TICKETS}
+       WHERE t.column_id = ? AND (t.agent_seen_at IS NULL OR t.agent_seen_at < ?)
+         AND NOT EXISTS (SELECT 1 FROM activity WHERE ticket_id = t.id AND created_at >= ?)
+       ORDER BY t.position`,
+      columnId,
+      since,
+      since,
+    )
+    .map(toTicket)
+}
+
+/** Unassigns a column's idle tickets (see `listIdleTickets`) and moves them to another column. Returns them. */
+export function releaseIdleTickets(columnId: string, input: ReleaseIdleInput, actor: string): Ticket[] {
+  const column = getColumn(columnId)
+  const target = resolveColumn(column.boardId, input.moveTo)
+  if (target.id === column.id) throw badRequest('Idle tickets must move to another column')
+  return listIdleTickets(columnId).map((ticket) => {
+    touchBoard(ticket.boardId)
+    assign(ticket, null, actor)
+    relocate(ticket, target.id, undefined, actor)
+    bumpVersion(ticket.id)
+    return getTicket(ticket.id)
+  })
 }
 
 /**

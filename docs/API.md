@@ -228,15 +228,22 @@ them). With `agentAllSkills` off, runs only get the ultrakanban skill, unless th
 
 ## Columns and tags
 
-| Method | Path                       | Body / query                                             | Returns  |
-| ------ | -------------------------- | -------------------------------------------------------- | -------- |
-| POST   | `/boards/:boardId/columns` | `{ name, color?, wipLimit?: number \| null, position? }` | `Column` |
-| PATCH  | `/columns/:columnId`       | `{ name?, color?, wipLimit? }`                           | `Column` |
-| POST   | `/columns/:columnId/move`  | `{ position }`                                           | `Column` |
-| DELETE | `/columns/:columnId`       | `?moveTicketsTo=ref` (otherwise its tickets are deleted) | `204`    |
-| POST   | `/boards/:boardId/tags`    | `{ name, color? }`                                       | `Tag`    |
-| PATCH  | `/tags/:tagId`             | `{ name?, color? }`                                      | `Tag`    |
-| DELETE | `/tags/:tagId`             |                                                          | `204`    |
+| Method | Path                              | Body / query                                             | Returns                                        |
+| ------ | --------------------------------- | -------------------------------------------------------- | ---------------------------------------------- |
+| POST   | `/boards/:boardId/columns`        | `{ name, color?, wipLimit?: number \| null, position? }` | `Column`                                       |
+| PATCH  | `/columns/:columnId`              | `{ name?, color?, wipLimit? }`                           | `Column`                                       |
+| POST   | `/columns/:columnId/move`         | `{ position }`                                           | `Column`                                       |
+| DELETE | `/columns/:columnId`              | `?moveTicketsTo=ref` (otherwise its tickets are deleted) | `204`                                          |
+| GET    | `/columns/:columnId/idle-tickets` |                                                          | `Ticket[]` idle in the column (see below)      |
+| POST   | `/columns/:columnId/release-idle` | `{ moveTo: ref }`                                        | `Ticket[]` it unassigned and moved to `moveTo` |
+| POST   | `/boards/:boardId/tags`           | `{ name, color? }`                                       | `Tag`                                          |
+| PATCH  | `/tags/:tagId`                    | `{ name?, color? }`                                      | `Tag`                                          |
+| DELETE | `/tags/:tagId`                    |                                                          | `204`                                          |
+
+A ticket is idle when no agent has sent a heartbeat for it (`POST /tickets/:ticketId/heartbeat`) and nothing has
+happened on it (no activity) for 10 minutes. `scripts/agent-loop.sh` sends one every `TICKET_CHECK_SECONDS` while a
+run is working the ticket; the board offers to move a working column's idle tickets back to its todo column, e.g.
+tickets whose agent stopped or crashed.
 
 ## Tickets
 
@@ -251,6 +258,7 @@ them). With `agentAllSkills` off, runs only get the ultrakanban skill, unless th
 | POST   | `/tickets/:ticketId/move`              | `{ column: ref, position?, ifVersion?, force? }`                                                                                                                                           | `Ticket` (appended when `position` is omitted)                                                                                                                            |
 | POST   | `/tickets/:ticketId/claim`             | `{ agent, moveTo?: ref, ifVersion? }`                                                                                                                                                      | `Ticket`; `409` if claimed by someone else (idempotent for the same agent)                                                                                                |
 | POST   | `/tickets/:ticketId/release`           | `{ agent, moveTo?: ref, force? }`                                                                                                                                                          | `Ticket`; `409` if claimed by someone else unless `force`                                                                                                                 |
+| POST   | `/tickets/:ticketId/heartbeat`         |                                                                                                                                                                                            | `204`; says an agent is working on the ticket right now (not a change: nothing is logged)                                                                                 |
 | POST   | `/boards/:boardId/tickets/claim-next`  | `{ agent, column: ref, tags?: ref[], moveTo?: ref }`                                                                                                                                       | `Ticket`: highest priority, then earliest due date, then board order, among unassigned tickets in `column` having all `tags`                                              |
 | POST   | `/tickets/:ticketId/review`            | `{ agent, pullRequest: url, comment?: markdown, ifVersion? }`                                                                                                                              | `Ticket`: links the pull request, assigns `agent`, posts `comment`, moves to the review column; `409` if claimed by someone else, `400` if the board has no review column |
 | POST   | `/tickets/:ticketId/pull-request/sync` |                                                                                                                                                                                            | `Ticket` after checking its pull request on GitHub now                                                                                                                    |

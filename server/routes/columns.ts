@@ -1,9 +1,9 @@
 import { Hono } from 'hono'
-import { deleteColumnSchema, moveColumnSchema, updateColumnSchema } from '../../shared/schemas.ts'
+import { deleteColumnSchema, moveColumnSchema, releaseIdleSchema, updateColumnSchema } from '../../shared/schemas.ts'
 import { transaction } from '../db.ts'
 import { actorOf, readJson } from '../http.ts'
 import { deleteColumn, moveColumn, updateColumn } from '../store/columns.ts'
-import { moveAllTickets } from '../store/tickets.ts'
+import { listIdleTickets, moveAllTickets, releaseIdleTickets } from '../store/tickets.ts'
 
 export const columnRoutes = new Hono()
   .patch('/:columnId', async (c) => {
@@ -13,6 +13,11 @@ export const columnRoutes = new Hono()
   .post('/:columnId/move', async (c) => {
     const { position } = await readJson(c, moveColumnSchema)
     return c.json(transaction(() => moveColumn(c.req.param('columnId'), position)))
+  })
+  .get('/:columnId/idle-tickets', (c) => c.json(listIdleTickets(c.req.param('columnId'))))
+  .post('/:columnId/release-idle', async (c) => {
+    const input = await readJson(c, releaseIdleSchema)
+    return c.json(transaction(() => releaseIdleTickets(c.req.param('columnId'), input, actorOf(c))))
   })
   .delete('/:columnId', (c) => {
     const columnId = c.req.param('columnId')
