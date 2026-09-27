@@ -74,6 +74,7 @@ fi
 
 echo "working board $BOARD on $repo as $agent/$model/$effort, $concurrency ticket(s) at a time"
 export KANBAN BOARD AGENT=$agent MODEL=$model EFFORT=$effort STATE_DIR=$dir/state AGENT_LOOP_CLEAN=1 \
+  CLAIM_LIMIT=$concurrency \
   WATCH_FILES="$here/agent-loop.sh:$(printf '%s:' "$here"/agent-loop/*.sh)$here/agent-board.sh:$here/../skill/SKILL.md"
 pids=()
 trap 'kill "${pids[@]}" 2>/dev/null; wait; exit 0' INT TERM
