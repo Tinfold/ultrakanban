@@ -115,6 +115,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
       agentEnabled: data.get('agentEnabled') === 'on',
       agentBacklog: data.get('agentBacklog') === 'on',
       agentAllSkills: data.get('agentAllSkills') === 'on',
+      autoMerge: data.get('autoMerge') === 'on',
     })
     onClose()
   }
@@ -154,6 +155,22 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
             <Label htmlFor="board-settings-done">Done column</Label>
             <ColumnSelect id="board-settings-done" name="doneColumn" value={detail.board.doneColumnId} />
           </div>
+        </div>
+        <div className="grid gap-1">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              name="autoMerge"
+              defaultChecked={detail.board.autoMerge}
+              className="size-4 accent-primary"
+            />
+            Merge ready pull requests automatically
+          </label>
+          <p className="pl-6 text-xs text-muted-foreground">
+            Merges pull requests in the review column once they have no conflicts, every check has passed and every
+            checklist item of their ticket is checked, the way Merge all would. Checks when pull requests are synced
+            with GitHub.
+          </p>
         </div>
         <GitHubStatus />
       </fieldset>

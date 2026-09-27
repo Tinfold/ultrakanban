@@ -184,6 +184,11 @@ export interface BoardSummary {
    * the ultrakanban skill, unless the repository has skills of its own.
    */
   agentAllSkills: boolean
+  /**
+   * Whether the server merges the review column's pull requests by itself once they are ready: open, not a draft,
+   * no conflicts, every check passed and every checklist item of the ticket checked.
+   */
+  autoMerge: boolean
   ticketCount: number
   createdAt: string
   updatedAt: string

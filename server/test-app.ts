@@ -60,11 +60,8 @@ const pullRequests = createPullRequestSync({
   },
   setPullRequestBase: async (repo, number, base) => void (pull(repo, number).base = base),
 })
-export const app = createApp({
-  attachmentFiles: createAttachmentFiles(attachmentDir),
-  pullRequests,
-  mergeQueue: createMergeQueue(pullRequests, { pollMs: 0 }),
-})
+export const mergeQueue = createMergeQueue(pullRequests, { pollMs: 0 })
+export const app = createApp({ attachmentFiles: createAttachmentFiles(attachmentDir), pullRequests, mergeQueue })
 
 export async function call<T>(method: string, path: string, body?: unknown, actor = 'tester') {
   const res = await app.request(`/api${path}`, {

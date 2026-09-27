@@ -31,6 +31,7 @@ const attachmentsDirectory =
 const attachmentFiles = createAttachmentFiles(attachmentsDirectory)
 const app = createApp({ pullRequests, mergeQueue, attachmentFiles })
 pullRequests.start(syncIntervalMs)
+mergeQueue.startAutoMerge(syncIntervalMs)
 void attachmentFiles.sweep(listAttachmentIds())
 
 // In development the app is served by Vite; serving a previous build here would run stale code.
