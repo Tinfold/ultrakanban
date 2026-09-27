@@ -185,6 +185,7 @@ interface BoardSummary {
   agentName: string | null // name of that agent, the loop that controls it ("claude" when null)
   agentModel: string | null // model it runs, an alias or full name ("opus" when null)
   agentEffort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null // effort it runs at ("high" when null)
+  agentConcurrency: number | null // tickets it works at once, 1-8, each in its own git worktree (1 when null)
   ticketCount: number
   createdAt: string
   updatedAt: string
@@ -193,16 +194,16 @@ interface BoardSummary {
 
 ## Boards
 
-| Method | Path                           | Body / query                                                                                                                                                                                                                | Returns                                        |
-| ------ | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| GET    | `/boards`                      |                                                                                                                                                                                                                             | `BoardSummary[]` (most recently updated first) |
-| POST   | `/boards`                      | `{ name, description?, columns?: string[], reviewColumn?: ref, doneColumn?: ref, githubRepo?, agentEnabled?, agentName?, agentModel?, agentEffort? }`                                                                       | `BoardSummary`                                 |
-| GET    | `/boards/:boardId`             |                                                                                                                                                                                                                             | `{ board, columns, tags, tickets }`            |
-| PATCH  | `/boards/:boardId`             | `{ name?, description?, reviewColumn?: ref \| null, doneColumn?: ref \| null, githubRepo?: string \| null, agentEnabled?: boolean, agentName?: string \| null, agentModel?: string \| null, agentEffort?: string \| null }` | `BoardSummary`                                 |
-| POST   | `/boards/:boardId/github-repo` | `{ name, owner?, description?, private?: boolean }`                                                                                                                                                                         | `BoardSummary` (201)                           |
-| DELETE | `/boards/:boardId`             |                                                                                                                                                                                                                             | `204`                                          |
-| GET    | `/boards/:boardId/export`      |                                                                                                                                                                                                                             | portable board JSON                            |
-| POST   | `/boards/import`               | portable board JSON                                                                                                                                                                                                         | `BoardSummary`                                 |
+| Method | Path                           | Body / query                                                                                                                                                                                                                                                   | Returns                                        |
+| ------ | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| GET    | `/boards`                      |                                                                                                                                                                                                                                                                | `BoardSummary[]` (most recently updated first) |
+| POST   | `/boards`                      | `{ name, description?, columns?: string[], reviewColumn?: ref, doneColumn?: ref, githubRepo?, agentEnabled?, agentName?, agentModel?, agentEffort?, agentConcurrency? }`                                                                                       | `BoardSummary`                                 |
+| GET    | `/boards/:boardId`             |                                                                                                                                                                                                                                                                | `{ board, columns, tags, tickets }`            |
+| PATCH  | `/boards/:boardId`             | `{ name?, description?, reviewColumn?: ref \| null, doneColumn?: ref \| null, githubRepo?: string \| null, agentEnabled?: boolean, agentName?: string \| null, agentModel?: string \| null, agentEffort?: string \| null, agentConcurrency?: number \| null }` | `BoardSummary`                                 |
+| POST   | `/boards/:boardId/github-repo` | `{ name, owner?, description?, private?: boolean }`                                                                                                                                                                                                            | `BoardSummary` (201)                           |
+| DELETE | `/boards/:boardId`             |                                                                                                                                                                                                                                                                | `204`                                          |
+| GET    | `/boards/:boardId/export`      |                                                                                                                                                                                                                                                                | portable board JSON                            |
+| POST   | `/boards/import`               | portable board JSON                                                                                                                                                                                                                                            | `BoardSummary`                                 |
 
 `POST /boards/:boardId/github-repo` creates a repository on GitHub with the server's login and sets it as the board's
 `githubRepo`. It is created under `owner` (a user or organization; the signed-in user when omitted), private unless
@@ -216,7 +217,9 @@ Administration write), and `read:org` plus access to the organization to create 
 `scripts/agent-supervisor.sh`, which runs on the host and keeps one agent loop per enabled board; see the README.
 The loop runs Claude Code with `agentModel` and `agentEffort` and claims tickets as
 `<agentName>/<agentModel>/<agentEffort>`, e.g. `claude/opus/high` with nothing set. A ticket's own `agentEffort`
-overrides the board's for that ticket: the loop runs it at that effort and under that name.
+overrides the board's for that ticket: the loop runs it at that effort and under that name. `agentConcurrency` is how
+many tickets the agent works at once: the host runs that many loops, each in its own git worktree of the board's
+clone, and never two on the same ticket.
 
 ## Columns and tags
 

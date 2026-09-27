@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import {
   AGENT_EFFORTS,
+  AGENT_MAX_CONCURRENCY,
   COLORS,
   MERGE_METHODS,
   OVERVIEW_RANGES,
@@ -42,6 +43,7 @@ const agentModel = z
   .regex(/^[\w.[\]-]{1,100}$/, 'Use a model alias or name, e.g. opus or claude-opus-5-5')
   .nullable()
 const agentEffort = z.enum(AGENT_EFFORTS).nullable()
+const agentConcurrency = z.int().min(1).max(AGENT_MAX_CONCURRENCY).nullable()
 /** Skips the merged-pull-request requirement of the board's done column. Meant for humans, not agents. */
 const force = z.boolean().optional()
 
@@ -56,6 +58,7 @@ export const createBoardSchema = z.object({
   agentName: agentName.optional(),
   agentModel: agentModel.optional(),
   agentEffort: agentEffort.optional(),
+  agentConcurrency: agentConcurrency.optional(),
 })
 
 export const updateBoardSchema = z.object({
@@ -68,6 +71,7 @@ export const updateBoardSchema = z.object({
   agentName: agentName.optional(),
   agentModel: agentModel.optional(),
   agentEffort: agentEffort.optional(),
+  agentConcurrency: agentConcurrency.optional(),
 })
 
 /** Creates a repository on GitHub and links it to the board. */

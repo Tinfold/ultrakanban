@@ -17,6 +17,7 @@ interface BoardRow {
   agent_name: string | null
   agent_model: string | null
   agent_effort: AgentEffort | null
+  agent_concurrency: number | null
   ticket_count: number
   created_at: string
   updated_at: string
@@ -37,6 +38,7 @@ const toBoard = (row: BoardRow): BoardSummary => ({
   agentName: row.agent_name,
   agentModel: row.agent_model,
   agentEffort: row.agent_effort,
+  agentConcurrency: row.agent_concurrency,
   ticketCount: row.ticket_count,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -68,8 +70,18 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     timestamp,
   )
   for (const name of input.columns ?? []) createColumn(id, { name })
-  const { reviewColumn, doneColumn, githubRepo, agentEnabled, agentName, agentModel, agentEffort } = input
-  return updateBoard(id, { reviewColumn, doneColumn, githubRepo, agentEnabled, agentName, agentModel, agentEffort })
+  const { reviewColumn, doneColumn, githubRepo, agentEnabled, agentName, agentModel, agentEffort, agentConcurrency } =
+    input
+  return updateBoard(id, {
+    reviewColumn,
+    doneColumn,
+    githubRepo,
+    agentEnabled,
+    agentName,
+    agentModel,
+    agentEffort,
+    agentConcurrency,
+  })
 }
 
 export function updateBoard(id: string, input: UpdateBoardInput): BoardSummary {
@@ -85,6 +97,7 @@ export function updateBoard(id: string, input: UpdateBoardInput): BoardSummary {
     agent_name: input.agentName,
     agent_model: input.agentModel,
     agent_effort: input.agentEffort,
+    agent_concurrency: input.agentConcurrency,
   })
   const board = getBoard(id)
   if (board.agentEnabled && !board.githubRepo) {

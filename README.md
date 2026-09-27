@@ -150,14 +150,21 @@ Then, per board, open **Board menu → Board settings**, set the **GitHub reposi
 create one on GitHub with the server's login and link it) and switch on
 **Run the agent on this board** (or `PATCH /api/boards/:id` with `githubRepo` and `agentEnabled`). The supervisor
 ([`scripts/agent-supervisor.sh`](scripts/agent-supervisor.sh)) checks the boards every 30 seconds and keeps one
-`ultrakanban-agent@<board>` unit running per enabled board. Each loop runs one `claude -p` at a time, but the loops
-of different boards run side by side, with no limit across boards: three enabled boards can mean three agents working
-at once, all on your `claude` login and its usage limits. It stops the loop when the board is switched off or
+`ultrakanban-agent@<board>` unit running per enabled board. It stops the loop when the board is switched off or
 deleted, and systemd restarts a loop that dies, with backoff up to 15 minutes. Each board gets its own clone,
 made with `gh repo clone`, under `~/.local/share/ultrakanban-agent/boards/<board>/repo`; your own working copies
-are never touched. Before every run the loop fetches and checks out the default branch (or, for feedback on a
-pull request, its branch) with no local changes, and goes back to the default branch afterwards. Logs:
-`journalctl --user -u ultrakanban-agent -u 'ultrakanban-agent@*' -f`.
+are never touched. Before every run the loop fetches and checks out the default branch (detached, so create a branch
+from it) or, for feedback on a pull request, its branch, with no local changes, and goes back to the default branch
+afterwards. Logs: `journalctl --user -u ultrakanban-agent -u 'ultrakanban-agent@*' -f`.
+
+**Parallel runs.** By default a board's agent runs one `claude -p` at a time. The board's **Parallel runs** setting
+(`agentConcurrency`, up to 8) lets it work that many tickets at once: the unit then runs that many loops, the first in
+the clone and each other one in its own git worktree of it (`boards/<board>/worktrees/<n>`), so their branches and
+files never get in each other's way. The loops share the board's state and lock each ticket while they look at it or
+work it, so two runs never work the same ticket, and when one runs out of Claude usage they all wait. Changing the
+setting restarts the board's loops, which stops runs in progress (they are picked up again). The boards themselves
+also run side by side, with no limit across boards: three enabled boards with two parallel runs each can mean six
+agents working at once, all on your `claude` login and its usage limits.
 
 **Names.** The board's **Agent name** (default `claude`) names the loop, which controls the work; its notes on
 tickets come from `<agent>-loop`. The runs it starts claim tickets as `<agent>/<model>/<effort>`, from the board's
@@ -211,7 +218,9 @@ To run the loop by hand instead, start it in a dedicated clone of the repository
 KANBAN=http://localhost:4317 BOARD=$BOARD AGENT_LOOP_CLEAN=1 ~/ultrakanban/scripts/agent-loop.sh
 ```
 
-`AGENT_LOOP_CLEAN=1` lets it reset the checkout before each run; leave it out in a working copy of your own.
+`AGENT_LOOP_CLEAN=1` lets it reset the checkout before each run; leave it out in a working copy of your own. To work
+several tickets at once by hand, start one loop per checkout (the clone plus `git worktree add --detach` ones), with
+the same `BOARD`, agent settings and `STATE_DIR`.
 
 ## Development
 

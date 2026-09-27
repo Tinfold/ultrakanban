@@ -14,7 +14,9 @@ export const AGENT_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 export type AgentEffort = (typeof AGENT_EFFORTS)[number]
 
 /** What a board's agent runs as when the board doesn't say (see scripts/agent-board.sh). */
-export const AGENT_DEFAULTS = { name: 'claude', model: 'opus', effort: 'high' } as const
+export const AGENT_DEFAULTS = { name: 'claude', model: 'opus', effort: 'high', concurrency: 1 } as const
+/** Most runs a board's agent can work at once; each one needs its own git worktree and counts against Claude usage. */
+export const AGENT_MAX_CONCURRENCY = 8
 
 /**
  * Name a board's agent claims tickets under: `<agent>/<model>/<effort>`, e.g. `claude/opus/high`. The agent name
@@ -153,6 +155,8 @@ export interface BoardSummary {
   agentModel: string | null
   /** Effort level the agent runs at; `high` when not set. */
   agentEffort: AgentEffort | null
+  /** How many runs the agent works at once, each on its own ticket in its own git worktree; 1 when not set. */
+  agentConcurrency: number | null
   ticketCount: number
   createdAt: string
   updatedAt: string

@@ -22,8 +22,9 @@ agents can work the same board safely.
 ## Working rules
 
 - **One ticket at a time, one agent at a time.** Claim a ticket, finish it, then claim the next. Never
-  claim a second ticket while one is in progress, and don't run several board agents in parallel: they
-  produce conflicting branches and review noise.
+  claim a second ticket while one is in progress, and don't run several board agents in parallel in one
+  checkout: they produce conflicting branches and review noise. To work several tickets at once, set the
+  board's **Parallel runs** instead: the board's agent then runs each ticket in its own git worktree.
 - **A fresh agent per ticket.** When you are orchestrating, spawn a new subagent for each ticket and give it
   only the ticket id and this skill. Let it finish and report back before spawning the next one. This keeps
   each agent's context small — never carry one agent through several tickets.

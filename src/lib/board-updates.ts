@@ -20,6 +20,7 @@ export type BoardPatch = Partial<
     | 'agentName'
     | 'agentModel'
     | 'agentEffort'
+    | 'agentConcurrency'
   >
 >
 export type TicketPatch = Partial<
