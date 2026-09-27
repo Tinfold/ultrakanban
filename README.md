@@ -185,12 +185,22 @@ Running the services on the host, not in the containers, is deliberate: the agen
 
 **What the loop does.** Each round, it first checks the tickets the agent holds and starts a run for one with new
 feedback: a ticket comment, a pull request comment, review or inline review comment, a check on the latest commit
-that ran and failed, or merge conflicts. The prompt lists exactly what is new. Bots and the agent's own replies
+that ran and failed, merge conflicts, or someone moving the ticket back into In progress (e.g. from Review, to
+ask for more work). The prompt lists exactly what is new. Bots and the agent's own replies
 don't count: the agent posts from the same GitHub account as you, so the skill makes it end every pull request
 comment with `<!-- ultrakanban:<agent> -->`, which the loop ignores. A pull request closed without merging moves
 its ticket to the `Cancelled` column (`CANCELLED_COLUMN`; add it to the board, the loop won't fall back to Todo)
 and unassigns it, so it is never picked up again. When none of its tickets needs work, it claims a new Todo ticket,
 and when there is nothing to do at all it waits `IDLE_SECONDS` (60 under the supervisor).
+
+You can drag the agent's tickets like any other. A ticket you move back to Todo (`TODO_COLUMN`), or to a column
+before it such as Backlog, goes back to the queue: the loop releases it, with a note, and forgets its state, so it is
+claimed again from Todo like any other ticket (park it in Backlog to keep it from being picked up). While a run is
+going, the loop checks its ticket every `TICKET_CHECK_SECONDS` (30), and stops the run, with a note, as soon as
+someone takes the ticket away: moves it back to the queue like that, to Cancelled or Done, unassigns or reassigns it,
+or deletes it. Moving a ticket back into In progress asks for more work (see above). Moving one into Review changes
+nothing, and the loop leaves tickets it doesn't hold alone, so dragging a Todo ticket to In progress yourself keeps it
+away from the agent.
 
 Nothing is missed, even while a run is going: before each run the loop notes the newest ticket activity id,
 pull request comment, review and inline comment ids, and the head commit's checks and conflict state. It saves

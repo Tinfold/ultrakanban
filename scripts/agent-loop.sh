@@ -19,9 +19,17 @@
 #     which end with the marker line <!-- ultrakanban:AGENT -->)
 #   - checks on the pull request's latest commit that ran and failed (see ci_status for what counts)
 #   - merge conflicts with the base branch
+#   - someone else moving the ticket into the in-progress column, e.g. back from review: they want more work on it
 # A pull request closed without merging moves its ticket to the cancelled column. Only when none of its tickets
 # needs work does it claim the next ticket from the todo column, or, when the board's agentBacklog setting is on and
 # the todo column has none left, from the backlog column.
+#
+# People can drag the agent's tickets around the board too. A ticket someone moves back to the todo column, or to a
+# column before it such as a backlog, goes back to the queue: the loop releases it (unassigns it) and forgets its
+# state, and it is claimed again from the todo column like any other ticket. While a run is going, the loop checks its
+# ticket every TICKET_CHECK_SECONDS, and stops the run when someone else takes the ticket away from the agent: moves it
+# back to the queue like that, or to the done or cancelled column, unassigns or reassigns it, or deletes it. Moving a
+# ticket into the review column, or tickets the agent doesn't hold, changes nothing for the loop.
 #
 # Before each run the loop takes a snapshot of what it hands over: the newest ticket activity id, the newest pull
 # request comment, review and inline comment ids, and the failing checks and conflict state of the pull request's
@@ -72,6 +80,7 @@
 #   CANCELLED_COLUMN    column for tickets whose pull request was closed without merging (default: Cancelled)
 #   IDLE_SECONDS        wait between rounds when there is nothing to do (default: 300)
 #   TICKET_TIMEOUT      stop a run that takes longer than this, as accepted by timeout(1) (default: 4h)
+#   TICKET_CHECK_SECONDS  how often a run's ticket is checked for having been taken away from the agent (default: 30)
 #   RETRY_SECONDS       wait before retrying a failed run, doubled after each failure (default: 600)
 #   MAX_ATTEMPTS        failed runs in a row before waiting for new feedback (default: 3)
 #   MAX_CI_RUNS         runs in a row started only by failing CI, with no human feedback between (default: 2)
@@ -111,6 +120,7 @@ IN_PROGRESS_COLUMN=${IN_PROGRESS_COLUMN:-In progress}
 CANCELLED_COLUMN=${CANCELLED_COLUMN:-Cancelled}
 IDLE_SECONDS=${IDLE_SECONDS:-300}
 TICKET_TIMEOUT=${TICKET_TIMEOUT:-4h}
+TICKET_CHECK_SECONDS=${TICKET_CHECK_SECONDS:-30}
 RETRY_SECONDS=${RETRY_SECONDS:-600}
 MAX_ATTEMPTS=${MAX_ATTEMPTS:-3}
 MAX_CI_RUNS=${MAX_CI_RUNS:-2}
@@ -149,6 +159,11 @@ def clip: if length > 2000 then .[:2000] + " [...]" else . end;
    else "" end) as $conflict
 | [ ($activity[] | select(.type == "comment" and .id > ($s.activity // 0) and (.actor | ours | not))
       | {key: "t\(.id)", text: "Ticket comment from \(.actor):\n\(.data.body // "" | clip)"}),
+    ($activity[] | select(.type == "moved" and .id > ($s.activity // 0) and (.actor | ours | not))
+      | select((.data.to // "" | ascii_downcase) == ($working | ascii_downcase))
+      | {key: "t\(.id)", text: ("\(.actor) moved the ticket from \(.data.from) to \(.data.to):\n"
+         + "They want more work on it. Look for what in their comments on the ticket and the pull request. If they "
+         + "don't say, ask them in a ticket comment and leave the ticket in \(.data.to).")}),
     ($issue[] | select(.id > ($s.issue // 0) and feedback)
       | {key: "i\(.id)", text: "Pull request comment from \(.user.login) (\(.html_url)):\n\(.body // "" | clip)"}),
     ($reviews[] | select(.id > ($s.review // 0) and feedback and .state != "PENDING")
@@ -198,6 +213,21 @@ def clip: if length > 2000 then .[:2000] + " [...]" else . end;
     and $now >= ($s.failedAt // 0) + $retry * pow(2; ($s.failures // 1) - 1))))
 JQ
 
+# The columns of a board (GET /boards/:id) in which the agent doesn't work tickets, as {id: {name, queued}}: the todo
+# column and the columns before it, where tickets wait to be worked (queued), and the done and cancelled columns.
+read -r -d '' IDLE_COLUMNS <<'JQ'
+def named($name): [.columns[] | select((.name | ascii_downcase) == ($name | ascii_downcase))][0];
+(.board.doneColumnId // "") as $done
+| (.board.reviewColumnId // "") as $review
+| (named($cancelled).id // "") as $cancelledId
+| (named($working).id // "") as $workingId
+| (named($todo).position // -1) as $todoAt
+| [.columns[] | (.id == $done or .id == $cancelledId) as $closed
+    | select($closed or (.position <= $todoAt and .id != $review and .id != $workingId))
+    | {key: .id, value: {name, queued: ($closed | not)}}]
+| from_entries
+JQ
+
 # Works the next ticket at the given effort level (the ticket's own), or at EFFORT when it is empty.
 use_effort() {
   effort=${1:-$EFFORT}
@@ -239,6 +269,15 @@ paused() {
 }
 
 get() { curl -sf "$KANBAN/api$1"; }
+
+# The board's IDLE_COLUMNS.
+idle_columns() {
+  jq -ce --arg todo "$TODO_COLUMN" --arg working "$IN_PROGRESS_COLUMN" --arg cancelled "$CANCELLED_COLUMN" \
+    "$IDLE_COLUMNS" <<<"${1:-$(get "/boards/$BOARD")}"
+}
+
+# Whether a name is the agent's: the loop's own or one of its workers'.
+ours() { [[ $1 == "$AGENT" || $1 == "$LOOP_ACTOR" || $1 == "$AGENT/"* ]]; }
 
 # Sends JSON (POST unless a method is given) as the worker, or as the given actor; prints the response body and then
 # the HTTP status on its own line.
@@ -441,20 +480,72 @@ limit_reset() {
   printf '%s\n' "$at"
 }
 
+# Prints why the agent no longer has a ticket, given the board's IDLE_COLUMNS: someone else moved it to one of them,
+# unassigned it or gave it to someone else, or deleted it. Fails while the agent still has it, and when the agent
+# moved or released it itself (e.g. to the cancelled column, as the skill says to when its pull request was closed).
+taken_away() {
+  local id=$1 idle=$2 response ticket why actor
+  response=$(curl -s -w '\n%{http_code}' "$KANBAN/api/tickets/$id")
+  case ${response##*$'\n'} in
+    404)
+      echo "the ticket was deleted"
+      return 0
+      ;;
+    200) ticket=${response%$'\n'*} ;;
+    *) return 1 ;;
+  esac
+  why=$(jq -r --argjson idle "$idle" --arg agent "$AGENT" --arg loop "$LOOP_ACTOR" '
+    def ours: . == $agent or . == $loop or startswith($agent + "/");
+    if $idle[.columnId] then "it was moved to \($idle[.columnId].name)"
+    elif .assignee == null then "it was unassigned"
+    elif .assignee | ours | not then "it was reassigned to \(.assignee)"
+    else empty end' <<<"$ticket") || return 1
+  [[ -n $why ]] || return 1
+  actor=$(get "/tickets/$id/activity" |
+    jq -r '[.[] | select(.type | IN("moved", "claimed", "released"))] | last | .actor // ""') || return 1
+  ours "$actor" && return 1
+  printf '%s%s\n' "$why" "${actor:+ (by $actor)}"
+}
+
+# Checks a run's ticket every TICKET_CHECK_SECONDS while the run (process pid) goes on, and stops the run if someone
+# takes the ticket away from the agent, writing why to the given file.
+watch_run() {
+  local id=$1 pid=$2 file=$3 idle= why
+  trap - INT TERM
+  if [[ -n $lock_fd ]]; then exec {lock_fd}>&-; fi
+  while sleep "$TICKET_CHECK_SECONDS" && kill -0 "$pid" 2>/dev/null; do
+    [[ -n $idle ]] || idle=$(idle_columns) || { idle=; continue; }
+    why=$(taken_away "$id" "$idle") || continue
+    printf '%s\n' "$why" >"$file"
+    log "ticket $id: $why; stopping its run"
+    kill -TERM "$pid"
+    return
+  done
+}
+
 # Runs claude on a ticket with the given prompt and further arguments (the session to start or resume), prints its
 # final message (and keeps it in claude_result, and what it printed to stderr in claude_errors) and reports the tokens
-# it used. Returns claude's exit status.
+# it used. Returns claude's exit status. If someone takes the ticket away from the agent meanwhile, the run is stopped
+# and claude_stopped says why (it is empty otherwise).
 run_claude() {
-  local id=$1 prompt=$2 output errors code usage response
+  local id=$1 prompt=$2 output errors stopped code usage response
   shift 2
-  output=$(mktemp) && errors=$(mktemp) || return 1
+  output=$(mktemp) && errors=$(mktemp) && stopped=$(mktemp) || return 1
   (
     # Without the ticket lock's descriptor: anything claude leaves running mustn't keep the ticket locked.
     if [[ -n $lock_fd ]]; then exec {lock_fd}>&-; fi
     exec timeout --foreground "$TICKET_TIMEOUT" claude -p ${claude_args[@]+"${claude_args[@]}"} --effort "$effort" \
       --output-format json "$@"
-  ) <<<"$prompt" >"$output" 2>"$errors"
+  ) <<<"$prompt" >"$output" 2>"$errors" &
+  running=$!
+  watch_run "$id" "$running" "$stopped" &
+  watcher=$!
+  wait "$running"
   code=$?
+  kill "$watcher" 2>/dev/null
+  wait "$watcher" 2>/dev/null
+  running= watcher=
+  claude_stopped=$(<"$stopped")
   claude_errors=$(<"$errors")
   [[ -n $claude_errors ]] && printf '%s\n' "$claude_errors" >&2
   claude_result=$(jq -r '.result // empty' "$output" 2>/dev/null || cat "$output")
@@ -463,7 +554,7 @@ run_claude() {
     response=$(post "/tickets/$id/usage" "$usage")
     [[ ${response##*$'\n'} == 201 ]] || log "can't record the token usage of the run on $id: ${response%$'\n'*}"
   fi
-  rm -f "$output" "$errors"
+  rm -f "$output" "$errors" "$stopped"
   return "$code"
 }
 
@@ -484,6 +575,7 @@ run_on_ticket() {
   paused && return 0
   state=$(read_state "$id")
   session=$(jq -r '.session.id // ""' <<<"$state")
+  claude_stopped=
   if branch=$(checkout "$branch"); then
     if [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]]; then
       printf '%s %s\n' "$id" "$(git rev-parse HEAD)" >"$(run_file)"
@@ -533,6 +625,13 @@ The repository is checked out on $branch, freshly updated from origin$(
   fi
   if [[ $code == 0 ]]; then
     write_state "$id" "$snapshot"
+    return 0
+  fi
+  if [[ -n $claude_stopped ]]; then
+    # Someone took the ticket away from the agent, so this isn't a failure. The next round puts it back in the queue
+    # (see requeue) or forgets it.
+    update_state "$id" 'del(.session)'
+    note "$id" "Stopped the agent's run on this ticket: $claude_stopped."
     return 0
   fi
   if [[ $start == --resume && $claude_errors == *"No conversation found"* ]]; then
@@ -598,6 +697,27 @@ cancel() {
   log "ticket #$number ($id): $pr_url was closed without merging; moved it to $CANCELLED_COLUMN"
 }
 
+# Releases a ticket in the todo column or one before it (someone moved it back there), so that it is claimed again
+# like any other ticket, and forgets its state and unfinished work.
+requeue() {
+  local id=$1 number=$2 holder=$3 column=$4 response
+  response=$(post "/tickets/$id/release" "$(jq -nc --arg agent "$holder" '{agent: $agent}')" "$holder")
+  if [[ ${response##*$'\n'} != 200 ]]; then
+    log "error: ticket #$number ($id): can't release it from $column: ${response%$'\n'*}"
+    return 1
+  fi
+  rm -f "$(state_file "$id")"
+  if [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]]; then git update-ref -d "refs/ultrakanban/work/$id" 2>/dev/null; fi
+  if [[ ${column,,} == "${TODO_COLUMN,,}" ]]; then
+    note "$id" "The ticket is back in $column, so the agent released it. It will be claimed again from there like \
+any other ticket."
+  else
+    note "$id" "The ticket was moved to $column, so the agent released it. Move it to $TODO_COLUMN when it should be \
+worked on again."
+  fi
+  log "ticket #$number ($id): moved back to $column; released it"
+}
+
 # Reassigns a ticket held under another of the agent's names (another model or effort, or the bare agent name) to
 # the worker set by use_effort, in one versioned update.
 adopt() {
@@ -614,18 +734,21 @@ adopt() {
 
 # Checks the tickets the agent holds and handles the first one that needs work. Returns 1 if none did.
 handle_feedback() {
-  local board review cancelled tickets file id number column holder version ticket_effort pr_url repo pr_number pr \
-    branch ci issue reviews inline activity state triage items ci_note
+  local board review cancelled idle tickets file id number column holder version ticket_effort pr_url repo pr_number \
+    queued pr branch ci issue reviews inline activity state triage items ci_note
   claim_lock -s
   board=$(get "/boards/$BOARD") || { claim_unlock; log "can't read board $BOARD"; return 1; }
   review=$(jq -r '.board.reviewColumnId // ""' <<<"$board")
   cancelled=$(jq -r --arg name "$CANCELLED_COLUMN" \
     '[.columns[] | select((.name | ascii_downcase) == ($name | ascii_downcase)) | .id][0] // ""' <<<"$board")
-  tickets=$(jq -r --arg agent "$AGENT" --arg cancelled "$cancelled" '(.board.doneColumnId // "") as $done
+  idle=$(idle_columns "$board") || { claim_unlock; log "can't read the columns of board $BOARD"; return 1; }
+  tickets=$(jq -r --arg agent "$AGENT" --arg cancelled "$cancelled" --argjson idle "$idle" \
+    '(.board.doneColumnId // "") as $done
     | .tickets[] | select(.assignee | . != null and (. == $agent or startswith($agent + "/")))
     | select(.columnId != $done and .columnId != $cancelled)
     | [.id, .number, .columnId, .assignee, .version, .agentEffort // "-", .pullRequest.url // "-",
-       .pullRequest.repo // "-", .pullRequest.number // "-"] | @tsv' \
+       .pullRequest.repo // "-", .pullRequest.number // "-",
+       ($idle[.columnId] | if .queued then .name else "-" end)] | @tsv' \
     <<<"$board")
   board=
 
@@ -643,11 +766,15 @@ handle_feedback() {
   fi
   claim_unlock
 
-  while IFS=$'\t' read -r -u 3 id number column holder version ticket_effort pr_url repo pr_number; do
+  while IFS=$'\t' read -r -u 3 id number column holder version ticket_effort pr_url repo pr_number queued; do
     [[ -n $id ]] || continue
     # Another loop is working this one.
     unlock_ticket
     lock_ticket "$id" || continue
+    if [[ $queued != - ]]; then
+      requeue "$id" "$number" "$holder" "$queued"
+      continue
+    fi
     pr=null branch= ci=null issue='[]' reviews='[]' inline='[]'
     if [[ $pr_url != - ]]; then
       pr=$(gh pr view "$pr_url" \
@@ -677,8 +804,9 @@ handle_feedback() {
     activity=$(get "/tickets/$id/activity") || { log "can't read the activity of $id"; continue; }
     state=$(read_state "$id")
     triage=$(printf '%s\n' "$activity" "$pr" "$ci" "$issue" "$reviews" "$inline" "$state" |
-      jq -cs --arg agent "$AGENT" --arg loop "$LOOP_ACTOR" --arg marker "$MARKER" --argjson now "$(date +%s)" \
-        --argjson retry "$RETRY_SECONDS" --argjson max "$MAX_ATTEMPTS" --argjson maxci "$MAX_CI_RUNS" "$TRIAGE") ||
+      jq -cs --arg agent "$AGENT" --arg loop "$LOOP_ACTOR" --arg marker "$MARKER" --arg working "$IN_PROGRESS_COLUMN" \
+        --argjson now "$(date +%s)" --argjson retry "$RETRY_SECONDS" --argjson max "$MAX_ATTEMPTS" \
+        --argjson maxci "$MAX_CI_RUNS" "$TRIAGE") ||
       { log "can't triage $id"; continue; }
     activity= pr= ci= issue= reviews= inline=
 
@@ -712,7 +840,8 @@ Read the ticket's activity and, if it has a pull request, its comments, reviews,
 then address everything above: answer questions, make the requested changes, fix failing checks, and resolve merge
 conflicts by merging the base branch into the pull request's branch. Commit and push to that branch.
 Reply where each piece of feedback was given: on the pull request for pull request feedback (with the marker line).
-If the ticket isn't in review yet, keep working it and submit it for review.$(
+If the ticket isn't in review yet, keep working it and submit it for review, unless the feedback above says
+otherwise.$(
       [[ $(jq -r .ci <<<"$triage") == true ]] && printf '%s' "
 Failing CI started this run. First find out from the failing job's log whether the failure comes from the code. If it
 doesn't (billing or spending limits, runners or infrastructure, a flaky test unrelated to the change, missing
@@ -795,7 +924,10 @@ sleeper=
 # Set when Claude usage runs out: no run starts before this time (seconds since the epoch). Kept in PAUSE_FILE, so
 # the other loops working the board wait too.
 paused_until=0
-trap 'log "stopped"; [[ -n $sleeper ]] && kill "$sleeper" 2>/dev/null; exit 0' INT TERM
+# The run in progress and the process watching its ticket (see run_claude), if any.
+running=
+watcher=
+trap 'log "stopped"; kill $sleeper $running $watcher 2>/dev/null; exit 0' INT TERM
 
 # `agent-loop.sh save-work` only keeps the work of an unfinished run in the current checkout (see save_work):
 # agent-board.sh does this before it removes a worktree.
