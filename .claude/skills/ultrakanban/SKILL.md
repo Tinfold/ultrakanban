@@ -57,6 +57,7 @@ curl -s -X POST $KANBAN/api/boards/$BOARD/tickets/claim-next \
 ```
 
 Only one agent can win a ticket. `404 no_ticket_available` means there is nothing to do: stop and report that.
+It skips blocked tickets: tagged `blocked`, or waiting for an unfinished ticket (`blocked by #12`, `depends on #12`).
 To work a specific ticket instead, use `POST /api/tickets/$TICKET/claim` with the same body minus `column`.
 
 ## 2. Read the ticket and its comments
