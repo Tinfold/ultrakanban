@@ -76,6 +76,9 @@
 #   MAX_ATTEMPTS        failed runs in a row before waiting for new feedback (default: 3)
 #   MAX_CI_RUNS         runs in a row started only by failing CI, with no human feedback between (default: 2)
 #   SKIP_PERMISSIONS    1 passes --dangerously-skip-permissions to claude, 0 doesn't (default: 1)
+#   STRICT_MCP          1 passes --strict-mcp-config to claude, so runs load no MCP servers (the account's connectors,
+#                       plugins' or the repository's) except those given with --mcp-config in CLAUDE_ARGS: their tools
+#                       and instructions are sent with every request of a run. 0 loads them as usual (default: 1)
 #   CLAUDE_ARGS         extra arguments for claude; set the model and effort with MODEL and EFFORT, not here
 #   STATE_DIR           where watermarks are kept (default: $XDG_STATE_HOME/ultrakanban-agent-loop/BOARD-AGENT)
 #   AGENT_LOOP_CLEAN    1 when running in a dedicated clone: before each run the loop fetches, discards local
@@ -122,6 +125,9 @@ read -r -a claude_args <<<"${CLAUDE_ARGS:-}"
 claude_args+=(--model "$MODEL")
 if [[ ${SKIP_PERMISSIONS:-1} == 1 ]]; then
   claude_args+=(--dangerously-skip-permissions)
+fi
+if [[ ${STRICT_MCP:-1} == 1 ]]; then
+  claude_args+=(--strict-mcp-config)
 fi
 mkdir -p "$STATE_DIR" || exit 1
 

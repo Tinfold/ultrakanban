@@ -36,6 +36,11 @@ agents can work the same board safely.
   Don't use `/loop` or a long-lived orchestrator session for this.
 - **Read before you write.** Ticket comments and pull request review comments are how humans steer you.
 - **Never move a ticket to the done column.** It moves there by itself when the pull request is merged.
+- **Keep your context small.** Everything a command prints stays in the conversation and is sent again with every
+  later step, so most of a run's tokens are re-reads of old output. Search first (`grep -n`) and read the lines you
+  need (`sed -n 120,180p`) instead of printing whole large files; trim board JSON with `jq` (a board lists every
+  ticket); print only the failures and summary of long test or build output; and look at each screenshot once,
+  cropped to what changed, rather than reading full-page captures again.
 
 ## 1. Claim a ticket
 

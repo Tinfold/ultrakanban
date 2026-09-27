@@ -228,6 +228,10 @@ asking. Run it on a machine, VM or user account that only has access to this wor
 as root). `SKIP_PERMISSIONS=0` turns it off; then allow the tools the work needs in the project's
 `.claude/settings.json`.
 
+**MCP servers:** runs load none (`--strict-mcp-config`), since every request of a run carries their tools and
+instructions. To give the agent some, pass them with `CLAUDE_ARGS="--mcp-config <file>"`, or set `STRICT_MCP=0` to
+load the usual ones (the account's connectors, plugins' and the repository's `.mcp.json`).
+
 To run the loop by hand instead, start it in a dedicated clone of the repository:
 
 ```sh
