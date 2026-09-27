@@ -42,6 +42,13 @@ agents can work the same board safely.
   pushed). If someone moves it from review back to In progress, they want more work on it: find out what from their
   comments, or ask in a ticket comment. Moving it into review yourself is still how you submit it. Re-read the
   ticket (`GET /api/tickets/$TICKET`) before you submit it for review, to be sure it is still yours.
+- **Mark a ticket blocked before you hand it back for being blocked.** If a ticket can't be worked yet because it
+  waits for something else, don't just release it: `claim-next` would give it straight back to the next run, which
+  spends tokens finding out the same thing. First mark it so `claim-next` skips it: append `Blocked by #12` to its
+  description when it waits for another ticket (it becomes claimable again by itself once #12 is done), or tag it
+  `blocked` when it waits for something off the board (a person has to remove the tag). Update it with
+  `PATCH /api/tickets/$TICKET` and `ifVersion`, keeping its other tags. Then say why in a ticket comment and release
+  it (`POST /api/tickets/$TICKET/release` with `{"agent":"<you>","moveTo":"<the column it came from>"}`).
 - **Keep your context small.** Everything a command prints stays in the conversation and is sent again with every
   later step, so most of a run's tokens are re-reads of old output. Search first (`grep -n`) and read the lines you
   need (`sed -n 120,180p`) instead of printing whole large files; trim board JSON with `jq` (a board lists every

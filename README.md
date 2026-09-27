@@ -177,7 +177,8 @@ progress** column holds fewer tickets than **Parallel runs**: tickets already in
 backlog isn't pulled into progress while they're being worked. The loop reads the setting each time it looks for a
 ticket, so it takes effect without a restart. From either column it skips blocked tickets: those tagged `blocked`, and
 those whose description says they wait for another ticket (`blocked by #12`, `depends on #3 and #4`) until that ticket
-is done or its pull request is merged.
+is done or its pull request is merged. An agent that finds a ticket blocked marks it this way before handing it back,
+so the loop doesn't keep claiming it only to find out again that it can't be done yet.
 
 **Names.** The board's **Agent name** (default `claude`) names the loop, which controls the work; its notes on
 tickets come from `<agent>-loop`. The runs it starts claim tickets as `<agent>/<model>/<effort>`, from the board's

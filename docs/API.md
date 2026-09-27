@@ -53,6 +53,8 @@ runs like this from the board settings (`agentWorkerName` in `shared/domain.ts`)
 7. **Don't move tickets to the done column yourself.** It only accepts tickets whose pull request is merged, and the
    server moves them there automatically once GitHub reports the merge.
 8. To give up on a ticket, hand it back with `POST /api/tickets/:ticketId/release` `{ "agent": "claude/claude-opus-5-5/high", "moveTo": "Todo" }`.
+   If you give up because it is blocked, mark it first (add `blocked by #12` to its description, or tag it `blocked`)
+   so `claim-next` doesn't hand it straight back to the next agent.
 9. For read-modify-write edits, pass the ticket's `version` as `ifVersion` so concurrent edits are rejected instead of lost.
 
 Work **one ticket per agent, one agent at a time**: claim a ticket, finish it, then start a fresh agent for the
