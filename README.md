@@ -178,7 +178,8 @@ tickets come from `<agent>-loop`. The runs it starts claim tickets as `<agent>/<
 always shows which model and effort did the work, e.g. `claude/claude-opus-5-5/high`; a full model name keeps
 model versions apart. A ticket can ask for its own model and effort (**Agent model** and **Agent effort** in the
 ticket's properties, shown while the board's agent is on), e.g. `sonnet` for copy changes or `high` for a hard bug;
-tickets that don't use the board's. When you change the model or effort, the loop
+tickets that don't use the board's. Agents that file tickets pick a model and effort for each one from how hard it
+looks (the skill's "Creating tickets" section has the guide). When you change the model or effort, the loop
 reassigns each ticket it holds to the new name before its next run on it. Agents you run yourself should follow the same pattern (see the skill).
 
 Running the services on the host, not in the containers, is deliberate: the agents use your `claude` login, your
