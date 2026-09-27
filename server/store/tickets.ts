@@ -8,7 +8,9 @@ import {
   type PullRequestState,
   type Ticket,
 } from '../../shared/domain.ts'
+import { parseChecklist, setChecklistItem } from '../../shared/checklist.ts'
 import type {
+  CheckItemInput,
   ClaimNextInput,
   ClaimTicketInput,
   CreateTicketInput,
@@ -290,6 +292,22 @@ export function updateTicket(id: string, input: UpdateTicketInput, actor: string
   const relinked = input.pullRequest !== undefined && linkPullRequest(ticket, input.pullRequest, actor)
 
   if (!changed.length && !reassigned && !relinked) return ticket
+  bumpVersion(id)
+  return getTicket(id)
+}
+
+/** Checks off or unchecks the checklist item at `index` of the ticket's description, leaving the rest as is. */
+export function checkItem(id: string, index: number, input: CheckItemInput, actor: string): Ticket {
+  const ticket = getTicket(id)
+  assertVersion(ticket, input.ifVersion)
+  const item = parseChecklist(ticket.description)[index]
+  if (!item) throw notFound('Checklist item', index)
+  const checked = input.checked ?? true
+  if (item.checked === checked) return ticket
+
+  touchBoard(ticket.boardId)
+  updateRow('tickets', id, { description: setChecklistItem(ticket.description, index, checked) })
+  logActivity(id, actor, 'checked', { item: item.text, checked })
   bumpVersion(id)
   return getTicket(id)
 }

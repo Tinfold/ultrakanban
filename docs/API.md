@@ -36,6 +36,8 @@ runs like this from the board settings (`agentWorkerName` in `shared/domain.ts`)
    Or claim a specific ticket: `POST /api/tickets/:ticketId/claim`.
 3. Read the ticket's comments (`GET /api/tickets/:ticketId/activity`) before starting: they may be newer than
    the description. Report progress and decisions with `POST /api/tickets/:ticketId/comments`.
+   If the description has a checklist (`- [ ] step`), check off each step as you finish it with
+   `POST /api/tickets/:ticketId/checklist/:index` rather than rewriting the description.
 4. **If the change is visible** (UI, styling, charts, CLI output), attach screenshots or a short screen recording to
    the ticket so reviewers can see the result without running it:
    `curl -X POST $API/tickets/$TICKET/attachments -H 'X-Actor: claude/claude-opus-5-5/high' -F file=@screenshot.png`.
@@ -157,6 +159,12 @@ interface Ticket {
   updatedAt: string
 }
 
+interface ChecklistItem {
+  index: number // 0-based, among the description's checklist items
+  text: string
+  checked: boolean
+}
+
 interface PullRequest {
   url: string // https://github.com/owner/repo/pull/123
   repo: string // owner/repo
@@ -238,6 +246,8 @@ overrides the board's for that ticket: the loop runs it at that effort and under
 | POST   | `/boards/:boardId/tickets/claim-next`  | `{ agent, column: ref, tags?: ref[], moveTo?: ref }`                                                                                                          | `Ticket`: highest priority, then earliest due date, then board order, among unassigned tickets in `column` having all `tags`                                              |
 | POST   | `/tickets/:ticketId/review`            | `{ agent, pullRequest: url, comment?: markdown, ifVersion? }`                                                                                                 | `Ticket`: links the pull request, assigns `agent`, posts `comment`, moves to the review column; `409` if claimed by someone else, `400` if the board has no review column |
 | POST   | `/tickets/:ticketId/pull-request/sync` |                                                                                                                                                               | `Ticket` after checking its pull request on GitHub now                                                                                                                    |
+| GET    | `/tickets/:ticketId/checklist`         |                                                                                                                                                               | `ChecklistItem[]`: the description's task list items (`- [ ]` / `- [x]`), outside code blocks                                                                             |
+| POST   | `/tickets/:ticketId/checklist/:index`  | `{ checked?: boolean, ifVersion? }` (`checked` defaults to `true`)                                                                                            | `Ticket` with the item at `index` (0-based) checked off or unchecked and the rest of the description untouched; `404` if there is no such item                            |
 | GET    | `/tickets/:ticketId/activity`          |                                                                                                                                                               | `Activity[]` (oldest first)                                                                                                                                               |
 | POST   | `/tickets/:ticketId/comments`          | `{ body }` (markdown)                                                                                                                                         | `Activity`                                                                                                                                                                |
 

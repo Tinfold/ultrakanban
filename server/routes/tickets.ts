@@ -1,7 +1,9 @@
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES } from '../../shared/domain.ts'
+import { parseChecklist } from '../../shared/checklist.ts'
 import {
+  checkItemSchema,
   claimTicketSchema,
   commentSchema,
   mergeTicketSchema,
@@ -20,6 +22,7 @@ import { listActivity } from '../store/activity.ts'
 import { createAttachment, listAttachments } from '../store/attachments.ts'
 import {
   addComment,
+  checkItem,
   claimTicket,
   deleteTicket,
   getTicket,
@@ -40,6 +43,13 @@ export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles }: AppS
       const ticket = transaction(() => updateTicket(c.req.param('ticketId'), input, actorOf(c)))
       pullRequests.checkSoon(ticket)
       return c.json(ticket)
+    })
+    .get('/:ticketId/checklist', (c) => c.json(parseChecklist(getTicket(c.req.param('ticketId')).description)))
+    .post('/:ticketId/checklist/:index', async (c) => {
+      const index = Number(c.req.param('index'))
+      if (!Number.isInteger(index) || index < 0) throw badRequest('Checklist item index must be a whole number, from 0')
+      const input = await readJson(c, checkItemSchema)
+      return c.json(transaction(() => checkItem(c.req.param('ticketId'), index, input, actorOf(c))))
     })
     .post('/:ticketId/review', async (c) => {
       const input = await readJson(c, submitForReviewSchema)

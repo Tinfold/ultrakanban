@@ -134,6 +134,12 @@ export const updateTicketSchema = z.object({
   ifVersion: version.optional(),
 })
 
+/** Checks off (or with `checked: false` unchecks) one checklist item of a ticket's description. */
+export const checkItemSchema = z.object({
+  checked: z.boolean().default(true),
+  ifVersion: version.optional(),
+})
+
 export const moveTicketSchema = z.object({
   column: ref,
   position: position.optional(),
@@ -249,6 +255,7 @@ export type CreateTagInput = z.input<typeof createTagSchema>
 export type UpdateTagInput = z.input<typeof updateTagSchema>
 export type CreateTicketInput = z.input<typeof createTicketSchema>
 export type UpdateTicketInput = z.input<typeof updateTicketSchema>
+export type CheckItemInput = z.input<typeof checkItemSchema>
 export type MoveTicketInput = z.input<typeof moveTicketSchema>
 export type ClaimTicketInput = z.input<typeof claimTicketSchema>
 export type ReleaseTicketInput = z.input<typeof releaseTicketSchema>

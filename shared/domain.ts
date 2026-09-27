@@ -210,6 +210,7 @@ export interface BoardDetail {
 export type Activity =
   | ActivityBase<'created', { column: string }>
   | ActivityBase<'updated', { fields: string[] }>
+  | ActivityBase<'checked', { item: string; checked: boolean }>
   | ActivityBase<'moved', { from: string; to: string }>
   | ActivityBase<'claimed', { assignee: string }>
   | ActivityBase<'released', { assignee: string }>

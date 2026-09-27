@@ -19,6 +19,8 @@ function verb(entry: OverviewActivity) {
       return 'created'
     case 'updated':
       return 'edited'
+    case 'checked':
+      return entry.data.checked ? 'checked off an item of' : 'unchecked an item of'
     case 'moved':
       return `moved to ${entry.data.to}`
     case 'claimed':
