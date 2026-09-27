@@ -20,8 +20,8 @@ priorities, due dates, checklists, comments and an activity log, backed by SQLit
   for their agent to resolve
 - **Quick merge**: merge a single ticket's pull request from its card in the review column
 - **Overview**: a dashboard across all boards (`/overview`): which agents are working on what right now, time
-  worked and tickets completed per agent, activity and work time per day, per-board counts and a cross-board feed; stale or duplicate agents can be
-  cleared from it
+  worked, tokens used and tickets completed per agent, activity, work time and token usage per day, per-board counts
+  and a cross-board feed; stale or duplicate agents can be cleared from it
 - **Live**: changes made by agents or other tabs show up right away (server-sent events)
 - **Responsive**: works with a mouse, keyboard or touch (long-press to drag); light, dark and system themes
 

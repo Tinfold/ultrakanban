@@ -6,6 +6,7 @@ import {
   commentSchema,
   mergeTicketSchema,
   moveTicketSchema,
+  recordUsageSchema,
   releaseTicketSchema,
   submitForReviewSchema,
   updateTicketSchema,
@@ -27,6 +28,7 @@ import {
   submitForReview,
   updateTicket,
 } from '../store/tickets.ts'
+import { listUsage, recordUsage } from '../store/usage.ts'
 
 const tooLargeMessage = `Attachments can be at most ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB`
 
@@ -112,6 +114,14 @@ export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles }: AppS
     .get('/:ticketId/activity', (c) => {
       const ticket = getTicket(c.req.param('ticketId'))
       return c.json(listActivity(ticket.id))
+    })
+    .get('/:ticketId/usage', (c) => c.json(listUsage(c.req.param('ticketId'))))
+    .post('/:ticketId/usage', async (c) => {
+      const input = await readJson(c, recordUsageSchema)
+      return c.json(
+        transaction(() => recordUsage(c.req.param('ticketId'), input)),
+        201,
+      )
     })
     .post('/:ticketId/comments', async (c) => {
       const { body } = await readJson(c, commentSchema)

@@ -1,7 +1,7 @@
 import { BotIcon } from 'lucide-react'
 import { Link } from 'wouter'
 import type { OverviewBoard } from '@shared/domain'
-import { formatDateTime, formatRelative } from '@/lib/format'
+import { formatDateTime, formatRelative, formatTokens } from '@/lib/format'
 
 const COUNTS = [
   ['open', 'Open'],
@@ -29,6 +29,9 @@ export function BoardTable({ boards }: { boards: OverviewBoard[] }) {
               </th>
             ))}
             <th scope="col" className="px-3 py-2 text-right font-medium whitespace-nowrap">
+              Tokens
+            </th>
+            <th scope="col" className="px-3 py-2 text-right font-medium whitespace-nowrap">
               Last activity
             </th>
           </tr>
@@ -55,6 +58,9 @@ export function BoardTable({ boards }: { boards: OverviewBoard[] }) {
                   {board[key] || <span className="text-muted-foreground/60">0</span>}
                 </td>
               ))}
+              <td className="px-3 py-2 text-right tabular-nums" title={`${board.tokens.toLocaleString()} tokens`}>
+                {board.tokens ? formatTokens(board.tokens) : <span className="text-muted-foreground/60">0</span>}
+              </td>
               <td className="px-3 py-2 text-right whitespace-nowrap text-muted-foreground">
                 {board.lastActivityAt ? (
                   <time dateTime={board.lastActivityAt} title={formatDateTime(board.lastActivityAt)}>

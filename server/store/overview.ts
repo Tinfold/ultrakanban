@@ -1,7 +1,9 @@
 import {
   type Activity,
+  addUsage,
   AGENT_EFFORTS,
   agentWorkerName,
+  noUsage,
   type Overview,
   type OverviewActivity,
   type OverviewAgent,
@@ -10,13 +12,17 @@ import {
   type OverviewEventKind,
   type OverviewRange,
   type OverviewTicket,
+  type OverviewUsage,
   type PullRequestState,
+  totalTokens,
+  type UsageTotals,
   type WorkSession,
   type WorkState,
 } from '../../shared/domain.ts'
 import { sql } from '../db.ts'
 import { type ActivityRow, toActivity } from './activity.ts'
 import { listBoards } from './boards.ts'
+import { toUsage, type UsageRow } from './usage.ts'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const RECENT_LIMIT = 30
@@ -182,6 +188,35 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
     workedMs.set(session.agent, (workedMs.get(session.agent) ?? 0) + duration)
   }
 
+  // Tokens agents' runs used.
+  const usage = sql
+    .all<UsageRow & { board_id: string }>(
+      `SELECT u.*, t.board_id FROM token_usage u JOIN tickets t ON t.id = u.ticket_id
+       WHERE u.created_at >= ? ORDER BY u.created_at, u.id`,
+      since,
+    )
+    .map((row): OverviewUsage => {
+      const { createdAt, agent, ticketId, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costUsd } =
+        toUsage(row)
+      return {
+        at: createdAt,
+        agent,
+        ticketId,
+        boardId: row.board_id,
+        inputTokens,
+        outputTokens,
+        cacheReadTokens,
+        cacheWriteTokens,
+        costUsd,
+      }
+    })
+  const usageBy = new Map<string, UsageTotals>()
+  const tokensOn = new Map<string, number>()
+  for (const run of usage) {
+    usageBy.set(run.agent, addUsage(usageBy.get(run.agent) ?? noUsage(), run))
+    tokensOn.set(run.boardId, (tokensOn.get(run.boardId) ?? 0) + totalTokens(run))
+  }
+
   // What everyone holds right now.
   const holdings = new Map<string, OverviewTicket[]>()
   const boardCounts = new Map<string, { open: number; working: number; review: number }>()
@@ -268,7 +303,7 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
   }
 
   const statusRank = { working: 0, review: 1, idle: 2 }
-  const agentNames = new Set([...hostAgents, ...holdings.keys(), ...workedMs.keys()])
+  const agentNames = new Set([...hostAgents, ...holdings.keys(), ...workedMs.keys(), ...usageBy.keys()])
   const hiddenAgents = [...agentNames].filter(isHidden).sort()
   const agents = [...agentNames]
     .filter((name) => !isHidden(name))
@@ -285,6 +320,7 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
         actions: actions.get(name) ?? 0,
         lastActiveAt: lastActive.get(name) ?? null,
         agentOf: agentBoards.get(name) ?? [],
+        usage: usageBy.get(name) ?? noUsage(),
       }
     })
     .sort(
@@ -301,6 +337,7 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
       ...counts,
       completed: completedOn.get(board.id) ?? 0,
       events: eventsOn.get(board.id) ?? 0,
+      tokens: tokensOn.get(board.id) ?? 0,
       lastActivityAt: boardLastActivity.get(board.id) ?? null,
     }
   })
@@ -330,6 +367,7 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
       completed: sum(completedOn.values()),
       activeAgents: agents.filter((agent) => agent.status === 'working').length,
       workedMs: sum(workedMs.values()),
+      usage: usage.reduce(addUsage, noUsage()),
     },
     agents,
     hiddenAgents,
@@ -337,6 +375,7 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
     events,
     sessions: clipped,
     completions: completions.sort((a, b) => a.at.localeCompare(b.at)),
+    usage,
     recent,
   }
 }
