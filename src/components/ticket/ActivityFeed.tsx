@@ -54,6 +54,12 @@ function describe(entry: Exclude<Activity, { type: 'comment' | 'attachment' }>) 
       return <>created this in {entry.data.column}</>
     case 'updated':
       return <>updated {entry.data.fields.map((field) => FIELD_LABELS[field] ?? field).join(', ')}</>
+    case 'checked':
+      return (
+        <>
+          {entry.data.checked ? 'checked off' : 'unchecked'} <span className="text-foreground">{entry.data.item}</span>
+        </>
+      )
     case 'moved':
       return (
         <>

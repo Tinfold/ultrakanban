@@ -60,6 +60,15 @@ are unclear, ask in a comment and stop rather than guessing.
 
 ## 3. Work, and report as you go
 
+If the description has a checklist, check off each step as you finish it (0-based, in the order they appear)
+instead of editing the description:
+
+```sh
+curl -s $KANBAN/api/tickets/$TICKET/checklist     # [{ "index": 0, "text": "...", "checked": false }, ...]
+curl -s -X POST $KANBAN/api/tickets/$TICKET/checklist/0 \
+  -H 'Content-Type: application/json' -H "X-Actor: $ME" -d '{"checked":true}'
+```
+
 Post a comment when you start something long, make a notable decision, or get blocked:
 
 ```sh

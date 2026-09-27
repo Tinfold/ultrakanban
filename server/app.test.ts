@@ -153,6 +153,59 @@ describe('tickets', () => {
   })
 })
 
+describe('checklists', () => {
+  const description = [
+    'Steps:',
+    '- [ ] reproduce',
+    '```md',
+    '- [ ] not a task, just code',
+    '```',
+    '  * [X] fix it',
+    '- [ ] add a test',
+  ].join('\n')
+
+  test('lists the checklist items of the description', async () => {
+    const ticket = await addTicket({ title: 'A', description })
+    const { body } = await call('GET', `/tickets/${ticket.id}/checklist`)
+
+    assert.deepEqual(body, [
+      { index: 0, text: 'reproduce', checked: false },
+      { index: 1, text: 'fix it', checked: true },
+      { index: 2, text: 'add a test', checked: false },
+    ])
+  })
+
+  test('agents check off one item without rewriting the description', async () => {
+    const ticket = await addTicket({ title: 'A', description })
+    const checked = await call<Ticket>('POST', `/tickets/${ticket.id}/checklist/2`, {}, 'alpha')
+    const unchecked = await call<Ticket>('POST', `/tickets/${ticket.id}/checklist/1`, { checked: false }, 'alpha')
+    const again = await call<Ticket>('POST', `/tickets/${ticket.id}/checklist/1`, { checked: false }, 'alpha')
+    const { body: activity } = await call<Activity[]>('GET', `/tickets/${ticket.id}/activity`)
+
+    assert.equal(checked.body.description, description.replace('- [ ] add a test', '- [x] add a test'))
+    assert.equal(unchecked.body.description, checked.body.description.replace('  * [X] fix it', '  * [ ] fix it'))
+    assert.equal(again.body.version, unchecked.body.version)
+    assert.deepEqual(
+      activity.filter((entry) => entry.type === 'checked').map(({ actor, data }) => ({ actor, data })),
+      [
+        { actor: 'alpha', data: { item: 'add a test', checked: true } },
+        { actor: 'alpha', data: { item: 'fix it', checked: false } },
+      ],
+    )
+  })
+
+  test('rejects unknown items and stale versions', async () => {
+    const ticket = await addTicket({ title: 'A', description })
+    const missing = await call<ApiErrorBody>('POST', `/tickets/${ticket.id}/checklist/3`, {})
+    const invalid = await call<ApiErrorBody>('POST', `/tickets/${ticket.id}/checklist/first`, {})
+    const stale = await call<ApiErrorBody>('POST', `/tickets/${ticket.id}/checklist/0`, { ifVersion: 9 })
+
+    assert.equal(missing.status, 404)
+    assert.equal(invalid.status, 400)
+    assert.equal(stale.body.error.code, 'version_conflict')
+  })
+})
+
 describe('agent claiming', () => {
   test('claim is exclusive until released', async () => {
     const ticket = await addTicket({ title: 'Work' })
