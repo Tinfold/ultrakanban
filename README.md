@@ -172,8 +172,10 @@ also run side by side, with no limit across boards: three enabled boards with tw
 agents working at once, all on your `claude` login and its usage limits.
 
 **Backlog.** The agent claims new tickets from the **Todo** column. Switch on **Take tickets from Backlog when Todo is
-empty** (`agentBacklog`) to let it go on to the **Backlog** column once Todo has none left. The loop reads the setting
-each time it looks for a ticket, so it takes effect without a restart.
+empty** (`agentBacklog`) to let it go on to the **Backlog** column once Todo has none left, as long as the **In
+progress** column holds fewer tickets than **Parallel runs**: tickets already in progress take up the slots, so the
+backlog isn't pulled into progress while they're being worked. The loop reads the setting each time it looks for a
+ticket, so it takes effect without a restart.
 
 **Names.** The board's **Agent name** (default `claude`) names the loop, which controls the work; its notes on
 tickets come from `<agent>-loop`. The runs it starts claim tickets as `<agent>/<model>/<effort>`, from the board's

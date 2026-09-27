@@ -23,7 +23,7 @@
 #   - someone else moving the ticket into the in-progress column, e.g. back from review: they want more work on it
 # A pull request closed without merging moves its ticket to the cancelled column. Only when none of its tickets
 # needs work does it claim the next ticket from the todo column, or, when the board's agentBacklog setting is on and
-# the todo column has none left, from the backlog column.
+# the todo column has none left and fewer than CLAIM_LIMIT tickets are in progress, from the backlog column.
 #
 # People can drag the agent's tickets around the board too. A ticket someone moves back to the todo column, or to a
 # column before it such as a backlog, goes back to the queue: the loop releases it (unassigns it) and forgets its
@@ -81,8 +81,8 @@
 #   EFFORT              effort level the workers run at unless the ticket sets its own: low, medium, high, xhigh
 #                       or max (default: medium)
 #   TODO_COLUMN         column to take new tickets from (default: Todo)
-#   BACKLOG_COLUMN      column to take new tickets from when the todo column has none and the board's agentBacklog
-#                       setting is on (default: Backlog)
+#   BACKLOG_COLUMN      column to take new tickets from when the todo column has none, the board's agentBacklog
+#                       setting is on and the in-progress column holds fewer than CLAIM_LIMIT tickets (default: Backlog)
 #   IN_PROGRESS_COLUMN  column to move claimed tickets to (default: In progress)
 #   CANCELLED_COLUMN    column for tickets whose pull request was closed without merging (default: Cancelled)
 #   IDLE_SECONDS        wait between rounds when there is nothing to do (default: 300)
