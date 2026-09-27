@@ -143,8 +143,10 @@ scripts/install-services.sh
 
 It installs and enables two systemd user services that start at login: `ultrakanban` (the board, as in
 [Running with Docker](#running-with-docker)) and `ultrakanban-agent`, the agent supervisor. It copies the agent
-scripts and the skill to `~/.local/share/ultrakanban-agent`, so run it again after updating. To keep everything
-running while you are logged out, also run `loginctl enable-linger`.
+scripts and the skill to `~/.local/share/ultrakanban-agent`, and the supervisor keeps those copies up to date: when
+you pull this checkout's default branch, it installs the new versions, and each agent loop switches to them before its
+next run. Run the script again only when the systemd units in `deploy/` change. To keep everything running while you
+are logged out, also run `loginctl enable-linger`.
 
 Then, per board, open **Board menu → Board settings**, set the **GitHub repository** (`owner/name`, or **New** to
 create one on GitHub with the server's login and link it) and switch on

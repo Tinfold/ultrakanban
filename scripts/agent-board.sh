@@ -4,7 +4,8 @@
 #
 # The board's agentConcurrency (1 when not set) is how many tickets it works at once: that many loops, the first in the
 # clone and each other one in its own git worktree of it (worktrees/<n>), sharing one state directory. If one loop
-# stops, the others are stopped too and the script exits, so systemd restarts them all.
+# stops, the others are stopped too and the script exits, so systemd restarts them all. When the installed scripts or
+# skill change, each loop stops before its next run, and once they all have, the script starts again with the new ones.
 #
 #   agent-board.sh <board id>
 #
@@ -70,21 +71,31 @@ if [[ -f $here/../skill/SKILL.md ]] && ! git -C "$dir/repo" ls-files --error-unm
 fi
 
 echo "working board $BOARD on $repo as $agent/$model/$effort, $concurrency ticket(s) at a time"
-export KANBAN BOARD AGENT=$agent MODEL=$model EFFORT=$effort STATE_DIR=$dir/state AGENT_LOOP_CLEAN=1
-if ((concurrency == 1)); then
-  cd "$dir/repo" && exec "$here/agent-loop.sh"
-  exit 1
-fi
-
+export KANBAN BOARD AGENT=$agent MODEL=$model EFFORT=$effort STATE_DIR=$dir/state AGENT_LOOP_CLEAN=1 \
+  WATCH_FILES="$here/agent-loop.sh:$here/agent-board.sh:$here/../skill/SKILL.md"
 pids=()
 trap 'kill "${pids[@]}" 2>/dev/null; wait; exit 0' INT TERM
 for n in "${!checkouts[@]}"; do
-  (cd "${checkouts[n]}" && LOOP_ID=$((n + 1)) exec "$here/agent-loop.sh") &
+  (
+    cd "${checkouts[n]}" || exit 1
+    if ((concurrency > 1)); then export LOOP_ID=$((n + 1)); fi
+    exec "$here/agent-loop.sh"
+  ) &
   pids+=("$!")
 done
-wait -n
-code=$?
-echo "an agent loop stopped (status $code); stopping the others"
-kill "${pids[@]}" 2>/dev/null
-wait
-exit "$code"
+
+# A loop exits with status 75 when the agent scripts are updated (agent-supervisor.sh keeps them up to date). The
+# others do the same once their runs are over, and then this script starts again with the new versions.
+for ((left = ${#pids[@]}; left > 0; left--)); do
+  wait -n
+  code=$?
+  if ((code == 75)); then
+    ((left == ${#pids[@]})) && echo "the agent scripts were updated; restarting once every loop finishes its run"
+    continue
+  fi
+  echo "an agent loop stopped (status $code); stopping the others"
+  kill "${pids[@]}" 2>/dev/null
+  wait
+  exit "$code"
+done
+exec "$here/agent-board.sh" "$BOARD"
