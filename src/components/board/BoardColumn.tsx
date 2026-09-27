@@ -16,12 +16,14 @@ const staticStrategy = () => null
 interface BoardColumnProps {
   column: Column
   ticketIds: string[]
+  /** Whether the ticket being dragged would land in this column. */
+  dropTarget?: boolean
   /** Whether tickets can be reordered by dragging (only in manual sort). */
   reorderable: boolean
   onOpenTicket: (ticketId: string) => void
 }
 
-export function BoardColumn({ column, ticketIds, reorderable, onOpenTicket }: BoardColumnProps) {
+export function BoardColumn({ column, ticketIds, dropTarget, reorderable, onOpenTicket }: BoardColumnProps) {
   const { detail, ticketsById } = useBoardContext()
   const [adding, setAdding] = useState(false)
   const listRef = useRef<HTMLDivElement>(null)
@@ -39,8 +41,9 @@ export function BoardColumn({ column, ticketIds, reorderable, onOpenTicket }: Bo
       style={{ transform: CSS.Translate.toString(transform), transition }}
       aria-label={column.name}
       className={cn(
-        'flex max-h-full w-[calc(100vw-3rem)] shrink-0 snap-center flex-col rounded-xl bg-muted/60 sm:w-72 dark:bg-muted/35',
+        'flex max-h-full w-[calc(100vw-3rem)] shrink-0 snap-center flex-col rounded-xl bg-muted/60 transition-shadow sm:w-72 dark:bg-muted/35',
         isDragging && 'opacity-50',
+        dropTarget && 'ring-2 ring-primary/25',
       )}
     >
       <ColumnHeader

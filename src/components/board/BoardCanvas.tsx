@@ -1,5 +1,6 @@
 import { DndContext, DragOverlay, MeasuringStrategy } from '@dnd-kit/core'
 import { horizontalListSortingStrategy, SortableContext } from '@dnd-kit/sortable'
+import { useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { AddColumn } from './AddColumn'
 import { useBoardContext } from './board-context'
@@ -18,19 +19,24 @@ interface BoardCanvasProps {
 
 export function BoardCanvas({ grouping, reorderable, onOpenTicket }: BoardCanvasProps) {
   const { detail, ticketsById, columnsById } = useBoardContext()
-  const dnd = useBoardDnd(grouping, reorderable)
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  const dnd = useBoardDnd(grouping, reorderable, scrollerRef)
   const activeTicket = dnd.active?.type === 'ticket' ? ticketsById.get(dnd.active.id) : undefined
   const activeColumn = dnd.active?.type === 'column' ? columnsById.get(dnd.active.id) : undefined
 
   return (
     <DndContext measuring={measuring} {...dnd.dndContextProps}>
-      <div className="flex h-full snap-x snap-mandatory items-start gap-3 overflow-x-auto overscroll-x-contain px-4 pt-3 pb-4 sm:snap-none">
+      <div
+        ref={scrollerRef}
+        className="flex h-full snap-x snap-mandatory items-start gap-3 overflow-x-auto overscroll-x-contain px-4 pt-3 pb-4 sm:snap-none"
+      >
         <SortableContext items={detail.columns.map((column) => column.id)} strategy={horizontalListSortingStrategy}>
           {detail.columns.map((column) => (
             <BoardColumn
               key={column.id}
               column={column}
               ticketIds={dnd.grouping[column.id] ?? []}
+              dropTarget={!!activeTicket && dnd.grouping[column.id]?.includes(activeTicket.id)}
               reorderable={reorderable}
               onOpenTicket={onOpenTicket}
             />
