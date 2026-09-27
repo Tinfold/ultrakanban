@@ -177,6 +177,7 @@ interface PullRequest {
   number: number
   state: 'unknown' | 'open' | 'draft' | 'merged' | 'closed' // unknown until GitHub has been checked
   title: string | null
+  conflicts: boolean // GitHub last found merge conflicts with its base branch (open and draft pull requests only)
   checkedAt: string | null
 }
 

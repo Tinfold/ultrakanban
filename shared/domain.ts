@@ -56,6 +56,8 @@ export interface PullRequest {
   number: number
   state: PullRequestState
   title: string | null
+  /** Whether GitHub last found that it can't merge cleanly into its base branch (only open and draft ones). */
+  conflicts: boolean
   checkedAt: string | null
 }
 

@@ -67,6 +67,7 @@ export function linkPullRequest(detail: BoardDetail, ticketId: string, url: stri
               number: parsed.number,
               state: 'unknown',
               title: null,
+              conflicts: false,
               checkedAt: null,
             },
           }

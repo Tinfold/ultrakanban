@@ -88,6 +88,27 @@ describe('pull request workflow', () => {
     pullRequestStatuses.clear()
   })
 
+  test('tracks whether the pull request has merge conflicts', async () => {
+    const url = 'https://github.com/acme/app/pull/77'
+    const ticket = await addTicket({ title: 'A', pullRequest: url })
+    const sync = async () =>
+      (await call<Ticket>('POST', `/tickets/${ticket.id}/pull-request/sync`)).body.pullRequest?.conflicts
+
+    assert.equal(ticket.pullRequest?.conflicts, false)
+    pullRequestStatuses.set(url, { state: 'open', title: 'Some PR', conflicts: true })
+    assert.equal(await sync(), true)
+    // GitHub hasn't worked it out yet: the last answer stands.
+    pullRequestStatuses.set(url, { state: 'open', title: 'Some PR', conflicts: null })
+    assert.equal(await sync(), true)
+    pullRequestStatuses.set(url, { state: 'open', title: 'Some PR', conflicts: false })
+    assert.equal(await sync(), false)
+    pullRequestStatuses.set(url, { state: 'draft', title: 'Some PR', conflicts: true })
+    assert.equal(await sync(), true)
+    pullRequestStatuses.set(url, { state: 'closed', title: 'Some PR', conflicts: true })
+    assert.equal(await sync(), false)
+    pullRequestStatuses.clear()
+  })
+
   test('board agent settings', async () => {
     const {
       body: { board: initial },
