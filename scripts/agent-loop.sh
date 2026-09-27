@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Works an ultrakanban board with Claude Code for as long as you leave it running, one `claude -p` at a time.
+# Several of these loops can work one board together, each in its own checkout (see "Several loops" below).
 #
 # The loop is the board's agent (its controller), named AGENT. The runs it starts are its workers, and they claim
 # tickets under a name made of the agent, the model and the effort level they run with: AGENT/MODEL/EFFORT, e.g.
@@ -41,6 +42,13 @@
 # ticket, quoting claude's message, and starts no runs at all until the time the message says the limit resets
 # (RETRY_SECONDS later if it doesn't say), then retries the ticket.
 #
+# Several loops: to work several tickets at once, run one loop per checkout of the repository, e.g. the clone and git
+# worktrees of it (agent-board.sh does this for a board's agentConcurrency), all with the same BOARD, AGENT and
+# STATE_DIR. They share the watermarks and the usage-limit pause, and locks in STATE_DIR keep them apart: a loop only
+# looks at or runs a ticket while it holds that ticket's lock, so no two loops ever work the same ticket. With
+# AGENT_LOOP_CLEAN=1 the default branch is checked out detached (a branch can only be checked out in one worktree),
+# and fetches are serialized.
+#
 # Run it from the repository the tickets are about, with the ultrakanban skill installed and gh authenticated:
 #
 #   KANBAN=http://localhost:4317 BOARD=<board id> scripts/agent-loop.sh
@@ -64,8 +72,9 @@
 #   AGENT_LOOP_CLEAN    1 when running in a dedicated clone: before each run the loop fetches, discards local
 #                       changes and checks out the default branch (or the pull request's branch for feedback runs).
 #                       agent-board.sh sets it. Leave it unset in a working copy of your own.
+#   LOOP_ID             label for this loop's log lines when several loops work the board (agent-board.sh numbers them)
 #
-# Requires curl, jq, gh, timeout (coreutils) and claude. Logs go to stdout. Stop it with Ctrl-C or SIGTERM.
+# Requires curl, jq, gh, timeout (coreutils), flock (util-linux) and claude. Logs go to stdout. Stop it with Ctrl-C or SIGTERM.
 
 set -uo pipefail
 
@@ -175,7 +184,39 @@ use_effort() {
   worker="$AGENT/$MODEL/$effort"
 }
 
-log() { printf '%s %s\n' "$(date '+%F %T')" "$*"; }
+log() { printf '%s %s%s\n' "$(date '+%F %T')" "${LOOP_ID:+[$LOOP_ID] }" "$*"; }
+
+# The ticket lock this loop holds (a file descriptor), if any. Loops sharing STATE_DIR only triage, note on or run a
+# ticket while they hold its lock, so they never work the same ticket at once.
+lock_fd=
+lock_ticket() {
+  exec {lock_fd}>"$STATE_DIR/$1.lock" && flock -n "$lock_fd" && return 0
+  unlock_ticket
+  return 1
+}
+unlock_ticket() {
+  if [[ -n $lock_fd ]]; then exec {lock_fd}>&-; fi
+  lock_fd=
+}
+
+# Claiming a ticket (exclusive) can't overlap with reading the tickets the agent holds (shared), so no loop sees a
+# newly claimed ticket before its claim is saved and locked, and none forgets its state as not the agent's.
+claim_fd=
+claim_lock() { exec {claim_fd}>"$STATE_DIR/claim.lock" && flock "$1" "$claim_fd"; }
+claim_unlock() {
+  if [[ -n $claim_fd ]]; then exec {claim_fd}>&-; fi
+  claim_fd=
+}
+
+# Where loops sharing STATE_DIR keep the time no run may start before, when Claude usage ran out.
+PAUSE_FILE=$STATE_DIR/paused-until
+
+# Whether Claude usage ran out (in this loop or another one) and hasn't reset yet. Sets paused_until.
+paused() {
+  paused_until=$(cat "$PAUSE_FILE" 2>/dev/null)
+  [[ $paused_until =~ ^[0-9]+$ ]] || paused_until=0
+  ((paused_until > $(date +%s)))
+}
 
 get() { curl -sf "$KANBAN/api$1"; }
 
@@ -263,24 +304,32 @@ ci_status() {
        infra: [.[] | select(.[0] == "infra") | {name: .[1], why: (.[2] | gsub("^\\s+|\\s+$"; ""))}]}'
 }
 
-# In a dedicated clone (AGENT_LOOP_CLEAN=1, set by agent-board.sh), puts the checkout on an up-to-date branch: the
-# given one (a pull request's branch) if it exists on origin, otherwise the default branch. Local changes are
-# discarded, so this never happens in a normal working copy. Prints the branch.
+# In a dedicated clone or worktree (AGENT_LOOP_CLEAN=1, set by agent-board.sh), puts the checkout on an up-to-date
+# branch: the given one (a pull request's branch) if it exists on origin, otherwise the default branch, detached so
+# that other worktrees can have it too. Local changes are discarded, so this never happens in a normal working copy.
+# Fetches hold a lock in the repository, so loops in worktrees of one clone don't fetch at once. Prints the branch.
 checkout() {
-  local branch=$1 default
+  local branch=$1 default lock
   if [[ ${AGENT_LOOP_CLEAN:-0} != 1 ]]; then
     git branch --show-current 2>/dev/null
     return 0
   fi
-  git fetch --prune --quiet origin || return 1
+  lock=$(git rev-parse --git-common-dir)/ultrakanban-fetch.lock || return 1
+  flock "$lock" git fetch --prune --quiet origin || return 1
   default=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null) ||
-    { git remote set-head origin --auto >/dev/null && default=$(git symbolic-ref --short refs/remotes/origin/HEAD); } ||
+    { flock "$lock" git remote set-head origin --auto >/dev/null &&
+      default=$(git symbolic-ref --short refs/remotes/origin/HEAD); } ||
     return 1
   default=${default#origin/}
   [[ -n $branch ]] && git rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null || branch=$default
   git rebase --abort >/dev/null 2>&1
   git merge --abort >/dev/null 2>&1
-  git reset --quiet --hard && git clean -fdq && git checkout --quiet -B "$branch" "origin/$branch" || return 1
+  git reset --quiet --hard && git clean -fdq || return 1
+  if [[ $branch == "$default" ]]; then
+    git checkout --quiet --detach "origin/$branch" || return 1
+  else
+    git checkout --quiet --ignore-other-worktrees -B "$branch" "origin/$branch" || return 1
+  fi
   printf '%s\n' "$branch"
 }
 
@@ -328,8 +377,12 @@ limit_reset() {
 run_claude() {
   local id=$1 output code usage response
   output=$(mktemp) || return 1
-  timeout --foreground "$TICKET_TIMEOUT" claude -p ${claude_args[@]+"${claude_args[@]}"} --effort "$effort" \
-    --output-format json <<<"$2" >"$output"
+  (
+    # Without the ticket lock's descriptor: anything claude leaves running mustn't keep the ticket locked.
+    if [[ -n $lock_fd ]]; then exec {lock_fd}>&-; fi
+    exec timeout --foreground "$TICKET_TIMEOUT" claude -p ${claude_args[@]+"${claude_args[@]}"} --effort "$effort" \
+      --output-format json
+  ) <<<"$2" >"$output"
   code=$?
   claude_result=$(jq -r '.result // empty' "$output" 2>/dev/null || cat "$output")
   printf '%s\n' "$claude_result"
@@ -345,11 +398,20 @@ run_claude() {
 # and counts the failure for the backoff.
 run_on_ticket() {
   local id=$1 prompt=$2 snapshot=$3 fingerprint=$4 ci_runs=${5:-0} branch=${6:-} code limit why
+  # Another loop may have run out of Claude usage since this round started.
+  paused && return 0
   if branch=$(checkout "$branch"); then
-    [[ -n $branch ]] && prompt+="
+    if [[ -n $branch && ${AGENT_LOOP_CLEAN:-0} == 1 && -z $(git branch --show-current) ]]; then
+      prompt+="
+
+The repository is checked out at origin/$branch (a detached HEAD, so create your branch from it), freshly updated \
+from origin with no local changes."
+    elif [[ -n $branch ]]; then
+      prompt+="
 
 The repository is checked out on $branch, freshly updated from origin$(
-      [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]] && printf '%s' " with no local changes")."
+        [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]] && printf '%s' " with no local changes")."
+    fi
     run_claude "$id" "$prompt"
     code=$?
     checkout "" >/dev/null # back to the default branch between runs
@@ -366,6 +428,7 @@ The repository is checked out on $branch, freshly updated from origin$(
     # Out of Claude usage: not the ticket's fault, so it doesn't count as a failure. Nothing can run until the limit
     # resets, so the whole loop waits for that.
     paused_until=$(limit_reset "$limit")
+    printf '%s\n' "$paused_until" >"$PAUSE_FILE"
     log "Claude usage limit reached ($limit); waiting until $(date -d "@$paused_until" '+%F %T')"
     note "$id" "Out of Claude usage, so this run did no work. Claude said: \"$limit\". The loop starts no runs on any \
 ticket until $(date -d "@$paused_until" '+%-I:%M%P %Z on %b %-d'), then picks this ticket up again."
@@ -432,7 +495,8 @@ adopt() {
 handle_feedback() {
   local board review cancelled tickets file id number column holder version ticket_effort pr_url repo pr_number pr \
     branch ci issue reviews inline activity state triage items ci_note
-  board=$(get "/boards/$BOARD") || { log "can't read board $BOARD"; return 1; }
+  claim_lock -s
+  board=$(get "/boards/$BOARD") || { claim_unlock; log "can't read board $BOARD"; return 1; }
   review=$(jq -r '.board.reviewColumnId // ""' <<<"$board")
   cancelled=$(jq -r --arg name "$CANCELLED_COLUMN" \
     '[.columns[] | select((.name | ascii_downcase) == ($name | ascii_downcase)) | .id][0] // ""' <<<"$board")
@@ -445,15 +509,19 @@ handle_feedback() {
   board=
 
   # Forget tickets the agent no longer holds.
-  for file in "$STATE_DIR"/*.json; do
-    [[ -e $file ]] || continue
+  for file in "$STATE_DIR"/*.json "$STATE_DIR"/*.lock; do
+    [[ -e $file && $file != */claim.lock ]] || continue
     id=${file##*/}
-    id=${id%.json}
+    id=${id%.*}
     [[ $'\n'$tickets == *$'\n'"$id"$'\t'* ]] || rm -f "$file"
   done
+  claim_unlock
 
   while IFS=$'\t' read -r -u 3 id number column holder version ticket_effort pr_url repo pr_number; do
     [[ -n $id ]] || continue
+    # Another loop is working this one.
+    unlock_ticket
+    lock_ticket "$id" || continue
     pr=null branch= ci=null issue='[]' reviews='[]' inline='[]'
     if [[ $pr_url != - ]]; then
       pr=$(gh pr view "$pr_url" \
@@ -471,7 +539,7 @@ handle_feedback() {
           ;;
         CLOSED)
           if [[ $column == "$review" ]]; then
-            cancel "$id" "$number" "$pr_url" "$cancelled" "$holder" && return 0
+            cancel "$id" "$number" "$pr_url" "$cancelled" "$holder" && { unlock_ticket; return 0; }
             continue
           fi
           pr=null
@@ -525,26 +593,37 @@ doesn't (billing or spending limits, runners or infrastructure, a flaky test unr
 secrets), don't push anything: explain what you found in the ticket comment and exit.")
 Finish with a ticket comment summarising what you did, then exit." \
       "$(jq -c .snapshot <<<"$triage")" "$(jq -r .fingerprint <<<"$triage")" "$(jq -r .ciRuns <<<"$triage")" "$branch"
+    unlock_ticket
     return 0
   done 3<<<"$tickets"
+  unlock_ticket
   return 1
 }
 
 # Claims the next ticket from the todo column and works it. Returns 1 if there was nothing to claim.
 claim_next() {
   local response status ticket id snapshot
+  paused && return 0
   use_effort ""
+  claim_lock -x
   response=$(post "/boards/$BOARD/tickets/claim-next" "$(jq -nc --arg agent "$worker" --arg column "$TODO_COLUMN" \
     --arg moveTo "$IN_PROGRESS_COLUMN" '{agent: $agent, column: $column, moveTo: $moveTo}')")
   status=${response##*$'\n'}
   ticket=${response%$'\n'*}
   if [[ $status != 200 ]]; then
+    claim_unlock
     [[ $status == 404 && $ticket == *no_ticket_available* ]] || log "claim failed (HTTP ${status:-none}): $ticket"
     return 1
   fi
 
   id=$(jq -r .id <<<"$ticket")
   log "ticket #$(jq -r .number <<<"$ticket") ($id): claimed: $(jq -r .title <<<"$ticket")"
+  if ! lock_ticket "$id"; then
+    # Can't happen while every loop takes the claim lock; leave the ticket to whichever loop has it.
+    claim_unlock
+    log "ticket #$(jq -r .number <<<"$ticket") ($id): another loop is already working it"
+    return 0
+  fi
   # The claim can't know the ticket's effort beforehand, so a ticket that sets one is handed to that worker now.
   use_effort "$(jq -r '.agentEffort // ""' <<<"$ticket")"
   adopt "$id" "$(jq -r .number <<<"$ticket")" "$WORKER" "$(jq -r .version <<<"$ticket")" || use_effort ""
@@ -552,10 +631,12 @@ claim_next() {
   # so a failed or interrupted run is retried with backoff.
   snapshot=$(get "/tickets/$id/activity" | jq -c '{activity: (map(.id) | max // 0)}') || snapshot='{}'
   write_state "$id" "$(jq -c '. + {claim: true}' <<<"$snapshot")"
+  claim_unlock
   run_on_ticket "$id" "$(intro)
 
 Ticket $id is already claimed for you and in progress. Work only this ticket; do not claim another.
 Take it through to review and exit after submitting it." "$snapshot" "claim"
+  unlock_ticket
   return 0
 }
 
@@ -568,13 +649,13 @@ pause() {
 }
 
 sleeper=
-# Set when Claude usage runs out: no run starts before this time (seconds since the epoch).
+# Set when Claude usage runs out: no run starts before this time (seconds since the epoch). Kept in PAUSE_FILE, so
+# the other loops working the board wait too.
 paused_until=0
 trap 'log "stopped"; [[ -n $sleeper ]] && kill "$sleeper" 2>/dev/null; exit 0' INT TERM
 
 log "working board $BOARD as $AGENT, claiming tickets as $WORKER (or at the effort a ticket asks for)"
 while true; do
-  left=$((paused_until - $(date +%s)))
-  ((left > 0)) && pause "$left"
+  paused && pause "$((paused_until - $(date +%s)))"
   handle_feedback || claim_next || pause "$IDLE_SECONDS"
 done

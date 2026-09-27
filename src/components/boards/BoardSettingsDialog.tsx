@@ -17,10 +17,11 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { useGitHubStatus } from '@/hooks/queries'
-import { AGENT_DEFAULTS, AGENT_EFFORTS, type AgentEffort, agentWorkerName } from '@shared/domain'
+import { AGENT_DEFAULTS, AGENT_EFFORTS, AGENT_MAX_CONCURRENCY, type AgentEffort, agentWorkerName } from '@shared/domain'
 
 const NONE = '__none'
 const DEFAULT_EFFORT = '__default'
+const DEFAULT_CONCURRENCY = '__default'
 
 function ColumnSelect({ id, name, value }: { id: string; name: string; value: string | null }) {
   const { detail } = useBoardContext()
@@ -85,6 +86,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
     const { agentName, agentModel, agentEffort } = detail.board
     return { agentName, agentModel, agentEffort }
   })
+  const [agentConcurrency, setAgentConcurrency] = useState(detail.board.agentConcurrency)
   const [githubRepo, setGithubRepo] = useState(detail.board.githubRepo ?? '')
   const [creatingRepo, setCreatingRepo] = useState(false)
   const signedIn = !!useGitHubStatus().data?.auth
@@ -108,6 +110,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
       agentName: text('agentName'),
       agentModel: text('agentModel'),
       agentEffort: agent.agentEffort,
+      agentConcurrency,
       agentEnabled: data.get('agentEnabled') === 'on',
     })
     onClose()
@@ -162,7 +165,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
           </p>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <div className="grid gap-2">
+          <div className="col-span-2 grid gap-2">
             <div className="flex items-center justify-between gap-2">
               <Label htmlFor="board-settings-repo">GitHub repository</Label>
               <Button
@@ -232,10 +235,30 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
               </SelectContent>
             </Select>
           </div>
+          <div className="grid gap-2">
+            <Label htmlFor="board-settings-agent-concurrency">Parallel runs</Label>
+            <Select
+              value={String(agentConcurrency ?? DEFAULT_CONCURRENCY)}
+              onValueChange={(value) => setAgentConcurrency(value === DEFAULT_CONCURRENCY ? null : Number(value))}
+            >
+              <SelectTrigger id="board-settings-agent-concurrency" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={DEFAULT_CONCURRENCY}>Default ({AGENT_DEFAULTS.concurrency})</SelectItem>
+                {Array.from({ length: AGENT_MAX_CONCURRENCY }, (_, index) => String(index + 1)).map((count) => (
+                  <SelectItem key={count} value={count}>
+                    {count}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
         <p className="text-xs text-muted-foreground">
           It claims tickets as <code>{agentWorkerName(agent)}</code>. A full model name, such as claude-opus-5-5, keeps
-          each model version apart on the board.
+          each model version apart on the board. With more than one parallel run, it works that many tickets at once,
+          each in its own git worktree, all on your Claude usage.
         </p>
         <label className="flex items-center gap-2 text-sm">
           <input

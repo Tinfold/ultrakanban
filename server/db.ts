@@ -151,6 +151,10 @@ const MIGRATIONS = [
   CREATE INDEX token_usage_board ON token_usage(board_id, id);
   CREATE INDEX token_usage_created ON token_usage(created_at);
   `,
+  `
+  -- How many runs the board's agent works at once, each in its own git worktree (1 when null).
+  ALTER TABLE boards ADD COLUMN agent_concurrency INTEGER;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

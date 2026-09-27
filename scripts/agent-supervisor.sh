@@ -16,17 +16,18 @@ POLL_SECONDS=${POLL_SECONDS:-30}
 AGENT_HOME=${ULTRAKANBAN_AGENT_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/ultrakanban-agent}
 
 reconcile() {
-  local boards wanted id repo agent model effort settings unit state units
+  local boards wanted id repo agent model effort concurrency settings unit state units
   boards=$(curl -sf "$KANBAN/api/boards") || { echo "can't reach $KANBAN; leaving the loops as they are"; return; }
   wanted=$(jq -r '.[] | select(.agentEnabled and .githubRepo != null)
-    | [.id, .githubRepo, .agentName // "claude", .agentModel // "opus", .agentEffort // "high"] | @tsv' <<<"$boards")
+    | [.id, .githubRepo, .agentName // "claude", .agentModel // "opus", .agentEffort // "high", .agentConcurrency // 1]
+    | @tsv' <<<"$boards")
 
-  while IFS=$'\t' read -r id repo agent model effort; do
+  while IFS=$'\t' read -r id repo agent model effort concurrency; do
     [[ -n $id ]] || continue
     unit="ultrakanban-agent@$id.service"
-    settings="$repo $agent/$model/$effort"
+    settings="$repo $agent/$model/$effort x$concurrency"
     if [[ $(cat "$AGENT_HOME/boards/$id/settings" 2>/dev/null) != "$settings" ]]; then
-      echo "board $id: starting its agent loop ($repo as $agent/$model/$effort)"
+      echo "board $id: starting its agent loop ($repo as $agent/$model/$effort, $concurrency at a time)"
       mkdir -p "$AGENT_HOME/boards/$id" && printf '%s\n' "$settings" >"$AGENT_HOME/boards/$id/settings"
       systemctl --user restart "$unit"
       continue
