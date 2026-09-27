@@ -241,6 +241,32 @@ overrides the board's for that ticket: the loop runs it at that effort and under
 | GET    | `/tickets/:ticketId/activity`          |                                                                                                                                                               | `Activity[]` (oldest first)                                                                                                                                               |
 | POST   | `/tickets/:ticketId/comments`          | `{ body }` (markdown)                                                                                                                                         | `Activity`                                                                                                                                                                |
 
+## Token usage
+
+Agents report the tokens each run used on a ticket, and the [overview](#overview) adds them up per agent, board and
+day. `scripts/agent-loop.sh` reports every `claude -p` run it starts (from `--output-format json`, all models the run
+called, subagents included); other agents can report theirs the same way.
+
+| Method | Path                       | Body                                                                                               | Returns                       |
+| ------ | -------------------------- | -------------------------------------------------------------------------------------------------- | ----------------------------- |
+| POST   | `/tickets/:ticketId/usage` | `{ agent, inputTokens, outputTokens, cacheReadTokens?, cacheWriteTokens?, costUsd?, durationMs? }` | `TokenUsage` (201)            |
+| GET    | `/tickets/:ticketId/usage` |                                                                                                    | `TokenUsage[]` (oldest first) |
+
+```ts
+interface TokenUsage {
+  id: number
+  ticketId: string
+  agent: string // who ran, e.g. claude/opus/high
+  inputTokens: number // uncached input
+  outputTokens: number
+  cacheReadTokens: number // input read from the prompt cache
+  cacheWriteTokens: number // input written to the prompt cache
+  costUsd: number | null // estimated cost, if the agent reported one
+  durationMs: number | null
+  createdAt: string
+}
+```
+
 ## Attachments
 
 Screenshots and screen recordings on tickets. Upload one file per request as `multipart/form-data` in a field named
@@ -276,7 +302,7 @@ interface Overview {
   generatedAt: string
   since: string // start of the range
   days: 7 | 14 | 30
-  totals: { boards; open; working; review; completed; activeAgents; workedMs } // all numbers
+  totals: { boards; open; working; review; completed; activeAgents; workedMs; usage: UsageTotals } // numbers
   agents: {
     name: string
     status: 'working' | 'review' | 'idle'
@@ -296,18 +322,31 @@ interface Overview {
     actions: number // activity entries it authored within the range
     lastActiveAt: string | null
     agentOf: string[] // ids of boards whose host agent runs under this name
+    usage: UsageTotals // tokens its runs used within the range
   }[]
   hiddenAgents: string[] // names cleared from `agents` (see below)
-  boards: { id; name; agentEnabled; agentName; open; working; review; completed; events; lastActivityAt }[]
+  boards: { id; name; agentEnabled; agentName; open; working; review; completed; events; tokens; lastActivityAt }[]
   events: { at: string; kind: 'created' | 'completed' | 'comment' | 'update'; actor: string; boardId: string }[]
   sessions: { agent; ticketId; boardId; start: string; end: string | null }[] // clipped to the range
   completions: { ticketId; boardId; at: string; cycleMs: number | null; reviewMs: number | null }[] // oldest first
+  // Token usage reported within the range, oldest first
+  usage: { at; agent; ticketId; boardId; inputTokens; outputTokens; cacheReadTokens; cacheWriteTokens; costUsd }[]
   recent: (Activity & { ticket: { number; title; boardId; boardName } })[] // latest 30, newest first
+}
+
+// Token usage added up over runs; costUsd sums the runs that reported a cost.
+interface UsageTotals {
+  inputTokens
+  outputTokens
+  cacheReadTokens
+  cacheWriteTokens
+  costUsd
+  runs
 }
 ```
 
-Agents are everyone holding a ticket that isn't done, everyone who worked within the range, and the host agent
-of every board that has it switched on. A ticket is being **worked** while it is assigned and outside the board's
+Agents are everyone holding a ticket that isn't done, everyone who worked or reported token usage within the range,
+and the host agent of every board that has it switched on. A ticket is being **worked** while it is assigned and outside the board's
 review and done columns (a board without a done column uses its last column), so claiming starts the clock and
 submitting for review, merging or releasing stops it. Work time is reconstructed from the activity log. Each
 completion's `cycleMs` runs from when work on the ticket started to done, and `reviewMs` from when it last entered

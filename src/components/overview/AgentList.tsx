@@ -1,11 +1,11 @@
 import { BotIcon, XIcon } from 'lucide-react'
 import { Link } from 'wouter'
-import type { Color, OverviewAgent, OverviewBoard, OverviewTicket } from '@shared/domain'
+import { type Color, type OverviewAgent, type OverviewBoard, type OverviewTicket, totalTokens } from '@shared/domain'
 import { PullRequestIcon } from '@/components/common/PullRequestIcon'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
 import { swatch } from '@/lib/colors'
-import { formatDateTime, formatDuration, formatRelative, ticketRef } from '@/lib/format'
+import { formatCost, formatDateTime, formatDuration, formatRelative, formatTokens, ticketRef } from '@/lib/format'
 import { ticketHref } from '@/lib/overview'
 
 const STATUSES: Record<OverviewAgent['status'], { label: string; color: Color }> = {
@@ -22,6 +22,17 @@ function StatusBadge({ status }: { status: OverviewAgent['status'] }) {
       {label}
     </span>
   )
+}
+
+function usageSummary({ usage }: OverviewAgent) {
+  const runs = `${usage.runs} ${usage.runs === 1 ? 'run' : 'runs'}`
+  return [
+    `${runs}, ${formatCost(usage.costUsd)} estimated`,
+    `Input: ${usage.inputTokens.toLocaleString()}`,
+    `Output: ${usage.outputTokens.toLocaleString()}`,
+    `Cache writes: ${usage.cacheWriteTokens.toLocaleString()}`,
+    `Cache reads: ${usage.cacheReadTokens.toLocaleString()}`,
+  ].join('\n')
 }
 
 function TicketRow({ ticket, now }: { ticket: OverviewTicket; now: number }) {
@@ -101,6 +112,10 @@ export function AgentList({ agents, boards, worked, now, hidden, onHide }: Agent
               <div>
                 <dt className="text-muted-foreground">Worked</dt>
                 <dd className="font-medium tabular-nums">{formatDuration(worked.get(agent.name) ?? 0)}</dd>
+              </div>
+              <div title={usageSummary(agent)}>
+                <dt className="text-muted-foreground">Tokens</dt>
+                <dd className="font-medium tabular-nums">{formatTokens(totalTokens(agent.usage))}</dd>
               </div>
               <div>
                 <dt className="text-muted-foreground">Completed</dt>

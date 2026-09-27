@@ -1,10 +1,20 @@
 import { addDays, differenceInCalendarDays, startOfDay } from 'date-fns'
-import type { Overview, OverviewAgent, OverviewEventKind, WorkSession } from '@shared/domain'
+import {
+  addUsage,
+  noUsage,
+  type Overview,
+  type OverviewAgent,
+  type OverviewEventKind,
+  type UsageTotals,
+  type WorkSession,
+} from '@shared/domain'
 
 export interface Day {
   start: Date
   events: Record<OverviewEventKind, number>
   workedMs: number
+  /** Tokens agents' runs used that day. */
+  usage: UsageTotals
 }
 
 const sessionEnd = (session: WorkSession, now: number) => (session.end ? Date.parse(session.end) : now)
@@ -16,10 +26,15 @@ export function dailyActivity(overview: Overview, now: number): Day[] {
     start: addDays(first, i),
     events: { created: 0, completed: 0, comment: 0, update: 0 },
     workedMs: 0,
+    usage: noUsage(),
   }))
   for (const event of overview.events) {
     const index = differenceInCalendarDays(Date.parse(event.at), first)
     if (index >= 0 && index < days.length) days[index].events[event.kind]++
+  }
+  for (const run of overview.usage) {
+    const index = differenceInCalendarDays(Date.parse(run.at), first)
+    if (index >= 0 && index < days.length) addUsage(days[index].usage, run)
   }
   for (const session of overview.sessions) {
     const start = Date.parse(session.start)

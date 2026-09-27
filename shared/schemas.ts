@@ -172,6 +172,19 @@ export const mergeRunSchema = z.object({ method: z.enum(MERGE_METHODS) })
 
 export const mergeTicketSchema = z.object({ method: z.enum(MERGE_METHODS).optional() })
 
+const tokens = z.int().min(0)
+
+/** Tokens an agent run used on a ticket, e.g. from `claude -p --output-format json`. */
+export const recordUsageSchema = z.object({
+  agent: name,
+  inputTokens: tokens,
+  outputTokens: tokens,
+  cacheReadTokens: tokens.default(0),
+  cacheWriteTokens: tokens.default(0),
+  costUsd: z.number().min(0).nullable().default(null),
+  durationMs: tokens.nullable().default(null),
+})
+
 export const commentSchema = z.object({ body: z.string().trim().min(1).max(20_000) })
 
 export const listTicketsQuerySchema = z.object({
@@ -244,4 +257,5 @@ export type ClaimNextInput = z.input<typeof claimNextSchema>
 export type MergeRunInput = z.input<typeof mergeRunSchema>
 export type MergeTicketInput = z.input<typeof mergeTicketSchema>
 export type ListTicketsQuery = z.output<typeof listTicketsQuerySchema>
+export type RecordUsage = z.output<typeof recordUsageSchema>
 export type BoardExport = z.output<typeof boardExportSchema>

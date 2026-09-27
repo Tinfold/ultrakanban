@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { format } from 'date-fns'
 import { type ReactNode, useEffect, useMemo } from 'react'
 import { toast } from 'sonner'
-import { OVERVIEW_RANGES, type OverviewRange } from '@shared/domain'
+import { addUsage, noUsage, OVERVIEW_RANGES, type OverviewRange, totalTokens } from '@shared/domain'
 import { AppHeader } from '@/components/app/AppHeader'
 import { AgentList } from '@/components/overview/AgentList'
 import { BoardTable } from '@/components/overview/BoardTable'
@@ -15,7 +15,7 @@ import { queryKeys, useOverview } from '@/hooks/queries'
 import { useNow } from '@/hooks/use-now'
 import { useStoredState } from '@/hooks/use-stored-state'
 import { api, errorMessage } from '@/lib/api'
-import { formatDuration } from '@/lib/format'
+import { formatCost, formatDuration, formatTokens } from '@/lib/format'
 import { dailyActivity, median, needsAttention, workedByAgent } from '@/lib/overview'
 import { storageKeys } from '@/lib/storage'
 import { cn } from '@/lib/utils'
@@ -29,6 +29,13 @@ const ACTIVITY_SERIES = [
 
 const WORK_SERIES: ChartSeries[] = [{ label: 'Worked', color: 'var(--chart-1)' }]
 
+const TOKEN_SERIES = [
+  { key: 'outputTokens', label: 'Output', color: 'var(--chart-1)' },
+  { key: 'inputTokens', label: 'Input', color: 'var(--chart-2)' },
+  { key: 'cacheWriteTokens', label: 'Cache writes', color: 'var(--chart-3)' },
+  { key: 'cacheReadTokens', label: 'Cache reads', color: 'var(--chart-4)' },
+] as const
+
 const HOUR_MS = 60 * 60 * 1000
 
 /** Anchors of the parts of the page stats and the jump bar link to. */
@@ -38,6 +45,7 @@ const SECTIONS = {
   boards: 'boards',
   activity: 'activity',
   timeWorked: 'time-worked',
+  tokens: 'tokens',
   recent: 'recent-activity',
 } as const
 
@@ -179,6 +187,7 @@ export function OverviewPage() {
     const completed = daily.reduce((total, day) => total + day.events.completed, 0)
     const workedMs = daily.reduce((total, day) => total + day.workedMs, 0)
     const created = daily.reduce((total, day) => total + day.events.created, 0)
+    const usage = daily.reduce((total, day) => addUsage(total, day.usage), noUsage())
     const attention = needsAttention(agents, now)
     const unclaimed = totals.open - totals.working - totals.review
     const completions = overview.completions.filter(
@@ -223,7 +232,7 @@ export function OverviewPage() {
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 *:last:col-span-2 md:grid-cols-3 md:*:last:col-span-1 xl:grid-cols-5">
           <Stat
             label="Median cycle time"
             value={formatMedian(cycleTimes)}
@@ -241,9 +250,15 @@ export function OverviewPage() {
             target={SECTIONS.activity}
           />
           <Stat label="Unclaimed" value={unclaimed} detail="Open and unassigned" target={SECTIONS.boards} />
+          <Stat
+            label="Tokens used"
+            value={formatTokens(totalTokens(usage))}
+            detail={`${formatCost(usage.costUsd)} estimated, ${usage.runs} ${usage.runs === 1 ? 'run' : 'runs'}`}
+            target={SECTIONS.tokens}
+          />
         </div>
 
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
           <ColumnChart
             id={SECTIONS.activity}
             className="scroll-mt-4"
@@ -266,6 +281,20 @@ export function OverviewPage() {
             columns={daily.map((day, i) => ({ ...columns[i], values: [day.workedMs / HOUR_MS] }))}
             formatValue={(hours) => formatDuration(hours * HOUR_MS)}
             formatTick={(hours) => `${+hours.toFixed(1)}h`}
+          />
+          <ColumnChart
+            id={SECTIONS.tokens}
+            className="scroll-mt-4 lg:col-span-2 xl:col-span-1"
+            title="Token usage"
+            description="Tokens agent runs used per day, as reported by the agent loop"
+            series={[...TOKEN_SERIES]}
+            columns={daily.map((day, i) => ({
+              ...columns[i],
+              values: TOKEN_SERIES.map((series) => day.usage[series.key]),
+            }))}
+            formatValue={(value) => value.toLocaleString()}
+            formatTick={formatTokens}
+            minStep={1}
           />
         </div>
 

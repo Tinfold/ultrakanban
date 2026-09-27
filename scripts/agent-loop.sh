@@ -29,6 +29,9 @@
 # to MAX_ATTEMPTS; new feedback resets the count. A missing or unreadable state file means handling everything
 # again, never skipping it.
 #
+# Each run's token usage (from claude's JSON output) is reported to the board with POST /tickets/:id/usage, so the
+# overview can show how many tokens each agent uses. A run stopped by the timeout reports nothing.
+#
 # CI can fail for reasons that aren't the code, and a fix can fail again. So a failing check counts once per commit
 # and check name (re-running CI on the same commit doesn't start a run), checks that never ran or failed for billing,
 # runner or approval reasons never start a run (the loop notes them on the ticket once per commit), and after
@@ -274,8 +277,35 @@ checkout() {
   printf '%s\n' "$branch"
 }
 
+# The tokens a run used, from claude's JSON output (every model it called, subagents included), as the body of
+# POST /tickets/:id/usage.
+read -r -d '' USAGE <<'JQ'
+def total($field): [.[] | .[$field] // 0] | add // 0;
+select(.type == "result")
+| (if (.modelUsage // {}) != {} then [.modelUsage[]] else [.usage // {} | {
+    inputTokens: .input_tokens, outputTokens: .output_tokens,
+    cacheReadInputTokens: .cache_read_input_tokens, cacheCreationInputTokens: .cache_creation_input_tokens}]
+  end) as $models
+| {agent: $agent, inputTokens: ($models | total("inputTokens")), outputTokens: ($models | total("outputTokens")),
+   cacheReadTokens: ($models | total("cacheReadInputTokens")),
+   cacheWriteTokens: ($models | total("cacheCreationInputTokens")),
+   costUsd: .total_cost_usd, durationMs: .duration_ms}
+JQ
+
+# Runs claude on a ticket, prints its final message and reports the tokens it used. Returns claude's exit status.
 run_claude() {
-  timeout --foreground "$TICKET_TIMEOUT" claude -p ${claude_args[@]+"${claude_args[@]}"} --effort "$effort" <<<"$1"
+  local id=$1 output code usage response
+  output=$(mktemp) || return 1
+  timeout --foreground "$TICKET_TIMEOUT" claude -p ${claude_args[@]+"${claude_args[@]}"} --effort "$effort" \
+    --output-format json <<<"$2" >"$output"
+  code=$?
+  jq -r '.result // empty' "$output" 2>/dev/null || cat "$output"
+  if usage=$(jq -ce --arg agent "$worker" "$USAGE" "$output" 2>/dev/null); then
+    response=$(post "/tickets/$id/usage" "$usage")
+    [[ ${response##*$'\n'} == 201 ]] || log "can't record the token usage of the run on $id: ${response%$'\n'*}"
+  fi
+  rm -f "$output"
+  return "$code"
 }
 
 # Runs claude on a ticket. On success saves the snapshot as the ticket's watermark; on failure keeps the old one
@@ -287,7 +317,7 @@ run_on_ticket() {
 
 The repository is checked out on $branch, freshly updated from origin$(
       [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]] && printf '%s' " with no local changes")."
-    run_claude "$prompt"
+    run_claude "$id" "$prompt"
     code=$?
     checkout "" >/dev/null # back to the default branch between runs
   else

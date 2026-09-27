@@ -108,6 +108,23 @@ const MIGRATIONS = [
     last_activity_id INTEGER NOT NULL
   );
   `,
+  `
+  -- Tokens each agent run used on a ticket, as reported by the agent (scripts/agent-loop.sh reports its runs).
+  CREATE TABLE token_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    agent TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    cache_read_tokens INTEGER NOT NULL,
+    cache_write_tokens INTEGER NOT NULL,
+    cost_usd REAL,
+    duration_ms INTEGER,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX token_usage_ticket ON token_usage(ticket_id, id);
+  CREATE INDEX token_usage_created ON token_usage(created_at);
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

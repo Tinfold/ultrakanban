@@ -14,6 +14,7 @@ import {
   type MergeRun,
   type Overview,
   type Ticket,
+  type TokenUsage,
 } from '../shared/domain.ts'
 import { createApp } from './app.ts'
 import { createAttachmentFiles } from './attachment-files.ts'
@@ -526,6 +527,59 @@ describe('pull request workflow', () => {
     const variant = working.agents.find((entry) => entry.name === 'idle-agent/opus/max')
     assert.deepEqual([variant?.status, variant?.agentOf], ['working', [boardId]])
     await call('PATCH', `/boards/${boardId}`, { agentEnabled: false })
+  })
+
+  test('agents report the tokens their runs use, and the overview adds them up', async () => {
+    const agent = 'token-agent'
+    const ticket = await addTicket({ title: 'A' })
+    const run = { agent, inputTokens: 10, outputTokens: 200, cacheReadTokens: 3000, cacheWriteTokens: 400 }
+    const { status, body: recorded } = await call<TokenUsage>('POST', `/tickets/${ticket.id}/usage`, {
+      ...run,
+      costUsd: 0.25,
+      durationMs: 60_000,
+    })
+    assert.equal(status, 201)
+    assert.deepEqual([recorded.ticketId, recorded.costUsd, recorded.durationMs], [ticket.id, 0.25, 60_000])
+    // Cache counts, cost and duration are optional.
+    await call('POST', `/tickets/${ticket.id}/usage`, { agent, inputTokens: 1, outputTokens: 2 })
+    assert.equal(
+      (await call('POST', `/tickets/${ticket.id}/usage`, { agent, inputTokens: -1, outputTokens: 0 })).status,
+      400,
+    )
+    assert.equal((await call('POST', '/tickets/nope/usage', run)).status, 404)
+
+    const { body: listed } = await call<TokenUsage[]>('GET', `/tickets/${ticket.id}/usage`)
+    assert.deepEqual(
+      listed.map((entry) => [entry.inputTokens, entry.cacheReadTokens, entry.costUsd]),
+      [
+        [10, 3000, 0.25],
+        [1, 0, null],
+      ],
+    )
+
+    const { body: overview } = await call<Overview>('GET', '/overview')
+    const usage = overview.agents.find((entry) => entry.name === agent)?.usage
+    assert.deepEqual(usage, {
+      inputTokens: 11,
+      outputTokens: 202,
+      cacheReadTokens: 3000,
+      cacheWriteTokens: 400,
+      costUsd: 0.25,
+      runs: 2,
+    })
+    assert.equal(overview.boards.find((entry) => entry.id === boardId)?.tokens, 3613)
+    assert.equal(overview.totals.usage.runs, overview.usage.length)
+    assert.deepEqual(
+      overview.usage.filter((entry) => entry.agent === agent).map((entry) => [entry.ticketId, entry.boardId]),
+      [
+        [ticket.id, boardId],
+        [ticket.id, boardId],
+      ],
+    )
+    // Runs from before the range don't count.
+    assert.ok(
+      !getOverview(7, new Date(Date.now() + 8 * 24 * 60 * 60 * 1000)).usage.some((entry) => entry.agent === agent),
+    )
   })
 
   test('overview hides cleared agents until they do something again', async () => {

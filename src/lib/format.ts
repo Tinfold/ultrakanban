@@ -34,3 +34,13 @@ export function formatDuration(ms: number) {
   if (hours) return minutes % 60 ? `${hours}h ${minutes % 60}m` : `${hours}h`
   return `${minutes}m`
 }
+
+const compactNumber = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 })
+
+/** Compact token count, e.g. `950`, `12.3K`, `4.5M`. */
+export const formatTokens = (count: number) => compactNumber.format(count)
+
+const dollars = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' })
+
+/** US dollars to the cent, e.g. `$12.34`; amounts below a cent read `<$0.01`. */
+export const formatCost = (usd: number) => (usd > 0 && usd < 0.01 ? '<$0.01' : dollars.format(usd))

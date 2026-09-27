@@ -219,6 +219,59 @@ export type Activity =
 
 export type ActivityType = Activity['type']
 
+/** Tokens an agent used, split the way Claude reports them. */
+export interface TokenCounts {
+  /** Uncached input. */
+  inputTokens: number
+  outputTokens: number
+  /** Input read from the prompt cache. */
+  cacheReadTokens: number
+  /** Input written to the prompt cache. */
+  cacheWriteTokens: number
+}
+
+export const totalTokens = (counts: TokenCounts) =>
+  counts.inputTokens + counts.outputTokens + counts.cacheReadTokens + counts.cacheWriteTokens
+
+/** Tokens one agent run used on a ticket (`POST /tickets/:id/usage`). */
+export interface TokenUsage extends TokenCounts {
+  id: number
+  ticketId: string
+  agent: string
+  /** Estimated cost in US dollars, when the agent reports one. */
+  costUsd: number | null
+  /** How long the run took. */
+  durationMs: number | null
+  createdAt: string
+}
+
+/** Token usage added up over several runs. */
+export interface UsageTotals extends TokenCounts {
+  /** Estimated cost in US dollars of the runs that reported one. */
+  costUsd: number
+  runs: number
+}
+
+export const noUsage = (): UsageTotals => ({
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  costUsd: 0,
+  runs: 0,
+})
+
+/** Adds a run's usage to `totals` and returns them. */
+export function addUsage(totals: UsageTotals, run: TokenCounts & { costUsd: number | null }) {
+  totals.inputTokens += run.inputTokens
+  totals.outputTokens += run.outputTokens
+  totals.cacheReadTokens += run.cacheReadTokens
+  totals.cacheWriteTokens += run.cacheWriteTokens
+  totals.costUsd += run.costUsd ?? 0
+  totals.runs++
+  return totals
+}
+
 interface ActivityBase<T extends string, D> {
   id: number
   ticketId: string
@@ -275,6 +328,8 @@ export interface OverviewAgent {
   lastActiveAt: string | null
   /** Boards whose host agent runs under this name. */
   agentOf: string[]
+  /** Tokens its runs used within the range. */
+  usage: UsageTotals
 }
 
 export interface OverviewBoard {
@@ -290,6 +345,8 @@ export interface OverviewBoard {
   completed: number
   /** Activity entries within the range. */
   events: number
+  /** Tokens agents used on its tickets within the range. */
+  tokens: number
   lastActivityAt: string | null
 }
 
@@ -323,6 +380,15 @@ export interface OverviewCompletion {
   reviewMs: number | null
 }
 
+/** An agent run's token usage within the range. */
+export interface OverviewUsage extends TokenCounts {
+  at: string
+  agent: string
+  ticketId: string
+  boardId: string
+  costUsd: number | null
+}
+
 export type OverviewActivity = Activity & {
   ticket: { number: number; title: string; boardId: string; boardName: string }
 }
@@ -341,6 +407,7 @@ export interface Overview {
     /** Agents with a ticket being worked right now. */
     activeAgents: number
     workedMs: number
+    usage: UsageTotals
   }
   agents: OverviewAgent[]
   /** Agents cleared from the overview that haven't done anything since; they aren't in `agents`. */
@@ -351,6 +418,8 @@ export interface Overview {
   sessions: WorkSession[]
   /** Tickets that reached the done column within the range, oldest first. */
   completions: OverviewCompletion[]
+  /** Agent runs' token usage within the range, oldest first. */
+  usage: OverviewUsage[]
   /** The latest activity entries across all boards, newest first. */
   recent: OverviewActivity[]
 }
