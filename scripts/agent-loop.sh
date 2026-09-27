@@ -37,6 +37,10 @@
 # runner or approval reasons never start a run (the loop notes them on the ticket once per commit), and after
 # MAX_CI_RUNS runs in a row started only by CI, it stops starting CI runs for the ticket until a human comments.
 #
+# A run that fails because the account is out of Claude usage doesn't count as a failure. The loop says so on the
+# ticket, quoting claude's message, and starts no runs at all until the time the message says the limit resets
+# (RETRY_SECONDS later if it doesn't say), then retries the ticket.
+#
 # Run it from the repository the tickets are about, with the ultrakanban skill installed and gh authenticated:
 #
 #   KANBAN=http://localhost:4317 BOARD=<board id> scripts/agent-loop.sh
@@ -87,6 +91,9 @@ MAX_CI_RUNS=${MAX_CI_RUNS:-2}
 # Check output or annotations that mean CI itself didn't run, not that the code failed.
 INFRA_PATTERN='billing|spending limit|payments have failed|account is locked|account has been locked'
 INFRA_PATTERN+='|was not started|minutes quota|exceeded .*(minutes|quota)'
+# What claude prints when the account is out of Claude usage, e.g. "You've hit your session limit · resets 2:50pm
+# (America/New_York)".
+USAGE_LIMIT_PATTERN="hit your [a-z -]*limit|usage limit|limit reached|out of (extra )?usage"
 STATE_DIR=${STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/ultrakanban-agent-loop/$BOARD-${AGENT//\//_}}
 read -r -a claude_args <<<"${CLAUDE_ARGS:-}"
 claude_args+=(--model "$MODEL")
@@ -292,14 +299,40 @@ select(.type == "result")
    costUsd: .total_cost_usd, durationMs: .duration_ms}
 JQ
 
-# Runs claude on a ticket, prints its final message and reports the tokens it used. Returns claude's exit status.
+# When Claude usage resets, from claude's limit message: "... resets 2:50pm (America/New_York)", "... resets Oct 3,
+# 9am (...)", or seconds since the epoch after a "|". Prints it in seconds since the epoch, a minute late to be safe,
+# or RETRY_SECONDS from now if the message doesn't say or says something that can't be right.
+limit_reset() {
+  local now when tz at=
+  now=$(date +%s)
+  if [[ $1 =~ \|([0-9]{10}) ]]; then
+    at=${BASH_REMATCH[1]}
+  elif [[ $1 =~ resets\ ([^\(]*[^\ \(])(\ \(([^\)]+)\))? ]]; then
+    when=${BASH_REMATCH[1]//,/} tz=${BASH_REMATCH[3]}
+    if [[ -n $tz ]]; then at=$(TZ=$tz date -d "$when" +%s 2>/dev/null); else at=$(date -d "$when" +%s 2>/dev/null); fi
+    # A time of day that passed within the last hour is just now (clocks differ); an earlier one is tomorrow's.
+    if [[ -n $at ]] && ((at <= now)); then
+      if ((at > now - 3600)); then at=$now; else at=$((at + 86400)); fi
+    fi
+  fi
+  if [[ -z $at ]] || ((at < now || at > now + 8 * 86400)); then
+    at=$((now + RETRY_SECONDS))
+  else
+    at=$((at + 60))
+  fi
+  printf '%s\n' "$at"
+}
+
+# Runs claude on a ticket, prints its final message (and keeps it in claude_result) and reports the tokens it used.
+# Returns claude's exit status.
 run_claude() {
   local id=$1 output code usage response
   output=$(mktemp) || return 1
   timeout --foreground "$TICKET_TIMEOUT" claude -p ${claude_args[@]+"${claude_args[@]}"} --effort "$effort" \
     --output-format json <<<"$2" >"$output"
   code=$?
-  jq -r '.result // empty' "$output" 2>/dev/null || cat "$output"
+  claude_result=$(jq -r '.result // empty' "$output" 2>/dev/null || cat "$output")
+  printf '%s\n' "$claude_result"
   if usage=$(jq -ce --arg agent "$worker" "$USAGE" "$output" 2>/dev/null); then
     response=$(post "/tickets/$id/usage" "$usage")
     [[ ${response##*$'\n'} == 201 ]] || log "can't record the token usage of the run on $id: ${response%$'\n'*}"
@@ -311,7 +344,7 @@ run_claude() {
 # Runs claude on a ticket. On success saves the snapshot as the ticket's watermark; on failure keeps the old one
 # and counts the failure for the backoff.
 run_on_ticket() {
-  local id=$1 prompt=$2 snapshot=$3 fingerprint=$4 ci_runs=${5:-0} branch=${6:-} code
+  local id=$1 prompt=$2 snapshot=$3 fingerprint=$4 ci_runs=${5:-0} branch=${6:-} code limit why
   if branch=$(checkout "$branch"); then
     [[ -n $branch ]] && prompt+="
 
@@ -329,11 +362,26 @@ The repository is checked out on $branch, freshly updated from origin$(
     return 0
   fi
   log "claude exited with status $code on $id"
+  if [[ $code != 124 ]] && limit=$(grep -iE -m1 "$USAGE_LIMIT_PATTERN" <<<"$claude_result"); then
+    # Out of Claude usage: not the ticket's fault, so it doesn't count as a failure. Nothing can run until the limit
+    # resets, so the whole loop waits for that.
+    paused_until=$(limit_reset "$limit")
+    log "Claude usage limit reached ($limit); waiting until $(date -d "@$paused_until" '+%F %T')"
+    note "$id" "Out of Claude usage, so this run did no work. Claude said: \"$limit\". The loop starts no runs on any \
+ticket until $(date -d "@$paused_until" '+%-I:%M%P %Z on %b %-d'), then picks this ticket up again."
+    return 0
+  fi
+  if [[ $code == 124 ]]; then
+    why="it ran longer than the $TICKET_TIMEOUT timeout (TICKET_TIMEOUT) and was stopped"
+  else
+    why="claude exited with status $code"
+    [[ -n $claude_result ]] && why+=". Its last output: \"$(tail -n 1 <<<"$claude_result" | cut -c 1-300)\""
+  fi
   write_state "$id" "$(read_state "$id" | jq -c --arg fp "$fingerprint" --argjson now "$(date +%s)" \
     --argjson ci "$ci_runs" '. + {failures: (if .failedFor == $fp then (.failures // 0) + 1 else 1 end),
       failedAt: $now, failedFor: $fp, ciRuns: $ci} | if $ci == 0 then del(.capNoted) else . end')"
-  note "$id" "Agent run stopped with exit status $code (124 means it hit the $TICKET_TIMEOUT timeout). It is \
-retried with backoff, up to $MAX_ATTEMPTS runs in a row; after that, new feedback such as a ticket comment retries it."
+  note "$id" "Agent run failed: $why. It is retried with backoff, up to $MAX_ATTEMPTS runs in a row; after that, \
+new feedback such as a ticket comment retries it."
 }
 
 intro() {
@@ -511,18 +559,22 @@ Take it through to review and exit after submitting it." "$snapshot" "claim"
   return 0
 }
 
-# Waits in the background so a signal ends the wait at once.
-idle() {
-  sleep "$IDLE_SECONDS" &
+# Waits the given number of seconds in the background, so a signal ends the wait at once.
+pause() {
+  sleep "$1" &
   sleeper=$!
   wait "$sleeper"
   sleeper=
 }
 
 sleeper=
+# Set when Claude usage runs out: no run starts before this time (seconds since the epoch).
+paused_until=0
 trap 'log "stopped"; [[ -n $sleeper ]] && kill "$sleeper" 2>/dev/null; exit 0' INT TERM
 
 log "working board $BOARD as $AGENT, claiming tickets as $WORKER (or at the effort a ticket asks for)"
 while true; do
-  handle_feedback || claim_next || idle
+  left=$((paused_until - $(date +%s)))
+  ((left > 0)) && pause "$left"
+  handle_feedback || claim_next || pause "$IDLE_SECONDS"
 done
