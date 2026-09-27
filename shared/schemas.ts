@@ -170,6 +170,8 @@ export const claimNextSchema = z.object({
 
 export const mergeRunSchema = z.object({ method: z.enum(MERGE_METHODS) })
 
+export const mergeTicketSchema = z.object({ method: z.enum(MERGE_METHODS).optional() })
+
 export const commentSchema = z.object({ body: z.string().trim().min(1).max(20_000) })
 
 export const listTicketsQuerySchema = z.object({
@@ -240,5 +242,6 @@ export type ReleaseTicketInput = z.input<typeof releaseTicketSchema>
 export type SubmitForReviewInput = z.input<typeof submitForReviewSchema>
 export type ClaimNextInput = z.input<typeof claimNextSchema>
 export type MergeRunInput = z.input<typeof mergeRunSchema>
+export type MergeTicketInput = z.input<typeof mergeTicketSchema>
 export type ListTicketsQuery = z.output<typeof listTicketsQuerySchema>
 export type BoardExport = z.output<typeof boardExportSchema>

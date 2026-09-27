@@ -695,6 +695,51 @@ describe('merging all reviewed pull requests', () => {
     assert.equal(invalid.status, 400)
     assert.equal(noReview.status, 400)
   })
+
+  test('merges one ticket on its own, moving it to done', async () => {
+    const ticket = await inReview(1)
+    await inReview(2)
+
+    const merged = await call<Ticket>('POST', `/tickets/${ticket}/merge`, { method: 'squash' })
+    const { body: run } = await call<MergeRun>('GET', `/boards/${boardId}/merge-run`)
+
+    assert.equal(merged.status, 200)
+    assert.equal(merged.body.pullRequest?.state, 'merged')
+    assert.equal(merged.body.columnId, (await ticketsIn('Done'))[0].columnId)
+    assert.deepEqual(merges, ['acme/app#1:squash'])
+    assert.deepEqual(
+      run.steps.map((step) => [step.number, step.status]),
+      [[1, 'merged']],
+    )
+  })
+
+  test('merging one ticket falls back to a method the repository allows', async () => {
+    const ticket = await inReview(1)
+    await call('POST', `/tickets/${ticket}/merge`, { method: 'rebase' })
+    assert.deepEqual(merges, ['acme/app#1:merge'])
+  })
+
+  test('refuses to merge one ticket that builds on another, conflicts or is not in review', async () => {
+    await inReview(1)
+    const stacked = await inReview(2, { base: 'branch-1' })
+    const conflicting = await inReview(3, { mergeable: false, mergeableState: 'dirty' })
+    const elsewhere = await addTicket({ title: 'Not in review', column: 'Todo', pullRequest: url(4) })
+
+    const refused = []
+    for (const id of [stacked, conflicting, elsewhere.id]) {
+      refused.push(await call<ApiErrorBody>('POST', `/tickets/${id}/merge`, {}))
+    }
+
+    assert.deepEqual(
+      refused.map(({ status, body }) => [status, body.error.message]),
+      [
+        [409, 'Builds on the pull request of #1; merge that one first, or merge all'],
+        [409, 'Has conflicts with main'],
+        [400, 'Only tickets in the review column with an open pull request can be merged'],
+      ],
+    )
+    assert.deepEqual(merges, [])
+  })
 })
 
 describe('attachments', () => {

@@ -18,6 +18,7 @@ priorities, due dates, checklists, comments and an activity log, backed by SQLit
 - **Merge all**: merge every pull request in review with one click, one at a time and in an order that avoids
   conflicts (stacked pull requests after the ones they build on); any that conflict after earlier merges are skipped
   for their agent to resolve
+- **Quick merge**: merge a single ticket's pull request from its card in the review column
 - **Overview**: a dashboard across all boards (`/overview`): which agents are working on what right now, time
   worked and tickets completed per agent, activity and work time per day, per-board counts and a cross-board feed; stale or duplicate agents can be
   cleared from it

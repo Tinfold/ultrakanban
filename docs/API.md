@@ -14,6 +14,7 @@ JSON over HTTP. Base URL: `http://127.0.0.1:4317/api` (in development the Vite d
   - `409 tag_exists` - tag names are unique per board (case-insensitive).
   - `409 pull_request_not_merged` - the board's done column only accepts tickets whose pull request is merged.
   - `409 merge_in_progress` - the board's pull requests are already being merged.
+  - `409 cannot_merge` - the ticket's pull request can't be merged now (draft, conflicts, builds on another in review).
   - `413 payload_too_large` / `415 unsupported_media_type` - attachments must be PNG, JPEG, GIF, WebP, MP4 or WebM, up to 25 MB.
 
 Columns and tags can be referenced **by id or by name** (case-insensitive) wherever a request field says `ref`.
@@ -68,16 +69,17 @@ Boards without a review/done column (see board settings) have no pull request re
   whether through `move`, `claim`/`release` `moveTo`, or creating a ticket there. Humans can pass `force: true` to
   `move` or ticket creation to override it; agents should not.
 
-### Merging everything in review
+### Merging pull requests in review
 
 Humans can merge every open pull request in the review column at once (the merge button on the review column in the
-app). Agents should not: merging is the reviewer's call.
+app), or one ticket's (the merge button on its card). Agents should not: merging is the reviewer's call.
 
-| Method | Path                          | Body                                          | Returns                                                                              |
-| ------ | ----------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------ |
-| GET    | `/boards/:boardId/merge-plan` |                                               | `MergePlan`: the review column's open pull requests in merge order, read from GitHub |
-| POST   | `/boards/:boardId/merge-run`  | `{ method: "merge" \| "squash" \| "rebase" }` | `202 MergeRun`, then merges in the background; `409 merge_in_progress` if one runs   |
-| GET    | `/boards/:boardId/merge-run`  |                                               | the board's latest `MergeRun` since the server started, or `null`                    |
+| Method | Path                          | Body                                           | Returns                                                                              |
+| ------ | ----------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------ |
+| GET    | `/boards/:boardId/merge-plan` |                                                | `MergePlan`: the review column's open pull requests in merge order, read from GitHub |
+| POST   | `/boards/:boardId/merge-run`  | `{ method: "merge" \| "squash" \| "rebase" }`  | `202 MergeRun`, then merges in the background; `409 merge_in_progress` if one runs   |
+| GET    | `/boards/:boardId/merge-run`  |                                                | the board's latest `MergeRun` since the server started, or `null`                    |
+| POST   | `/tickets/:ticketId/merge`    | `{ method?: "merge" \| "squash" \| "rebase" }` | the merged `Ticket`, now in the done column; waits for the merge                     |
 
 - **Order:** a pull request that builds on another (its base is the other's branch, or it contains the other's
   commits) merges after it; otherwise they merge in the review column's order, so dragging tickets there changes it.
@@ -86,6 +88,10 @@ app). Agents should not: merging is the reviewer's call.
   The rest still merge. A stacked pull request is retargeted to the branch its base was merged into.
 - Drafts are skipped. Pull requests blocked by branch protection are still tried (admins may bypass it) and fail
   with GitHub's message if refused, as does one that gets new commits after the run started.
+- **One ticket:** `POST /tickets/:ticketId/merge` merges a ticket in the review column on its own, as a one-step
+  `MergeRun` (so it never overlaps "merge all"). It is refused with `409 cannot_merge` if the pull request is a draft,
+  has conflicts, or builds on another pull request still in review (merge that one first), and fails with
+  `502 github_error` if GitHub refuses the merge. `method` falls back to one the repository allows.
 - Merged tickets move to the done column right away. Merging needs a GitHub token with write access (`400` without
   one).
 

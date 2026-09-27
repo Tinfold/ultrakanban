@@ -4,6 +4,7 @@ import { ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES } from '../../shared/domain.ts'
 import {
   claimTicketSchema,
   commentSchema,
+  mergeTicketSchema,
   moveTicketSchema,
   releaseTicketSchema,
   submitForReviewSchema,
@@ -29,7 +30,7 @@ import {
 
 const tooLargeMessage = `Attachments can be at most ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB`
 
-export const ticketRoutes = ({ pullRequests, attachmentFiles }: AppServices) =>
+export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles }: AppServices) =>
   new Hono()
     .get('/:ticketId', (c) => c.json(getTicket(c.req.param('ticketId'))))
     .patch('/:ticketId', async (c) => {
@@ -45,6 +46,10 @@ export const ticketRoutes = ({ pullRequests, attachmentFiles }: AppServices) =>
       return c.json(ticket)
     })
     .post('/:ticketId/pull-request/sync', async (c) => c.json(await pullRequests.syncTicket(c.req.param('ticketId'))))
+    .post('/:ticketId/merge', async (c) => {
+      const { method } = await readJson(c, mergeTicketSchema)
+      return c.json(await mergeQueue.mergeTicket(c.req.param('ticketId'), method, actorOf(c)))
+    })
     .get('/:ticketId/attachments', (c) => c.json(listAttachments(c.req.param('ticketId'))))
     .post(
       '/:ticketId/attachments',

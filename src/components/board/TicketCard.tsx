@@ -10,6 +10,7 @@ import { dueState, formatDueDate, ticketRef } from '@/lib/format'
 import { checklistProgress } from '@/lib/markdown'
 import { cn } from '@/lib/utils'
 import { useBoardContext } from './board-context'
+import { QuickMergeButton } from './QuickMergeButton'
 
 const DUE_STYLES = {
   overdue: 'text-red-600 dark:text-red-400',
@@ -23,11 +24,15 @@ interface TicketCardProps {
 }
 
 export function TicketCard({ ticket, overlay }: TicketCardProps) {
-  const { tagsById } = useBoardContext()
+  const { detail, tagsById } = useBoardContext()
   const checklist = checklistProgress(ticket.description)
   const tags = ticket.tagIds.flatMap((tagId) => tagsById.get(tagId) ?? [])
   const hasMeta =
     ticket.dueDate || checklist.total > 0 || ticket.commentCount > 0 || ticket.attachmentCount > 0 || ticket.pullRequest
+  const canMerge =
+    !overlay &&
+    ticket.columnId === detail.board.reviewColumnId &&
+    (ticket.pullRequest?.state === 'open' || ticket.pullRequest?.state === 'unknown')
 
   return (
     <div
@@ -85,6 +90,7 @@ export function TicketCard({ ticket, overlay }: TicketCardProps) {
               {ticket.commentCount}
             </span>
           )}
+          {canMerge && <QuickMergeButton ticket={ticket} />}
         </div>
       )}
     </div>
