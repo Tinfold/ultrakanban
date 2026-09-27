@@ -1,6 +1,7 @@
 import {
   type Activity,
   addUsage,
+  AGENT_DEFAULTS,
   AGENT_EFFORTS,
   agentWorkerName,
   noUsage,
@@ -277,16 +278,25 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
       .map((row) => [row.board_id, row.at]),
   )
 
-  // A board's host agent runs as its worker name, or as that name with a ticket's own effort. Only the board's
-  // default worker is listed while idle; the per-ticket variants show up once they have work.
+  // A board's host agent runs as its worker name, or as that name with a ticket's own model and effort. Only the
+  // board's default worker is listed while idle; the per-ticket variants show up once they have work.
+  const ticketModels = new Map<string, string[]>()
+  for (const row of sql.all<{ board_id: string; agent_model: string }>(
+    'SELECT DISTINCT board_id, agent_model FROM tickets WHERE agent_model IS NOT NULL',
+  )) {
+    ticketModels.set(row.board_id, [...(ticketModels.get(row.board_id) ?? []), row.agent_model])
+  }
   const agentBoards = new Map<string, string[]>()
   const hostAgents: string[] = []
   for (const board of boards) {
     if (!board.agentEnabled) continue
     hostAgents.push(agentWorkerName(board))
-    for (const effort of AGENT_EFFORTS) {
-      const name = agentWorkerName({ ...board, agentEffort: effort })
-      agentBoards.set(name, [...(agentBoards.get(name) ?? []), board.id])
+    const models = new Set([board.agentModel ?? AGENT_DEFAULTS.model, ...(ticketModels.get(board.id) ?? [])])
+    for (const agentModel of models) {
+      for (const agentEffort of AGENT_EFFORTS) {
+        const name = agentWorkerName({ ...board, agentModel, agentEffort })
+        agentBoards.set(name, [...(agentBoards.get(name) ?? []), board.id])
+      }
     }
   }
 

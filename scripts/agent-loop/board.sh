@@ -1,10 +1,12 @@
 # Helpers: logging, ticket locks, the usage-limit pause, board API calls and saved ticket state.
 # Part of agent-loop.sh, which sources it; the settings it uses are described there.
 
-# Works the next ticket at the given effort level (the ticket's own), or at EFFORT when it is empty.
-use_effort() {
-  effort=${1:-$EFFORT}
-  worker="$AGENT/$MODEL/$effort"
+# Works the next ticket with the given model and at the given effort level (the ticket's own), or with MODEL and at
+# EFFORT for those that are empty.
+use_worker() {
+  model=${1:-$MODEL}
+  effort=${2:-$EFFORT}
+  worker="$AGENT/$model/$effort"
 }
 
 log() { printf '%s %s%s\n' "$(date '+%F %T')" "${LOOP_ID:+[$LOOP_ID] }" "$*"; }

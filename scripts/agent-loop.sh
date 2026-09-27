@@ -5,7 +5,8 @@
 # The loop is the board's agent (its controller), named AGENT. The runs it starts are its workers, and they claim
 # tickets under a name made of the agent, the model and the effort level they run with: AGENT/MODEL/EFFORT, e.g.
 # claude/opus/high. The loop passes that model and effort to claude, so the name always says what did the work.
-# A ticket can ask for its own effort level (its agentEffort); tickets that don't are worked at EFFORT.
+# A ticket can ask for its own model and effort level (its agentModel and agentEffort); tickets that don't are worked
+# with MODEL at EFFORT.
 # Tickets held under another of the agent's names (another model or effort, or the bare agent name) are its own too:
 # before a run on one, the loop reassigns it to the current worker.
 #
@@ -38,6 +39,10 @@
 # run, starts the next run. A failed run saves nothing and is retried after RETRY_SECONDS, doubling each time, up
 # to MAX_ATTEMPTS; new feedback resets the count. A missing or unreadable state file means handling everything
 # again, never skipping it.
+#
+# Runs get only the ultrakanban skill, in their system prompt, unless the board's agentAllSkills setting is on or the
+# repository has skills or commands of its own (under .claude/): the account's and plugins' skills are listed in every
+# request a run makes, and it has no use for them.
 #
 # Each run's token usage (from claude's JSON output) is reported to the board with POST /tickets/:id/usage, so the
 # overview can show how many tokens each agent uses. A run stopped by the timeout reports nothing.
@@ -72,7 +77,7 @@
 #   AGENT               name of the board's agent; its workers claim tickets as AGENT/MODEL/EFFORT (default: claude)
 #   MODEL               Claude model the workers run, an alias or a full name such as claude-opus-5-5 (default: opus)
 #   EFFORT              effort level the workers run at unless the ticket sets its own: low, medium, high, xhigh
-#                       or max (default: high)
+#                       or max (default: medium)
 #   TODO_COLUMN         column to take new tickets from (default: Todo)
 #   BACKLOG_COLUMN      column to take new tickets from when the todo column has none and the board's agentBacklog
 #                       setting is on (default: Backlog)
@@ -88,6 +93,14 @@
 #   STRICT_MCP          1 passes --strict-mcp-config to claude, so runs load no MCP servers (the account's connectors,
 #                       plugins' or the repository's) except those given with --mcp-config in CLAUDE_ARGS: their tools
 #                       and instructions are sent with every request of a run. 0 loads them as usual (default: 1)
+#   DISALLOWED_TOOLS    Claude Code tools the runs don't get, separated by spaces: every tool's definition is sent with
+#                       each request of a run, and a run started by the loop has no use for these. Empty gives the runs
+#                       every tool (default: ScheduleWakeup CronCreate CronDelete CronList RemoteTrigger
+#                       PushNotification ListAgents SendMessage EnterWorktree ExitWorktree DesignSync)
+#   CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS, BASH_MAX_OUTPUT_LENGTH
+#                       the most tokens of a file one Read returns to a run, and the most characters of a command's
+#                       output it sees: whatever a run reads is sent again with each of its later requests, so a big
+#                       read costs many times its size (default: 10000 and 15000; Claude Code's own are 25000 and 30000)
 #   CLAUDE_ARGS         extra arguments for claude; set the model and effort with MODEL and EFFORT, not here
 #   STATE_DIR           where watermarks are kept (default: $XDG_STATE_HOME/ultrakanban-agent-loop/BOARD-AGENT)
 #   AGENT_LOOP_CLEAN    1 when running in a dedicated clone: before each run the loop fetches, discards local
@@ -107,9 +120,10 @@ set -uo pipefail
 : "${BOARD:?set BOARD to the board id}"
 AGENT=${AGENT:-claude}
 MODEL=${MODEL:-opus}
-EFFORT=${EFFORT:-high}
+EFFORT=${EFFORT:-medium}
 WORKER="$AGENT/$MODEL/$EFFORT"
-# The effort and name of the run being prepared; use_effort sets them per ticket.
+# The model, effort and name of the run being prepared; use_worker sets them per ticket.
+model=$MODEL
 effort=$EFFORT
 worker=$WORKER
 LOOP_ACTOR="$AGENT-loop"
@@ -132,13 +146,20 @@ INFRA_PATTERN+='|was not started|minutes quota|exceeded .*(minutes|quota)'
 USAGE_LIMIT_PATTERN="hit your [a-z -]*limit|usage limit|limit reached|out of (extra )?usage"
 STATE_DIR=${STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/ultrakanban-agent-loop/$BOARD-${AGENT//\//_}}
 read -r -a claude_args <<<"${CLAUDE_ARGS:-}"
-claude_args+=(--model "$MODEL")
 if [[ ${SKIP_PERMISSIONS:-1} == 1 ]]; then
   claude_args+=(--dangerously-skip-permissions)
 fi
 if [[ ${STRICT_MCP:-1} == 1 ]]; then
   claude_args+=(--strict-mcp-config)
 fi
+DISALLOWED_TOOLS=${DISALLOWED_TOOLS-ScheduleWakeup CronCreate CronDelete CronList RemoteTrigger PushNotification \
+ListAgents SendMessage EnterWorktree ExitWorktree DesignSync}
+read -r -a disallowed <<<"$DISALLOWED_TOOLS"
+if ((${#disallowed[@]})); then
+  claude_args+=(--disallowedTools "$(IFS=,; echo "${disallowed[*]}")")
+fi
+export CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS=${CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS:-10000}
+export BASH_MAX_OUTPUT_LENGTH=${BASH_MAX_OUTPUT_LENGTH:-15000}
 mkdir -p "$STATE_DIR" || exit 1
 
 # The rest of the loop is split into parts by what they do, so that changing one means reading only that part.
@@ -183,7 +204,7 @@ watched() {
 }
 watching=$(watched)
 
-log "working board $BOARD as $AGENT, claiming tickets as $WORKER (or at the effort a ticket asks for)"
+log "working board $BOARD as $AGENT, claiming tickets as $WORKER (or with the model and effort a ticket asks for)"
 # A run stopped along with the loop left its work here; keep it now, so whichever loop resumes the ticket gets it back.
 if [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]]; then save_work; fi
 while true; do

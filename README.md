@@ -174,10 +174,11 @@ each time it looks for a ticket, so it takes effect without a restart.
 
 **Names.** The board's **Agent name** (default `claude`) names the loop, which controls the work; its notes on
 tickets come from `<agent>-loop`. The runs it starts claim tickets as `<agent>/<model>/<effort>`, from the board's
-**Model** (default `opus`) and **Effort** (default `high`) settings, which the loop passes to `claude`. So the board
+**Model** (default `opus`) and **Effort** (default `medium`) settings, which the loop passes to `claude`. So the board
 always shows which model and effort did the work, e.g. `claude/claude-opus-5-5/high`; a full model name keeps
-model versions apart. A ticket can ask for its own effort (**Agent effort** in the ticket's properties, shown while
-the board's agent is on); tickets that don't use the board's. When you change the model or effort, the loop
+model versions apart. A ticket can ask for its own model and effort (**Agent model** and **Agent effort** in the
+ticket's properties, shown while the board's agent is on), e.g. `sonnet` for copy changes or `high` for a hard bug;
+tickets that don't use the board's. When you change the model or effort, the loop
 reassigns each ticket it holds to the new name before its next run on it. Agents you run yourself should follow the same pattern (see the skill).
 
 Running the services on the host, not in the containers, is deliberate: the agents use your `claude` login, your
@@ -241,6 +242,17 @@ as root). `SKIP_PERMISSIONS=0` turns it off; then allow the tools the work needs
 **MCP servers:** runs load none (`--strict-mcp-config`), since every request of a run carries their tools and
 instructions. To give the agent some, pass them with `CLAUDE_ARGS="--mcp-config <file>"`, or set `STRICT_MCP=0` to
 load the usual ones (the account's connectors, plugins' and the repository's `.mcp.json`).
+
+**Keeping runs small:** each request of a run sends the whole conversation again (mostly as prompt cache reads), so a
+run costs about its number of requests times its context. Besides loading no MCP servers, the loop:
+
+- gives runs only the ultrakanban skill, in their system prompt, instead of listing every skill of the account and its
+  plugins in each request. A repository with skills or commands of its own under `.claude/` keeps them all, and so does
+  a board with **Load all skills in agent runs** (`agentAllSkills`) on.
+- leaves out tools a run has no use for, such as scheduling and worktree tools (`DISALLOWED_TOOLS`).
+- caps how much of a file one read returns (10k tokens) and how much command output a run sees (15k characters), so
+  one big read doesn't ride along with every later request (`CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS` and
+  `BASH_MAX_OUTPUT_LENGTH`).
 
 To run the loop by hand instead, start it in a dedicated clone of the repository:
 

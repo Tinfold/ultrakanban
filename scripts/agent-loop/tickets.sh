@@ -42,7 +42,7 @@ worked on again."
 }
 
 # Reassigns a ticket held under another of the agent's names (another model or effort, or the bare agent name) to
-# the worker set by use_effort, in one versioned update.
+# the worker set by use_worker, in one versioned update.
 adopt() {
   local id=$1 number=$2 holder=$3 version=$4 response
   [[ $holder == "$worker" ]] && return 0
@@ -57,7 +57,7 @@ adopt() {
 
 # Checks the tickets the agent holds and handles the first one that needs work. Returns 1 if none did.
 handle_feedback() {
-  local board review cancelled idle tickets file id number column holder version ticket_effort pr_url repo pr_number \
+  local board review cancelled idle tickets file id number column holder version ticket_model ticket_effort pr_url repo pr_number \
     queued pr branch ci issue reviews inline activity state triage items ci_note
   claim_lock -s
   board=$(get "/boards/$BOARD") || { claim_unlock; log "can't read board $BOARD"; return 1; }
@@ -69,7 +69,7 @@ handle_feedback() {
     '(.board.doneColumnId // "") as $done
     | .tickets[] | select(.assignee | . != null and (. == $agent or startswith($agent + "/")))
     | select(.columnId != $done and .columnId != $cancelled)
-    | [.id, .number, .columnId, .assignee, .version, .agentEffort // "-", .pullRequest.url // "-",
+    | [.id, .number, .columnId, .assignee, .version, .agentModel // "-", .agentEffort // "-", .pullRequest.url // "-",
        .pullRequest.repo // "-", .pullRequest.number // "-",
        ($idle[.columnId] | if .queued then .name else "-" end)] | @tsv' \
     <<<"$board")
@@ -89,7 +89,7 @@ handle_feedback() {
   fi
   claim_unlock
 
-  while IFS=$'\t' read -r -u 3 id number column holder version ticket_effort pr_url repo pr_number queued; do
+  while IFS=$'\t' read -r -u 3 id number column holder version ticket_model ticket_effort pr_url repo pr_number queued; do
     [[ -n $id ]] || continue
     # Another loop is working this one.
     unlock_ticket
@@ -148,7 +148,7 @@ loop stopped starting runs for CI on this ticket. Comment on the ticket to let i
     fi
     [[ $(jq -r .run <<<"$triage") == true ]] || continue
 
-    use_effort "${ticket_effort#-}"
+    use_worker "${ticket_model#-}" "${ticket_effort#-}"
     adopt "$id" "$number" "$holder" "$version" || continue
     items=$(jq -r '.items | map(.text) | join("\n\n---\n\n")' <<<"$triage")
     log "ticket #$number ($id): $(jq -r '.items | map(.text | split("\n")[0] | rtrimstr(":")) | join("; ")' \
@@ -195,7 +195,7 @@ claim_from() {
 claim_next() {
   local response status ticket id snapshot
   paused && return 0
-  use_effort ""
+  use_worker "" ""
   claim_lock -x
   response=$(claim_from "$TODO_COLUMN")
   status=${response##*$'\n'}
@@ -219,9 +219,10 @@ claim_next() {
     log "ticket #$(jq -r .number <<<"$ticket") ($id): another loop is already working it"
     return 0
   fi
-  # The claim can't know the ticket's effort beforehand, so a ticket that sets one is handed to that worker now.
-  use_effort "$(jq -r '.agentEffort // ""' <<<"$ticket")"
-  adopt "$id" "$(jq -r .number <<<"$ticket")" "$WORKER" "$(jq -r .version <<<"$ticket")" || use_effort ""
+  # The claim can't know the ticket's model and effort beforehand, so a ticket that sets them is handed to that worker
+  # now.
+  use_worker "$(jq -r '.agentModel // ""' <<<"$ticket")" "$(jq -r '.agentEffort // ""' <<<"$ticket")"
+  adopt "$id" "$(jq -r .number <<<"$ticket")" "$WORKER" "$(jq -r .version <<<"$ticket")" || use_worker "" ""
   # Everything on the ticket so far is handed to this run. Until it succeeds, the claim itself counts as feedback,
   # so a failed or interrupted run is retried with backoff.
   snapshot=$(get "/tickets/$id/activity" | jq -c '{activity: (map(.id) | max // 0)}') || snapshot='{}'

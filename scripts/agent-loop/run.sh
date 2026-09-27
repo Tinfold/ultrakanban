@@ -86,6 +86,22 @@ watch_run() {
   done
 }
 
+# The skills the next run gets, as arguments for claude (skill_args): only the ultrakanban skill, in the system prompt,
+# unless the board's agentAllSkills is on or the repository has skills or commands of its own.
+use_skills() {
+  local skill=.claude/skills/ultrakanban/SKILL.md
+  skill_args=()
+  [[ -f $skill ]] || return 0
+  if [[ -n $(find .claude/commands .claude/skills -mindepth 1 -maxdepth 1 ! -path "${skill%/*}" -print -quit \
+    2>/dev/null) ]] || get "/boards/$BOARD" | jq -e .board.agentAllSkills >/dev/null; then
+    return 0
+  fi
+  skill_args=(--disable-slash-commands --append-system-prompt "This run has no Skill tool: the ultrakanban skill it \
+uses is already loaded, here.
+
+$(<"$skill")")
+}
+
 # Runs claude on a ticket with the given prompt and further arguments (the session to start or resume), prints its
 # final message (and keeps it in claude_result, and what it printed to stderr in claude_errors) and reports the tokens
 # it used. Returns claude's exit status. If someone takes the ticket away from the agent meanwhile, the run is stopped
@@ -94,11 +110,12 @@ run_claude() {
   local id=$1 prompt=$2 output errors stopped code usage response
   shift 2
   output=$(mktemp) && errors=$(mktemp) && stopped=$(mktemp) || return 1
+  use_skills
   (
     # Without the ticket lock's descriptor: anything claude leaves running mustn't keep the ticket locked.
     if [[ -n $lock_fd ]]; then exec {lock_fd}>&-; fi
-    exec timeout --foreground "$TICKET_TIMEOUT" claude -p ${claude_args[@]+"${claude_args[@]}"} --effort "$effort" \
-      --output-format json "$@"
+    exec timeout --foreground "$TICKET_TIMEOUT" claude -p ${claude_args[@]+"${claude_args[@]}"} \
+      ${skill_args[@]+"${skill_args[@]}"} --model "$model" --effort "$effort" --output-format json "$@"
   ) <<<"$prompt" >"$output" 2>"$errors" &
   running=$!
   watch_run "$id" "$running" "$stopped" &
@@ -231,7 +248,7 @@ new feedback such as a ticket comment retries it."
 intro() {
   printf '%s' "Use the ultrakanban skill. KANBAN=$KANBAN, BOARD=$BOARD.
 Your name (agent field and X-Actor header): $worker. Use exactly this name: it says that you are the $AGENT agent
-running $MODEL at $effort effort.
+running $model at $effort effort.
 This is a non-interactive run started by scripts/agent-loop.sh: do the work, then exit. Don't wait for review; the loop
 starts a new run when feedback arrives. If you need an answer from a human, ask in a ticket comment and exit.
 If the ticket's description has a checklist (- [ ] step), check off each step as you finish it with

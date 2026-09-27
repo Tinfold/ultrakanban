@@ -1,6 +1,6 @@
 import { CalendarIcon, CheckIcon, PlusIcon, UserRoundXIcon } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
-import { AGENT_DEFAULTS, AGENT_EFFORTS, type AgentEffort, type Priority } from '@shared/domain'
+import { AGENT_DEFAULTS, AGENT_EFFORTS, AGENT_MODELS, type AgentEffort, type Priority } from '@shared/domain'
 import { ColorDot } from '@/components/common/TagChip'
 import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { UserAvatar } from '@/components/common/UserAvatar'
@@ -84,6 +84,34 @@ export function EffortPicker({ value, onChange, children }: PickerProps<AgentEff
           {AGENT_EFFORTS.map((effort) => (
             <DropdownMenuRadioItem key={effort} value={effort}>
               {effort}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+const BOARD_MODEL = '__board'
+
+/** The model the board's agent works a ticket with; `null` follows the board's setting. */
+export function ModelPicker({ value, onChange, children }: PickerProps<string | null>) {
+  const { detail } = useBoardContext()
+  const models = [...new Set([...AGENT_MODELS, ...(value ? [value] : [])])]
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-48">
+        <DropdownMenuRadioGroup
+          value={value ?? BOARD_MODEL}
+          onValueChange={(next) => onChange(next === BOARD_MODEL ? null : next)}
+        >
+          <DropdownMenuRadioItem value={BOARD_MODEL}>
+            Board default ({detail.board.agentModel ?? AGENT_DEFAULTS.model})
+          </DropdownMenuRadioItem>
+          {models.map((model) => (
+            <DropdownMenuRadioItem key={model} value={model}>
+              {model}
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>

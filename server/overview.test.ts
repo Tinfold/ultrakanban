@@ -91,15 +91,15 @@ describe('overview', () => {
   test('overview lists enabled board agents under their worker names', async () => {
     await call('PATCH', `/boards/${boardId}`, { githubRepo: 'acme/app', agentEnabled: true, agentName: 'idle-agent' })
     const { body: idle } = await call<Overview>('GET', '/overview')
-    const agent = idle.agents.find((entry) => entry.name === 'idle-agent/opus/high')
+    const agent = idle.agents.find((entry) => entry.name === 'idle-agent/opus/medium')
     assert.deepEqual([agent?.status, agent?.agentOf], ['idle', [boardId]])
     assert.ok(!idle.agents.some((entry) => entry.name === 'idle-agent' || entry.name === 'idle-agent/opus/max'))
 
-    // A ticket's own effort runs under its own worker name, which still counts as the board's host agent.
-    await addTicket({ title: 'A' })
-    await call('POST', `/boards/${boardId}/tickets/claim-next`, { agent: 'idle-agent/opus/max', column: 'Todo' })
+    // A ticket's own model and effort run under their own worker name, which still counts as the board's host agent.
+    await addTicket({ title: 'A', agentModel: 'sonnet' })
+    await call('POST', `/boards/${boardId}/tickets/claim-next`, { agent: 'idle-agent/sonnet/max', column: 'Todo' })
     const { body: working } = await call<Overview>('GET', '/overview')
-    const variant = working.agents.find((entry) => entry.name === 'idle-agent/opus/max')
+    const variant = working.agents.find((entry) => entry.name === 'idle-agent/sonnet/max')
     assert.deepEqual([variant?.status, variant?.agentOf], ['working', [boardId]])
     await call('PATCH', `/boards/${boardId}`, { agentEnabled: false })
   })

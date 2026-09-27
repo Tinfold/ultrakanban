@@ -114,6 +114,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
       agentConcurrency,
       agentEnabled: data.get('agentEnabled') === 'on',
       agentBacklog: data.get('agentBacklog') === 'on',
+      agentAllSkills: data.get('agentAllSkills') === 'on',
     })
     onClose()
   }
@@ -282,6 +283,21 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
             Take tickets from Backlog when Todo is empty
           </label>
           {!hasBacklog && <p className="pl-6 text-xs text-muted-foreground">This board has no column named Backlog.</p>}
+        </div>
+        <div className="grid gap-1">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              name="agentAllSkills"
+              defaultChecked={detail.board.agentAllSkills}
+              className="size-4 accent-primary"
+            />
+            Load all skills in agent runs
+          </label>
+          <p className="pl-6 text-xs text-muted-foreground">
+            Off, runs only get the ultrakanban skill, unless the repository has skills of its own. Every skill is listed
+            in each request a run makes, which costs tokens.
+          </p>
         </div>
       </fieldset>
 

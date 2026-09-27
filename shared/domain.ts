@@ -13,8 +13,11 @@ export function colorForName(name: string): Color {
 export const AGENT_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 export type AgentEffort = (typeof AGENT_EFFORTS)[number]
 
+/** Model aliases offered for a ticket; boards and tickets can also name a model in full, e.g. claude-opus-5-5. */
+export const AGENT_MODELS = ['fable', 'opus', 'sonnet', 'haiku'] as const
+
 /** What a board's agent runs as when the board doesn't say (see scripts/agent-board.sh). */
-export const AGENT_DEFAULTS = { name: 'claude', model: 'opus', effort: 'high', concurrency: 1 } as const
+export const AGENT_DEFAULTS = { name: 'claude', model: 'opus', effort: 'medium', concurrency: 1 } as const
 /** Most runs a board's agent can work at once; each one needs its own git worktree and counts against Claude usage. */
 export const AGENT_MAX_CONCURRENCY = 8
 
@@ -162,12 +165,17 @@ export interface BoardSummary {
   agentName: string | null
   /** Claude model the agent runs, as an alias or a full model name; `opus` when not set. */
   agentModel: string | null
-  /** Effort level the agent runs at; `high` when not set. */
+  /** Effort level the agent runs at; `medium` when not set. */
   agentEffort: AgentEffort | null
   /** How many runs the agent works at once, each on its own ticket in its own git worktree; 1 when not set. */
   agentConcurrency: number | null
   /** Whether the agent also takes tickets from the Backlog column once the Todo column has none left. */
   agentBacklog: boolean
+  /**
+   * Whether the agent's runs load every skill (the account's, plugins' and the repository's). Otherwise they only get
+   * the ultrakanban skill, unless the repository has skills of its own.
+   */
+  agentAllSkills: boolean
   ticketCount: number
   createdAt: string
   updatedAt: string
@@ -204,6 +212,8 @@ export interface Ticket {
   dueDate: string | null
   /** Effort level the board's agent works this ticket at; the board's `agentEffort` when not set. */
   agentEffort: AgentEffort | null
+  /** Claude model the board's agent works this ticket with; the board's `agentModel` when not set. */
+  agentModel: string | null
   tagIds: string[]
   pullRequest: PullRequest | null
   position: number

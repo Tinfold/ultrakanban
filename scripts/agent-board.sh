@@ -25,7 +25,7 @@ board=$(curl -sf "$KANBAN/api/boards/$BOARD") || { echo "can't read board $BOARD
 repo=$(jq -r '.board.githubRepo // ""' <<<"$board")
 agent=$(jq -r '.board.agentName // "claude"' <<<"$board")
 model=$(jq -r '.board.agentModel // "opus"' <<<"$board")
-effort=$(jq -r '.board.agentEffort // "high"' <<<"$board")
+effort=$(jq -r '.board.agentEffort // "medium"' <<<"$board")
 concurrency=$(jq -r '.board.agentConcurrency // 1' <<<"$board")
 [[ $concurrency =~ ^[1-9][0-9]*$ ]] || concurrency=1
 if [[ $(jq -r .board.agentEnabled <<<"$board") != true || -z $repo ]]; then

@@ -67,7 +67,7 @@ reconcile() {
   local boards wanted id repo agent model effort concurrency settings unit state units
   boards=$(curl -sf "$KANBAN/api/boards") || { echo "can't reach $KANBAN; leaving the loops as they are"; return; }
   wanted=$(jq -r '.[] | select(.agentEnabled and .githubRepo != null)
-    | [.id, .githubRepo, .agentName // "claude", .agentModel // "opus", .agentEffort // "high", .agentConcurrency // 1]
+    | [.id, .githubRepo, .agentName // "claude", .agentModel // "opus", .agentEffort // "medium", .agentConcurrency // 1]
     | @tsv' <<<"$boards")
 
   while IFS=$'\t' read -r id repo agent model effort concurrency; do
