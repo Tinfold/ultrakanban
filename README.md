@@ -194,7 +194,9 @@ for the ticket, with a note, until someone comments. And the agent is told not t
 isn't from the code.
 
 A failed run saves nothing and is retried with backoff (`RETRY_SECONDS`, doubling, up to `MAX_ATTEMPTS` in a row,
-then again when new feedback arrives). Other settings are listed at the top of the script. It needs `curl`, `jq`,
+then again when new feedback arrives), with a ticket note saying why it failed. Running out of Claude usage doesn't
+count as a failure: the note quotes claude's limit message, and the loop starts no runs on any ticket until the time
+the message says the limit resets. Other settings are listed at the top of the script. It needs `curl`, `jq`,
 `timeout`, git, an authenticated `gh` and the skill.
 
 **Permissions:** the loop passes `--dangerously-skip-permissions`, so with the agent switched on, `claude` runs
