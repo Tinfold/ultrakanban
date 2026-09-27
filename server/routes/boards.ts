@@ -9,6 +9,7 @@ import {
   createTicketSchema,
   listTicketsQuerySchema,
   mergeRunSchema,
+  recordUsageSchema,
   updateBoardSchema,
 } from '../../shared/schemas.ts'
 import { transaction } from '../db.ts'
@@ -21,6 +22,7 @@ import { createColumn } from '../store/columns.ts'
 import { createTag } from '../store/tags.ts'
 import { claimNextTicket, createTicket, getTicketByNumber, listTickets } from '../store/tickets.ts'
 import { exportBoard, importBoard } from '../store/transfer.ts'
+import { listBoardUsage, recordBoardUsage } from '../store/usage.ts'
 
 /** GitHub turning a request down (name taken, no access, missing scope) is the caller's to fix; anything else isn't. */
 const gitHubFailure = (error: unknown) =>
@@ -112,6 +114,14 @@ export const boardRoutes = ({ pullRequests, mergeQueue }: AppServices) =>
     .post('/:boardId/tickets/claim-next', async (c) => {
       const input = await readJson(c, claimNextSchema)
       return c.json(transaction(() => claimNextTicket(c.req.param('boardId'), input)))
+    })
+    .get('/:boardId/usage', (c) => c.json(listBoardUsage(c.req.param('boardId'))))
+    .post('/:boardId/usage', async (c) => {
+      const input = await readJson(c, recordUsageSchema)
+      return c.json(
+        transaction(() => recordBoardUsage(c.req.param('boardId'), input)),
+        201,
+      )
     })
     .get('/:boardId/merge-plan', async (c) => c.json(await mergeQueue.plan(c.req.param('boardId'))))
     .get('/:boardId/merge-run', (c) => c.json(mergeQueue.latest(getBoard(c.req.param('boardId')).id)))

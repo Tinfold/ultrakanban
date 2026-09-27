@@ -180,7 +180,7 @@ export const mergeTicketSchema = z.object({ method: z.enum(MERGE_METHODS).option
 
 const tokens = z.int().min(0)
 
-/** Tokens an agent run used on a ticket, e.g. from `claude -p --output-format json`. */
+/** Tokens an agent run used on a ticket or board, e.g. from `claude -p --output-format json`. */
 export const recordUsageSchema = z.object({
   agent: name,
   inputTokens: tokens,

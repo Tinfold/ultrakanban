@@ -255,17 +255,22 @@ overrides the board's for that ticket: the loop runs it at that effort and under
 
 Agents report the tokens each run used on a ticket, and the [overview](#overview) adds them up per agent, board and
 day. `scripts/agent-loop.sh` reports every `claude -p` run it starts (from `--output-format json`, all models the run
-called, subagents included); other agents can report theirs the same way.
+called, subagents included); other agents can report theirs the same way. Runs that weren't on a ticket (an assistant
+answering a question, say) are reported to the board instead, and count toward the agent's and the board's totals just
+the same, with `ticketId: null`.
 
-| Method | Path                       | Body                                                                                               | Returns                       |
-| ------ | -------------------------- | -------------------------------------------------------------------------------------------------- | ----------------------------- |
-| POST   | `/tickets/:ticketId/usage` | `{ agent, inputTokens, outputTokens, cacheReadTokens?, cacheWriteTokens?, costUsd?, durationMs? }` | `TokenUsage` (201)            |
-| GET    | `/tickets/:ticketId/usage` |                                                                                                    | `TokenUsage[]` (oldest first) |
+| Method | Path                       | Body                                                                                               | Returns                                              |
+| ------ | -------------------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| POST   | `/tickets/:ticketId/usage` | `{ agent, inputTokens, outputTokens, cacheReadTokens?, cacheWriteTokens?, costUsd?, durationMs? }` | `TokenUsage` (201)                                   |
+| GET    | `/tickets/:ticketId/usage` |                                                                                                    | `TokenUsage[]` (oldest first)                        |
+| POST   | `/boards/:boardId/usage`   | same as for a ticket                                                                               | `TokenUsage` (201) with `ticketId: null`             |
+| GET    | `/boards/:boardId/usage`   |                                                                                                    | `TokenUsage[]` (oldest first), on its tickets or not |
 
 ```ts
 interface TokenUsage {
   id: number
-  ticketId: string
+  boardId: string
+  ticketId: string | null // null for runs reported to the board rather than a ticket
   agent: string // who ran, e.g. claude/opus/high
   inputTokens: number // uncached input
   outputTokens: number
@@ -340,6 +345,7 @@ interface Overview {
   sessions: { agent; ticketId; boardId; start: string; end: string | null }[] // clipped to the range
   completions: { ticketId; boardId; at: string; cycleMs: number | null; reviewMs: number | null }[] // oldest first
   // Token usage reported within the range, oldest first
+  // (ticketId is null for runs reported to a board rather than a ticket)
   usage: { at; agent; ticketId; boardId; inputTokens; outputTokens; cacheReadTokens; cacheWriteTokens; costUsd }[]
   recent: (Activity & { ticket: { number; title; boardId; boardName } })[] // latest 30, newest first
 }

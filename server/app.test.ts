@@ -635,6 +635,49 @@ describe('pull request workflow', () => {
     )
   })
 
+  test('agents report runs that were not on a ticket to the board', async () => {
+    const agent = 'board-token-agent'
+    const ticket = await addTicket({ title: 'A' })
+    const tokensBefore = (await call<Overview>('GET', '/overview')).body.boards.find(
+      (entry) => entry.id === boardId,
+    )?.tokens
+    await call('POST', `/tickets/${ticket.id}/usage`, { agent, inputTokens: 1, outputTokens: 2 })
+    const { status, body: recorded } = await call<TokenUsage>('POST', `/boards/${boardId}/usage`, {
+      agent,
+      inputTokens: 10,
+      outputTokens: 20,
+      costUsd: 0.5,
+    })
+    assert.equal(status, 201)
+    assert.deepEqual([recorded.boardId, recorded.ticketId, recorded.costUsd], [boardId, null, 0.5])
+    assert.equal(
+      (await call('POST', `/boards/${boardId}/usage`, { agent, inputTokens: -1, outputTokens: 0 })).status,
+      400,
+    )
+    assert.equal((await call('POST', '/boards/nope/usage', { agent, inputTokens: 1, outputTokens: 1 })).status, 404)
+
+    // The board lists runs on its tickets and its own; the ticket only its runs.
+    const { body: board } = await call<TokenUsage[]>('GET', `/boards/${boardId}/usage`)
+    assert.deepEqual(
+      board.filter((entry) => entry.agent === agent).map((entry) => entry.ticketId),
+      [ticket.id, null],
+    )
+    const { body: onTicket } = await call<TokenUsage[]>('GET', `/tickets/${ticket.id}/usage`)
+    assert.equal(onTicket.filter((entry) => entry.agent === agent).length, 1)
+
+    const { body: overview } = await call<Overview>('GET', '/overview')
+    const usage = overview.agents.find((entry) => entry.name === agent)?.usage
+    assert.deepEqual([usage?.inputTokens, usage?.outputTokens, usage?.costUsd, usage?.runs], [11, 22, 0.5, 2])
+    assert.equal(overview.boards.find((entry) => entry.id === boardId)?.tokens, (tokensBefore ?? 0) + 33)
+    assert.deepEqual(
+      overview.usage.filter((entry) => entry.agent === agent).map((entry) => [entry.ticketId, entry.boardId]),
+      [
+        [ticket.id, boardId],
+        [null, boardId],
+      ],
+    )
+  })
+
   test('overview hides cleared agents until they do something again', async () => {
     const agent = 'stale-agent'
     const ticket = await addTicket({ title: 'A' })

@@ -234,10 +234,12 @@ export interface TokenCounts {
 export const totalTokens = (counts: TokenCounts) =>
   counts.inputTokens + counts.outputTokens + counts.cacheReadTokens + counts.cacheWriteTokens
 
-/** Tokens one agent run used on a ticket (`POST /tickets/:id/usage`). */
+/** Tokens one agent run used on a ticket (`POST /tickets/:id/usage`) or a board (`POST /boards/:id/usage`). */
 export interface TokenUsage extends TokenCounts {
   id: number
-  ticketId: string
+  boardId: string
+  /** `null` for runs that weren't on a ticket. */
+  ticketId: string | null
   agent: string
   /** Estimated cost in US dollars, when the agent reports one. */
   costUsd: number | null
@@ -385,7 +387,8 @@ export interface OverviewCompletion {
 export interface OverviewUsage extends TokenCounts {
   at: string
   agent: string
-  ticketId: string
+  /** `null` for runs that weren't on a ticket. */
+  ticketId: string | null
   boardId: string
   costUsd: number | null
 }

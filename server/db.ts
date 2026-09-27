@@ -125,6 +125,32 @@ const MIGRATIONS = [
   CREATE INDEX token_usage_ticket ON token_usage(ticket_id, id);
   CREATE INDEX token_usage_created ON token_usage(created_at);
   `,
+  `
+  -- Agents can report runs that weren't on a ticket (POST /boards/:id/usage), so usage belongs to a board and
+  -- optionally to one of its tickets.
+  CREATE TABLE token_usage_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+    ticket_id TEXT REFERENCES tickets(id) ON DELETE CASCADE,
+    agent TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    cache_read_tokens INTEGER NOT NULL,
+    cache_write_tokens INTEGER NOT NULL,
+    cost_usd REAL,
+    duration_ms INTEGER,
+    created_at TEXT NOT NULL
+  );
+  INSERT INTO token_usage_new
+    SELECT u.id, t.board_id, u.ticket_id, u.agent, u.input_tokens, u.output_tokens, u.cache_read_tokens,
+      u.cache_write_tokens, u.cost_usd, u.duration_ms, u.created_at
+    FROM token_usage u JOIN tickets t ON t.id = u.ticket_id;
+  DROP TABLE token_usage;
+  ALTER TABLE token_usage_new RENAME TO token_usage;
+  CREATE INDEX token_usage_ticket ON token_usage(ticket_id, id);
+  CREATE INDEX token_usage_board ON token_usage(board_id, id);
+  CREATE INDEX token_usage_created ON token_usage(created_at);
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

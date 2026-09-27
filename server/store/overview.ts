@@ -190,19 +190,24 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
 
   // Tokens agents' runs used.
   const usage = sql
-    .all<UsageRow & { board_id: string }>(
-      `SELECT u.*, t.board_id FROM token_usage u JOIN tickets t ON t.id = u.ticket_id
-       WHERE u.created_at >= ? ORDER BY u.created_at, u.id`,
-      since,
-    )
+    .all<UsageRow>('SELECT * FROM token_usage WHERE created_at >= ? ORDER BY created_at, id', since)
     .map((row): OverviewUsage => {
-      const { createdAt, agent, ticketId, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costUsd } =
-        toUsage(row)
+      const {
+        createdAt,
+        agent,
+        ticketId,
+        boardId,
+        inputTokens,
+        outputTokens,
+        cacheReadTokens,
+        cacheWriteTokens,
+        costUsd,
+      } = toUsage(row)
       return {
         at: createdAt,
         agent,
         ticketId,
-        boardId: row.board_id,
+        boardId,
         inputTokens,
         outputTokens,
         cacheReadTokens,
