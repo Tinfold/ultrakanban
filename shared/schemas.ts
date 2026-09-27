@@ -60,6 +60,7 @@ export const createBoardSchema = z.object({
   agentEffort: agentEffort.optional(),
   agentConcurrency: agentConcurrency.optional(),
   agentBacklog: z.boolean().optional(),
+  agentAllSkills: z.boolean().optional(),
 })
 
 export const updateBoardSchema = z.object({
@@ -74,6 +75,7 @@ export const updateBoardSchema = z.object({
   agentEffort: agentEffort.optional(),
   agentConcurrency: agentConcurrency.optional(),
   agentBacklog: z.boolean().optional(),
+  agentAllSkills: z.boolean().optional(),
 })
 
 /** Creates a repository on GitHub and links it to the board. */
@@ -123,6 +125,7 @@ export const createTicketSchema = z.object({
   assignee: name.nullable().optional(),
   dueDate: isoDate.optional(),
   agentEffort: agentEffort.optional(),
+  agentModel: agentModel.optional(),
   pullRequest: pullRequestUrl.nullable().optional(),
   position: position.optional(),
   force,
@@ -136,6 +139,7 @@ export const updateTicketSchema = z.object({
   assignee: name.nullable().optional(),
   dueDate: isoDate.optional(),
   agentEffort: agentEffort.optional(),
+  agentModel: agentModel.optional(),
   pullRequest: pullRequestUrl.nullable().optional(),
   ifVersion: version.optional(),
 })
@@ -250,6 +254,7 @@ export const boardExportSchema = z.object({
       assignee: name.nullable().default(null),
       dueDate: isoDate.default(null),
       agentEffort: agentEffort.default(null),
+      agentModel: agentModel.default(null),
       pullRequest: z
         .object({
           url: pullRequestUrl,

@@ -19,6 +19,7 @@ interface BoardRow {
   agent_effort: AgentEffort | null
   agent_concurrency: number | null
   agent_backlog: number
+  agent_all_skills: number
   ticket_count: number
   created_at: string
   updated_at: string
@@ -41,6 +42,7 @@ const toBoard = (row: BoardRow): BoardSummary => ({
   agentEffort: row.agent_effort,
   agentConcurrency: row.agent_concurrency,
   agentBacklog: row.agent_backlog === 1,
+  agentAllSkills: row.agent_all_skills === 1,
   ticketCount: row.ticket_count,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -82,6 +84,7 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     agentEffort,
     agentConcurrency,
     agentBacklog,
+    agentAllSkills,
   } = input
   return updateBoard(id, {
     reviewColumn,
@@ -93,6 +96,7 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     agentEffort,
     agentConcurrency,
     agentBacklog,
+    agentAllSkills,
   })
 }
 
@@ -111,6 +115,7 @@ export function updateBoard(id: string, input: UpdateBoardInput): BoardSummary {
     agent_effort: input.agentEffort,
     agent_concurrency: input.agentConcurrency,
     agent_backlog: input.agentBacklog === undefined ? undefined : Number(input.agentBacklog),
+    agent_all_skills: input.agentAllSkills === undefined ? undefined : Number(input.agentAllSkills),
   })
   const board = getBoard(id)
   if (board.agentEnabled && !board.githubRepo) {

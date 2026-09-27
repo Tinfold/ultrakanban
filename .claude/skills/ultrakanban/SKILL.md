@@ -42,6 +42,11 @@ agents can work the same board safely.
   pushed). If someone moves it from review back to In progress, they want more work on it: find out what from their
   comments, or ask in a ticket comment. Moving it into review yourself is still how you submit it. Re-read the
   ticket (`GET /api/tickets/$TICKET`) before you submit it for review, to be sure it is still yours.
+- **Keep your context small.** Everything a command prints stays in the conversation and is sent again with every
+  later step, so most of a run's tokens are re-reads of old output. Search first (`grep -n`) and read the lines you
+  need (`sed -n 120,180p`) instead of printing whole large files; trim board JSON with `jq` (a board lists every
+  ticket); print only the failures and summary of long test or build output; and look at each screenshot once,
+  cropped to what changed, rather than reading full-page captures again.
 
 ## 1. Claim a ticket
 
@@ -164,5 +169,13 @@ When asked to file work rather than do it:
 ```sh
 curl -s -X POST $KANBAN/api/boards/$BOARD/tickets \
   -H 'Content-Type: application/json' -H "X-Actor: $ME" \
-  -d '{"title":"...","description":"markdown, use - [ ] for steps","column":"Todo","priority":"high","tags":["bug"]}'
+  -d '{"title":"...","description":"markdown, use - [ ] for steps","column":"Todo","priority":"high","tags":["bug"],"agentModel":"sonnet","agentEffort":"medium"}'
 ```
+
+Pick `agentModel` and `agentEffort` for each ticket you file: the board's agent works it with them, so the cheapest
+setting that can do the work well saves tokens. Omit both (the board's defaults) when unsure, or when asked to.
+
+- `haiku` at `low`: mechanical edits where the change is fully spelled out (a rename, bumping a version, a typo).
+- `sonnet` at `medium`: routine, well-scoped work: copy and docs, small UI changes, a clear bug with a known cause.
+- `opus` at `medium`: changes across several files or areas that need judgment.
+- `opus` at `high` (`xhigh` rarely): hard bugs with unknown causes, design or architecture, concurrency, security.

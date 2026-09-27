@@ -22,10 +22,11 @@ export type BoardPatch = Partial<
     | 'agentEffort'
     | 'agentConcurrency'
     | 'agentBacklog'
+    | 'agentAllSkills'
   >
 >
 export type TicketPatch = Partial<
-  Pick<Ticket, 'title' | 'description' | 'priority' | 'assignee' | 'dueDate' | 'agentEffort' | 'tagIds'>
+  Pick<Ticket, 'title' | 'description' | 'priority' | 'assignee' | 'dueDate' | 'agentEffort' | 'agentModel' | 'tagIds'>
 >
 export type ColumnPatch = Partial<Pick<Column, 'name' | 'color' | 'wipLimit'>>
 export type TagPatch = Partial<Pick<Tag, 'name' | 'color'>>

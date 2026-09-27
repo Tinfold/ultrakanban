@@ -172,6 +172,11 @@ const MIGRATIONS = [
   -- Whether the board's agent also takes tickets from the backlog column once the todo column is empty.
   ALTER TABLE boards ADD COLUMN agent_backlog INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  ALTER TABLE tickets ADD COLUMN agent_model TEXT;
+  -- Whether the board's agent runs load every skill, not only the ultrakanban skill (see scripts/agent-loop.sh).
+  ALTER TABLE boards ADD COLUMN agent_all_skills INTEGER NOT NULL DEFAULT 0;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

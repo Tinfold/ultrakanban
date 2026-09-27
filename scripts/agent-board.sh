@@ -25,7 +25,7 @@ board=$(curl -sf "$KANBAN/api/boards/$BOARD") || { echo "can't read board $BOARD
 repo=$(jq -r '.board.githubRepo // ""' <<<"$board")
 agent=$(jq -r '.board.agentName // "claude"' <<<"$board")
 model=$(jq -r '.board.agentModel // "opus"' <<<"$board")
-effort=$(jq -r '.board.agentEffort // "high"' <<<"$board")
+effort=$(jq -r '.board.agentEffort // "medium"' <<<"$board")
 concurrency=$(jq -r '.board.agentConcurrency // 1' <<<"$board")
 [[ $concurrency =~ ^[1-9][0-9]*$ ]] || concurrency=1
 if [[ $(jq -r .board.agentEnabled <<<"$board") != true || -z $repo ]]; then
@@ -74,7 +74,7 @@ fi
 
 echo "working board $BOARD on $repo as $agent/$model/$effort, $concurrency ticket(s) at a time"
 export KANBAN BOARD AGENT=$agent MODEL=$model EFFORT=$effort STATE_DIR=$dir/state AGENT_LOOP_CLEAN=1 \
-  WATCH_FILES="$here/agent-loop.sh:$here/agent-board.sh:$here/../skill/SKILL.md"
+  WATCH_FILES="$here/agent-loop.sh:$(printf '%s:' "$here"/agent-loop/*.sh)$here/agent-board.sh:$here/../skill/SKILL.md"
 pids=()
 trap 'kill "${pids[@]}" 2>/dev/null; wait; exit 0' INT TERM
 for n in "${!checkouts[@]}"; do

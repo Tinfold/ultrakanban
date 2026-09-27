@@ -1,4 +1,4 @@
-import { CalendarIcon, GaugeIcon, TagIcon, UserRoundIcon } from 'lucide-react'
+import { CalendarIcon, CpuIcon, GaugeIcon, TagIcon, UserRoundIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { AGENT_DEFAULTS, type Ticket } from '@shared/domain'
 import { PriorityIcon } from '@/components/common/PriorityIcon'
@@ -9,7 +9,15 @@ import { dueState, formatDueDate } from '@/lib/format'
 import { PRIORITY_LABELS } from '@/lib/priority'
 import { cn } from '@/lib/utils'
 import { useBoardContext } from '../board/board-context'
-import { AssigneePicker, ColumnPicker, DueDatePicker, EffortPicker, PriorityPicker, TagPicker } from './pickers'
+import {
+  AssigneePicker,
+  ColumnPicker,
+  DueDatePicker,
+  EffortPicker,
+  ModelPicker,
+  PriorityPicker,
+  TagPicker,
+} from './pickers'
 import { PullRequestField } from './PullRequestField'
 
 function Property({ label, children }: { label: string; children: ReactNode }) {
@@ -98,6 +106,24 @@ export function TicketProperties({ ticket }: { ticket: Ticket }) {
               {ticket.agentEffort ?? `Board default (${detail.board.agentEffort ?? AGENT_DEFAULTS.effort})`}
             </Button>
           </EffortPicker>
+        </Property>
+      )}
+
+      {(detail.board.agentEnabled || ticket.agentModel) && (
+        <Property label="Agent model">
+          <ModelPicker
+            value={ticket.agentModel}
+            onChange={(agentModel) => actions.updateTicket(ticket.id, { agentModel })}
+          >
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(triggerClass, !ticket.agentModel && 'text-muted-foreground')}
+            >
+              <CpuIcon />
+              {ticket.agentModel ?? `Board default (${detail.board.agentModel ?? AGENT_DEFAULTS.model})`}
+            </Button>
+          </ModelPicker>
         </Property>
       )}
 
