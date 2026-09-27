@@ -90,6 +90,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
   const [githubRepo, setGithubRepo] = useState(detail.board.githubRepo ?? '')
   const [creatingRepo, setCreatingRepo] = useState(false)
   const signedIn = !!useGitHubStatus().data?.auth
+  const hasBacklog = detail.columns.some((column) => column.name.toLowerCase() === 'backlog')
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -112,6 +113,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
       agentEffort: agent.agentEffort,
       agentConcurrency,
       agentEnabled: data.get('agentEnabled') === 'on',
+      agentBacklog: data.get('agentBacklog') === 'on',
     })
     onClose()
   }
@@ -269,6 +271,18 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
           />
           Run the agent on this board
         </label>
+        <div className="grid gap-1">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              name="agentBacklog"
+              defaultChecked={detail.board.agentBacklog}
+              className="size-4 accent-primary"
+            />
+            Take tickets from Backlog when Todo is empty
+          </label>
+          {!hasBacklog && <p className="pl-6 text-xs text-muted-foreground">This board has no column named Backlog.</p>}
+        </div>
       </fieldset>
 
       <DialogFooter>

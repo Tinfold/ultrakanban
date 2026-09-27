@@ -168,6 +168,10 @@ setting restarts the board's loops, which stops runs in progress (they are resum
 also run side by side, with no limit across boards: three enabled boards with two parallel runs each can mean six
 agents working at once, all on your `claude` login and its usage limits.
 
+**Backlog.** The agent claims new tickets from the **Todo** column. Switch on **Take tickets from Backlog when Todo is
+empty** (`agentBacklog`) to let it go on to the **Backlog** column once Todo has none left. The loop reads the setting
+each time it looks for a ticket, so it takes effect without a restart.
+
 **Names.** The board's **Agent name** (default `claude`) names the loop, which controls the work; its notes on
 tickets come from `<agent>-loop`. The runs it starts claim tickets as `<agent>/<model>/<effort>`, from the board's
 **Model** (default `opus`) and **Effort** (default `high`) settings, which the loop passes to `claude`. So the board

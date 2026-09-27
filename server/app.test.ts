@@ -400,8 +400,9 @@ describe('pull request workflow', () => {
         initial.agentModel,
         initial.agentEffort,
         initial.agentConcurrency,
+        initial.agentBacklog,
       ],
-      [null, false, null, null, null, null],
+      [null, false, null, null, null, null, false],
     )
     assert.equal(agentWorkerName(initial), 'claude/opus/high')
 
@@ -415,6 +416,7 @@ describe('pull request workflow', () => {
     for (const agentConcurrency of [0, 1.5, AGENT_MAX_CONCURRENCY + 1, '2']) {
       assert.equal((await call('PATCH', `/boards/${boardId}`, { agentConcurrency })).status, 400)
     }
+    assert.equal((await call('PATCH', `/boards/${boardId}`, { agentBacklog: 'yes' })).status, 400)
 
     const { body: on } = await call<BoardSummary>('PATCH', `/boards/${boardId}`, {
       githubRepo: 'acme/app',
@@ -423,10 +425,11 @@ describe('pull request workflow', () => {
       agentModel: 'claude-sonnet-5',
       agentEffort: 'xhigh',
       agentConcurrency: 3,
+      agentBacklog: true,
     })
     assert.deepEqual(
-      [on.githubRepo, on.agentEnabled, on.agentName, on.agentConcurrency],
-      ['acme/app', true, 'claude-2', 3],
+      [on.githubRepo, on.agentEnabled, on.agentName, on.agentConcurrency, on.agentBacklog],
+      ['acme/app', true, 'claude-2', 3, true],
     )
     assert.equal(agentWorkerName(on), 'claude-2/claude-sonnet-5/xhigh')
     const { body: boards } = await call<BoardSummary[]>('GET', '/boards')
@@ -439,6 +442,7 @@ describe('pull request workflow', () => {
       agentModel: null,
       agentEffort: null,
       agentConcurrency: null,
+      agentBacklog: false,
     })
     assert.deepEqual(
       [
@@ -448,8 +452,9 @@ describe('pull request workflow', () => {
         cleared.agentModel,
         cleared.agentEffort,
         cleared.agentConcurrency,
+        cleared.agentBacklog,
       ],
-      [null, false, null, null, null, null],
+      [null, false, null, null, null, null, false],
     )
   })
 
