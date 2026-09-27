@@ -166,6 +166,8 @@ export interface BoardSummary {
   agentEffort: AgentEffort | null
   /** How many runs the agent works at once, each on its own ticket in its own git worktree; 1 when not set. */
   agentConcurrency: number | null
+  /** Whether the agent also takes tickets from the Backlog column once the Todo column has none left. */
+  agentBacklog: boolean
   ticketCount: number
   createdAt: string
   updatedAt: string

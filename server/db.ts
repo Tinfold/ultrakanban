@@ -168,6 +168,10 @@ const MIGRATIONS = [
     PRIMARY KEY (usage_id, model)
   );
   `,
+  `
+  -- Whether the board's agent also takes tickets from the backlog column once the todo column is empty.
+  ALTER TABLE boards ADD COLUMN agent_backlog INTEGER NOT NULL DEFAULT 0;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

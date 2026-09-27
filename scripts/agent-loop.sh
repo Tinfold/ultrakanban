@@ -20,7 +20,8 @@
 #   - checks on the pull request's latest commit that ran and failed (see ci_status for what counts)
 #   - merge conflicts with the base branch
 # A pull request closed without merging moves its ticket to the cancelled column. Only when none of its tickets
-# needs work does it claim the next ticket from the todo column.
+# needs work does it claim the next ticket from the todo column, or, when the board's agentBacklog setting is on and
+# the todo column has none left, from the backlog column.
 #
 # Before each run the loop takes a snapshot of what it hands over: the newest ticket activity id, the newest pull
 # request comment, review and inline comment ids, and the failing checks and conflict state of the pull request's
@@ -65,6 +66,8 @@
 #   EFFORT              effort level the workers run at unless the ticket sets its own: low, medium, high, xhigh
 #                       or max (default: high)
 #   TODO_COLUMN         column to take new tickets from (default: Todo)
+#   BACKLOG_COLUMN      column to take new tickets from when the todo column has none and the board's agentBacklog
+#                       setting is on (default: Backlog)
 #   IN_PROGRESS_COLUMN  column to move claimed tickets to (default: In progress)
 #   CANCELLED_COLUMN    column for tickets whose pull request was closed without merging (default: Cancelled)
 #   IDLE_SECONDS        wait between rounds when there is nothing to do (default: 300)
@@ -100,6 +103,7 @@ worker=$WORKER
 LOOP_ACTOR="$AGENT-loop"
 MARKER="<!-- ultrakanban:$AGENT -->"
 TODO_COLUMN=${TODO_COLUMN:-Todo}
+BACKLOG_COLUMN=${BACKLOG_COLUMN:-Backlog}
 IN_PROGRESS_COLUMN=${IN_PROGRESS_COLUMN:-In progress}
 CANCELLED_COLUMN=${CANCELLED_COLUMN:-Cancelled}
 IDLE_SECONDS=${IDLE_SECONDS:-300}
@@ -716,16 +720,33 @@ Finish with a ticket comment summarising what you did, then exit." \
   return 1
 }
 
-# Claims the next ticket from the todo column and works it. Returns 1 if there was nothing to claim.
+# Whether the board lets the agent take tickets from the backlog column, and has that column.
+backlog_on() {
+  get "/boards/$BOARD" | jq -e --arg name "$BACKLOG_COLUMN" \
+    '.board.agentBacklog and any(.columns[]; (.name | ascii_downcase) == ($name | ascii_downcase))' >/dev/null
+}
+
+# Claims the next ticket from the given column; prints the response body and then the HTTP status on its own line.
+claim_from() {
+  post "/boards/$BOARD/tickets/claim-next" "$(jq -nc --arg agent "$worker" --arg column "$1" \
+    --arg moveTo "$IN_PROGRESS_COLUMN" '{agent: $agent, column: $column, moveTo: $moveTo}')"
+}
+
+# Claims the next ticket from the todo column (then the backlog column, if the board allows it) and works it.
+# Returns 1 if there was nothing to claim.
 claim_next() {
   local response status ticket id snapshot
   paused && return 0
   use_effort ""
   claim_lock -x
-  response=$(post "/boards/$BOARD/tickets/claim-next" "$(jq -nc --arg agent "$worker" --arg column "$TODO_COLUMN" \
-    --arg moveTo "$IN_PROGRESS_COLUMN" '{agent: $agent, column: $column, moveTo: $moveTo}')")
+  response=$(claim_from "$TODO_COLUMN")
   status=${response##*$'\n'}
   ticket=${response%$'\n'*}
+  if [[ $status == 404 && $ticket == *no_ticket_available* ]] && backlog_on; then
+    response=$(claim_from "$BACKLOG_COLUMN")
+    status=${response##*$'\n'}
+    ticket=${response%$'\n'*}
+  fi
   if [[ $status != 200 ]]; then
     claim_unlock
     [[ $status == 404 && $ticket == *no_ticket_available* ]] || log "claim failed (HTTP ${status:-none}): $ticket"
