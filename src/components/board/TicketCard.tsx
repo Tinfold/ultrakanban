@@ -113,7 +113,8 @@ export function SortableTicketCard({ ticket, onOpen }: SortableTicketCardProps) 
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
       className={cn(
-        'cursor-pointer rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        // A long press picks the ticket up on phones, so it must not select text or open the callout menu.
+        'cursor-pointer rounded-lg outline-none select-none focus-visible:ring-2 focus-visible:ring-ring [-webkit-touch-callout:none]',
         isDragging && 'opacity-40',
       )}
       aria-label={`${ticketRef(ticket.number)} ${ticket.title}`}
