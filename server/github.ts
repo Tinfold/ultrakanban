@@ -150,7 +150,7 @@ export function createGitHubClient(): GitHubClient {
       if (!pullRequest) throw new Error(`Not a pull request URL: ${url}`)
       const data = await getPullRequest(pullRequest.repo, pullRequest.number)
       const state = data.merged ? 'merged' : data.state === 'closed' ? 'closed' : data.draft ? 'draft' : 'open'
-      return { state, title: data.title }
+      return { state, title: data.title, conflicts: data.mergeable === null ? null : !data.mergeable }
     },
 
     async createRepository({ owner, name, description, private: isPrivate }) {

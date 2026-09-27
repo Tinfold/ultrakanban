@@ -1,6 +1,6 @@
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { CalendarIcon, MessageSquareIcon, PaperclipIcon, SquareCheckIcon } from 'lucide-react'
+import { CalendarIcon, GitMergeConflictIcon, MessageSquareIcon, PaperclipIcon, SquareCheckIcon } from 'lucide-react'
 import type { Ticket } from '@shared/domain'
 import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { PullRequestIcon } from '@/components/common/PullRequestIcon'
@@ -8,6 +8,7 @@ import { TagChip } from '@/components/common/TagChip'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { dueState, formatDueDate, ticketRef } from '@/lib/format'
 import { checklistProgress } from '@/lib/markdown'
+import { CONFLICTS_HINT } from '@/lib/pull-request'
 import { cn } from '@/lib/utils'
 import { useBoardContext } from './board-context'
 import { QuickMergeButton } from './QuickMergeButton'
@@ -76,6 +77,12 @@ export function TicketCard({ ticket, overlay }: TicketCardProps) {
           {ticket.pullRequest && (
             <span className="flex items-center gap-1 tabular-nums" title={ticket.pullRequest.title ?? undefined}>
               <PullRequestIcon state={ticket.pullRequest.state} />#{ticket.pullRequest.number}
+            </span>
+          )}
+          {ticket.pullRequest?.conflicts && (
+            <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400" title={CONFLICTS_HINT}>
+              <GitMergeConflictIcon />
+              Conflicts
             </span>
           )}
           {ticket.attachmentCount > 0 && (

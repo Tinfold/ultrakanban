@@ -1,4 +1,4 @@
-import { GitPullRequestIcon, MoreHorizontalIcon, RefreshCwIcon } from 'lucide-react'
+import { GitMergeConflictIcon, GitPullRequestIcon, MoreHorizontalIcon, RefreshCwIcon } from 'lucide-react'
 import { type FormEvent, useState } from 'react'
 import { parsePullRequestUrl, type Ticket } from '@shared/domain'
 import { PullRequestIcon } from '@/components/common/PullRequestIcon'
@@ -13,7 +13,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { formatRelative } from '@/lib/format'
-import { PULL_REQUEST_STATE_LABELS } from '@/lib/pull-request'
+import { CONFLICTS_HINT, PULL_REQUEST_STATE_LABELS } from '@/lib/pull-request'
 import { useBoardContext } from '../board/board-context'
 
 /** Shows the ticket's GitHub pull request and lets people link, refresh or unlink it. */
@@ -61,6 +61,15 @@ export function PullRequestField({ ticket }: { ticket: Ticket }) {
                 {pullRequest.repo.split('/')[1]}#{pullRequest.number}
               </span>
             </a>
+            {pullRequest.conflicts && (
+              <GitMergeConflictIcon
+                role="img"
+                aria-label={CONFLICTS_HINT}
+                className="size-4 shrink-0 text-amber-600 dark:text-amber-400"
+              >
+                <title>{CONFLICTS_HINT}</title>
+              </GitMergeConflictIcon>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon-xs" aria-label="Pull request actions">

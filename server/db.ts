@@ -181,6 +181,10 @@ const MIGRATIONS = [
   -- When an agent last said it is working on the ticket (POST /tickets/:id/heartbeat); not a change to the ticket.
   ALTER TABLE tickets ADD COLUMN agent_seen_at TEXT;
   `,
+  `
+  -- Whether the ticket's pull request has merge conflicts with its base branch, as GitHub last reported.
+  ALTER TABLE tickets ADD COLUMN pr_conflicts INTEGER NOT NULL DEFAULT 0;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

@@ -44,6 +44,7 @@ interface TicketRow {
   pr_url: string | null
   pr_state: string
   pr_title: string | null
+  pr_conflicts: number
   pr_checked_at: string | null
   position: number
   version: number
@@ -71,6 +72,7 @@ function toPullRequest(url: string, row: TicketRow): PullRequest {
     number,
     state: row.pr_state as PullRequestState,
     title: row.pr_title,
+    conflicts: Boolean(row.pr_conflicts),
     checkedAt: row.pr_checked_at,
   }
 }
@@ -219,7 +221,7 @@ function linkPullRequest(ticket: Ticket, url: string | null, actor: string) {
   const current = ticket.pullRequest?.url ?? null
   if (next === current) return false
   sql.run(
-    "UPDATE tickets SET pr_url = ?, pr_state = 'unknown', pr_title = NULL, pr_checked_at = NULL WHERE id = ?",
+    "UPDATE tickets SET pr_url = ?, pr_state = 'unknown', pr_title = NULL, pr_conflicts = 0, pr_checked_at = NULL WHERE id = ?",
     next,
     ticket.id,
   )
@@ -479,14 +481,22 @@ export function listPendingPullRequests() {
 export interface PullRequestStatus {
   state: Exclude<PullRequestState, 'unknown'>
   title: string | null
+  /**
+   * Whether it has merge conflicts with its base branch; `null` (or left out) while GitHub is still working it out,
+   * which keeps the last known answer.
+   */
+  conflicts?: boolean | null
 }
 
 /** Stores a pull request's state without side effects (used when importing). */
-export function setPullRequestStatus(ticketId: string, { state, title }: PullRequestStatus) {
+export function setPullRequestStatus(ticketId: string, { state, title, conflicts }: PullRequestStatus) {
+  const open = state === 'open' || state === 'draft'
   sql.run(
-    'UPDATE tickets SET pr_state = ?, pr_title = ?, pr_checked_at = ? WHERE id = ? AND pr_url IS NOT NULL',
+    `UPDATE tickets SET pr_state = ?, pr_title = ?, pr_conflicts = coalesce(?, pr_conflicts), pr_checked_at = ?
+     WHERE id = ? AND pr_url IS NOT NULL`,
     state,
     title,
+    open ? (conflicts == null ? null : Number(conflicts)) : 0,
     now(),
     ticketId,
   )
@@ -503,7 +513,10 @@ export function applyPullRequestStatus(ticketId: string, url: string, status: Pu
   if (previous?.url !== url || previous.state === 'merged') return ticket
 
   setPullRequestStatus(ticketId, status)
-  if (previous.state === status.state && previous.title === status.title) return ticket
+  const { conflicts } = getTicket(ticketId).pullRequest!
+  if (previous.state === status.state && previous.title === status.title && previous.conflicts === conflicts) {
+    return ticket
+  }
 
   touchBoard(ticket.boardId)
   // A first check finding the PR open or draft isn't news; merges and closes always are.
