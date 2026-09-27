@@ -389,8 +389,8 @@ checkout() {
   printf '%s\n' "$branch"
 }
 
-# The tokens a run used, from claude's JSON output (every model it called, subagents included), as the body of
-# POST /tickets/:id/usage.
+# The tokens a run used, from claude's JSON output (every model it called, subagents included), in all and per model,
+# as the body of POST /tickets/:id/usage.
 read -r -d '' USAGE <<'JQ'
 def total($field): [.[] | .[$field] // 0] | add // 0;
 select(.type == "result")
@@ -401,7 +401,10 @@ select(.type == "result")
 | {agent: $agent, inputTokens: ($models | total("inputTokens")), outputTokens: ($models | total("outputTokens")),
    cacheReadTokens: ($models | total("cacheReadInputTokens")),
    cacheWriteTokens: ($models | total("cacheCreationInputTokens")),
-   costUsd: .total_cost_usd, durationMs: .duration_ms}
+   costUsd: .total_cost_usd, durationMs: .duration_ms,
+   models: [.modelUsage // {} | to_entries[] | {model: .key, inputTokens: (.value.inputTokens // 0),
+     outputTokens: (.value.outputTokens // 0), cacheReadTokens: (.value.cacheReadInputTokens // 0),
+     cacheWriteTokens: (.value.cacheCreationInputTokens // 0), costUsd: .value.costUSD}]}
 JQ
 
 # When Claude usage resets, from claude's limit message: "... resets 2:50pm (America/New_York)", "... resets Oct 3,

@@ -27,6 +27,15 @@ export function agentWorkerName(board: Pick<BoardSummary, 'agentName' | 'agentMo
   return `${board.agentName ?? name}/${board.agentModel ?? model}/${board.agentEffort ?? effort}`
 }
 
+/**
+ * The model a run under an `<agent>/<model>/<effort>` name (see `agentWorkerName`) runs, e.g. `opus`
+ * for `claude/opus/high`; null for other names.
+ */
+export function workerModel(agent: string) {
+  const parts = agent.split('/')
+  return parts.length === 3 && parts[1] ? parts[1] : null
+}
+
 export const PULL_REQUEST_STATES = ['unknown', 'open', 'draft', 'merged', 'closed'] as const
 /** `unknown` until GitHub has been checked (or when it can't be reached). */
 export type PullRequestState = (typeof PULL_REQUEST_STATES)[number]
@@ -238,6 +247,13 @@ export interface TokenCounts {
 export const totalTokens = (counts: TokenCounts) =>
   counts.inputTokens + counts.outputTokens + counts.cacheReadTokens + counts.cacheWriteTokens
 
+/** Tokens one model used within an agent run. */
+export interface ModelUsage extends TokenCounts {
+  /** As the agent reported it, e.g. `claude-opus-5-5`. */
+  model: string
+  costUsd: number | null
+}
+
 /** Tokens one agent run used on a ticket (`POST /tickets/:id/usage`) or a board (`POST /boards/:id/usage`). */
 export interface TokenUsage extends TokenCounts {
   id: number
@@ -249,17 +265,25 @@ export interface TokenUsage extends TokenCounts {
   costUsd: number | null
   /** How long the run took. */
   durationMs: number | null
+  /** The run's tokens split by the models that used them, most first; empty when the agent didn't report that. */
+  models: ModelUsage[]
   createdAt: string
 }
 
-/** Token usage added up over several runs. */
-export interface UsageTotals extends TokenCounts {
+/** Token counts added up over several runs. */
+export interface UsageCounts extends TokenCounts {
   /** Estimated cost in US dollars of the runs that reported one. */
   costUsd: number
   runs: number
 }
 
-export const noUsage = (): UsageTotals => ({
+/** Token usage added up over several runs, in all and per model. */
+export interface UsageTotals extends UsageCounts {
+  /** By model name; a run that used several models counts as a run of each. */
+  models: Record<string, UsageCounts>
+}
+
+const noCounts = (): UsageCounts => ({
   inputTokens: 0,
   outputTokens: 0,
   cacheReadTokens: 0,
@@ -268,16 +292,35 @@ export const noUsage = (): UsageTotals => ({
   runs: 0,
 })
 
+export const noUsage = (): UsageTotals => ({ ...noCounts(), models: {} })
+
+function addCounts(totals: UsageCounts, counts: TokenCounts & { costUsd: number | null }, runs: number) {
+  totals.inputTokens += counts.inputTokens
+  totals.outputTokens += counts.outputTokens
+  totals.cacheReadTokens += counts.cacheReadTokens
+  totals.cacheWriteTokens += counts.cacheWriteTokens
+  totals.costUsd += counts.costUsd ?? 0
+  totals.runs += runs
+}
+
 /** Adds a run's usage to `totals` and returns them. */
-export function addUsage(totals: UsageTotals, run: TokenCounts & { costUsd: number | null }) {
-  totals.inputTokens += run.inputTokens
-  totals.outputTokens += run.outputTokens
-  totals.cacheReadTokens += run.cacheReadTokens
-  totals.cacheWriteTokens += run.cacheWriteTokens
-  totals.costUsd += run.costUsd ?? 0
-  totals.runs++
+export function addUsage(totals: UsageTotals, run: TokenCounts & { costUsd: number | null; models: ModelUsage[] }) {
+  addCounts(totals, run, 1)
+  for (const model of run.models) addCounts((totals.models[model.model] ??= noCounts()), model, 1)
   return totals
 }
+
+/** Adds `more` totals to `totals` and returns them. */
+export function mergeUsage(totals: UsageTotals, more: UsageTotals) {
+  addCounts(totals, more, more.runs)
+  for (const [model, counts] of Object.entries(more.models)) {
+    addCounts((totals.models[model] ??= noCounts()), counts, counts.runs)
+  }
+  return totals
+}
+
+/** Stands for the model of runs that didn't report theirs and don't have it in their agent's name. */
+export const UNKNOWN_MODEL = 'unknown'
 
 interface ActivityBase<T extends string, D> {
   id: number
@@ -395,6 +438,11 @@ export interface OverviewUsage extends TokenCounts {
   ticketId: string | null
   boardId: string
   costUsd: number | null
+  /**
+   * Split by model. Runs that didn't report it count as a run of the model in the agent's name (see `workerModel`),
+   * or of `UNKNOWN_MODEL`.
+   */
+  models: ModelUsage[]
 }
 
 export type OverviewActivity = Activity & {

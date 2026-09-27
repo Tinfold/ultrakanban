@@ -642,6 +642,17 @@ describe('pull request workflow', () => {
       cacheWriteTokens: 400,
       costUsd: 0.25,
       runs: 2,
+      // Its runs didn't say which models they used, and its name doesn't either.
+      models: {
+        unknown: {
+          inputTokens: 11,
+          outputTokens: 202,
+          cacheReadTokens: 3000,
+          cacheWriteTokens: 400,
+          costUsd: 0.25,
+          runs: 2,
+        },
+      },
     })
     assert.equal(overview.boards.find((entry) => entry.id === boardId)?.tokens, 3613)
     assert.equal(overview.totals.usage.runs, overview.usage.length)
@@ -656,6 +667,69 @@ describe('pull request workflow', () => {
     assert.ok(
       !getOverview(7, new Date(Date.now() + 8 * 24 * 60 * 60 * 1000)).usage.some((entry) => entry.agent === agent),
     )
+  })
+
+  test('agents report the tokens each model used, and the overview adds them up per model', async () => {
+    const agent = 'model-agent/opus/high'
+    const ticket = await addTicket({ title: 'A' })
+    const haiku = { model: 'claude-haiku-4-5', inputTokens: 5, outputTokens: 6 }
+    const opus = { model: 'claude-opus-5-5', inputTokens: 10, outputTokens: 20, cacheReadTokens: 300, costUsd: 1 }
+    const { status, body: recorded } = await call<TokenUsage>('POST', `/tickets/${ticket.id}/usage`, {
+      agent,
+      inputTokens: 15,
+      outputTokens: 26,
+      cacheReadTokens: 300,
+      costUsd: 1.5,
+      models: [haiku, opus],
+    })
+    assert.equal(status, 201)
+    // Most tokens first, with the counts left out defaulting like the run's.
+    assert.deepEqual(recorded.models, [
+      { ...opus, cacheWriteTokens: 0 },
+      { ...haiku, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: null },
+    ])
+    const { body: listed } = await call<TokenUsage[]>('GET', `/tickets/${ticket.id}/usage`)
+    assert.deepEqual(listed[0].models, recorded.models)
+    assert.equal(
+      (
+        await call('POST', `/tickets/${ticket.id}/usage`, {
+          agent,
+          inputTokens: 1,
+          outputTokens: 1,
+          models: [opus, opus],
+        })
+      ).status,
+      400,
+    )
+
+    // A run that doesn't say counts as one of the model in the agent's name.
+    await call('POST', `/tickets/${ticket.id}/usage`, { agent, inputTokens: 1, outputTokens: 2, costUsd: 0.5 })
+    const { body: overview } = await call<Overview>('GET', '/overview')
+    const models = overview.agents.find((entry) => entry.name === agent)?.usage.models
+    assert.deepEqual(models, {
+      'claude-opus-5-5': {
+        inputTokens: 10,
+        outputTokens: 20,
+        cacheReadTokens: 300,
+        cacheWriteTokens: 0,
+        costUsd: 1,
+        runs: 1,
+      },
+      'claude-haiku-4-5': {
+        inputTokens: 5,
+        outputTokens: 6,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        costUsd: 0,
+        runs: 1,
+      },
+      opus: { inputTokens: 1, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.5, runs: 1 },
+    })
+    assert.deepEqual(
+      overview.usage.filter((entry) => entry.agent === agent).map((entry) => entry.models.map((model) => model.model)),
+      [['claude-opus-5-5', 'claude-haiku-4-5'], ['opus']],
+    )
+    assert.equal(overview.totals.usage.models.opus?.runs, 1)
   })
 
   test('agents report runs that were not on a ticket to the board', async () => {

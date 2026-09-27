@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { format } from 'date-fns'
 import { type ReactNode, useEffect, useMemo } from 'react'
 import { toast } from 'sonner'
-import { addUsage, noUsage, OVERVIEW_RANGES, type OverviewRange, totalTokens } from '@shared/domain'
+import { mergeUsage, noUsage, OVERVIEW_RANGES, type OverviewRange, totalTokens, type UsageTotals } from '@shared/domain'
 import { AppHeader } from '@/components/app/AppHeader'
 import { AgentList } from '@/components/overview/AgentList'
 import { BoardTable } from '@/components/overview/BoardTable'
@@ -15,8 +15,16 @@ import { queryKeys, useOverview } from '@/hooks/queries'
 import { useNow } from '@/hooks/use-now'
 import { useStoredState } from '@/hooks/use-stored-state'
 import { api, errorMessage } from '@/lib/api'
-import { formatCost, formatDuration, formatTokens } from '@/lib/format'
-import { dailyActivity, median, needsAttention, workedByAgent } from '@/lib/overview'
+import { formatCost, formatDuration, formatModel, formatTokens } from '@/lib/format'
+import {
+  dailyActivity,
+  median,
+  modelSeries,
+  modelsByTokens,
+  needsAttention,
+  seriesTokens,
+  workedByAgent,
+} from '@/lib/overview'
 import { storageKeys } from '@/lib/storage'
 import { cn } from '@/lib/utils'
 
@@ -46,6 +54,7 @@ const SECTIONS = {
   activity: 'activity',
   timeWorked: 'time-worked',
   tokens: 'tokens',
+  models: 'models',
   recent: 'recent-activity',
 } as const
 
@@ -75,6 +84,34 @@ function Stat({ label, value, detail, target }: StatProps) {
     >
       {body}
     </a>
+  )
+}
+
+const runs = (count: number) => `${count} ${count === 1 ? 'run' : 'runs'}`
+
+/** Each model's tokens, cost and runs over the range, most tokens first. */
+function ModelTotals({ usage }: { usage: UsageTotals }) {
+  const total = totalTokens(usage)
+  return (
+    <ul className="grid gap-1 border-t pt-3 text-xs">
+      {modelsByTokens(usage).map((entry) => {
+        const tokens = totalTokens(entry)
+        return (
+          <li key={entry.model} className="flex items-baseline gap-2" title={entry.model}>
+            <span className="min-w-0 flex-1 truncate">{formatModel(entry.model)}</span>
+            <span className="text-muted-foreground tabular-nums">
+              {runs(entry.runs)}, {formatCost(entry.costUsd)}
+            </span>
+            <span className="w-12 text-right font-medium tabular-nums" title={`${tokens.toLocaleString()} tokens`}>
+              {formatTokens(tokens)}
+            </span>
+            <span className="w-9 text-right text-muted-foreground tabular-nums">
+              {total ? Math.round((tokens / total) * 100) : 0}%
+            </span>
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 
@@ -187,7 +224,8 @@ export function OverviewPage() {
     const completed = daily.reduce((total, day) => total + day.events.completed, 0)
     const workedMs = daily.reduce((total, day) => total + day.workedMs, 0)
     const created = daily.reduce((total, day) => total + day.events.created, 0)
-    const usage = daily.reduce((total, day) => addUsage(total, day.usage), noUsage())
+    const usage = daily.reduce((total, day) => mergeUsage(total, day.usage), noUsage())
+    const models = modelSeries(usage, formatModel)
     const attention = needsAttention(agents, now)
     const unclaimed = totals.open - totals.working - totals.review
     const completions = overview.completions.filter(
@@ -253,12 +291,12 @@ export function OverviewPage() {
           <Stat
             label="Tokens used"
             value={formatTokens(totalTokens(usage))}
-            detail={`${formatCost(usage.costUsd)} estimated, ${usage.runs} ${usage.runs === 1 ? 'run' : 'runs'}`}
+            detail={`${formatCost(usage.costUsd)} estimated, ${runs(usage.runs)}`}
             target={SECTIONS.tokens}
           />
         </div>
 
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           <ColumnChart
             id={SECTIONS.activity}
             className="scroll-mt-4"
@@ -284,7 +322,7 @@ export function OverviewPage() {
           />
           <ColumnChart
             id={SECTIONS.tokens}
-            className="scroll-mt-4 lg:col-span-2 xl:col-span-1"
+            className="scroll-mt-4"
             title="Token usage"
             description="Tokens agent runs used per day, as reported by the agent loop"
             series={[...TOKEN_SERIES]}
@@ -295,6 +333,21 @@ export function OverviewPage() {
             formatValue={(value) => value.toLocaleString()}
             formatTick={formatTokens}
             minStep={1}
+          />
+          <ColumnChart
+            id={SECTIONS.models}
+            className="scroll-mt-4"
+            title="Tokens by model"
+            description="Tokens per day by the model that used them, subagents included"
+            series={models}
+            columns={daily.map((day, i) => ({
+              ...columns[i],
+              values: models.map((series) => seriesTokens(day.usage, series)),
+            }))}
+            formatValue={(value) => value.toLocaleString()}
+            formatTick={formatTokens}
+            minStep={1}
+            footer={models.length > 0 && <ModelTotals usage={usage} />}
           />
         </div>
 

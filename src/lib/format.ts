@@ -44,3 +44,17 @@ const dollars = new Intl.NumberFormat(undefined, { style: 'currency', currency: 
 
 /** US dollars to the cent, e.g. `$12.34`; amounts below a cent read `<$0.01`. */
 export const formatCost = (usd: number) => (usd > 0 && usd < 0.01 ? '<$0.01' : dollars.format(usd))
+
+/**
+ * Readable model name, e.g. `Opus 5.5` for `claude-opus-5-5`, `Haiku 4.5` for `claude-haiku-4-5-20251001` and `Opus`
+ * for the `opus` alias. Names it doesn't recognise are shown as they are.
+ */
+export function formatModel(model: string) {
+  const capitalized = (word: string) => word.charAt(0).toUpperCase() + word.slice(1)
+  const match = /^claude-([a-z]+)-(\d+)(?:-(\d))?(?:-\d{8})?(\[1m\])?$/i.exec(model)
+  if (match) {
+    const [, family, major, minor, longContext] = match
+    return `${capitalized(family)} ${major}${minor ? `.${minor}` : ''}${longContext ? ' (1M)' : ''}`
+  }
+  return /^[a-z]+$/i.test(model) ? capitalized(model) : model
+}
