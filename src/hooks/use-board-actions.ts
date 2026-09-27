@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useMemo } from 'react'
 import { toast } from 'sonner'
-import type { BoardDetail } from '@shared/domain'
+import type { BoardDetail, MergeMethod } from '@shared/domain'
 import type { CreateColumnInput, CreateTagInput, CreateTicketInput } from '@shared/schemas'
 import { api, errorMessage } from '@/lib/api'
 import * as updates from '@/lib/board-updates'
@@ -117,6 +117,12 @@ export function useBoardActions(boardId: string) {
           updates.addTicket,
         ),
       syncPullRequest: (ticketId: string) => run(() => api.syncPullRequest(ticketId), undefined, updates.addTicket),
+      /** Merges the ticket's pull request, which moves the ticket to the done column. */
+      mergeTicket: async (ticketId: string, method: MergeMethod) => {
+        const ticket = await run(() => api.mergeTicket(ticketId, method), undefined, updates.addTicket)
+        if (ticket?.pullRequest) toast.success(`Merged ${ticket.pullRequest.repo}#${ticket.pullRequest.number}`)
+        return ticket
+      },
       deleteTicket: (ticketId: string) =>
         run(
           () => api.deleteTicket(ticketId),

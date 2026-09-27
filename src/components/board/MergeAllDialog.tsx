@@ -24,15 +24,10 @@ import { queryKeys, useMergePlan, useMergeRun } from '@/hooks/queries'
 import { useStoredState } from '@/hooks/use-stored-state'
 import { api, errorMessage } from '@/lib/api'
 import { ticketRef } from '@/lib/format'
+import { MERGE_METHOD_LABELS } from '@/lib/pull-request'
 import { storageKeys } from '@/lib/storage'
 import { cn } from '@/lib/utils'
 import { useBoardContext } from './board-context'
-
-const METHOD_LABELS: Record<MergeMethod, string> = {
-  merge: 'Create a merge commit',
-  squash: 'Squash and merge',
-  rebase: 'Rebase and merge',
-}
 
 const STATUS_ICONS: Record<MergeStepStatus, { icon: LucideIcon; className: string; label: string }> = {
   pending: { icon: CircleIcon, className: 'text-muted-foreground', label: 'Waiting' },
@@ -219,7 +214,7 @@ function MergeAll({ onClose }: { onClose: () => void }) {
                 <SelectContent>
                   {methods.map((option) => (
                     <SelectItem key={option} value={option}>
-                      {METHOD_LABELS[option]}
+                      {MERGE_METHOD_LABELS[option]}
                     </SelectItem>
                   ))}
                 </SelectContent>

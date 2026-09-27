@@ -90,6 +90,8 @@ export const api = {
   deleteTicket: (ticketId: string) => request<void>('DELETE', `/tickets/${ticketId}`),
   listActivity: (ticketId: string) => request<Activity[]>('GET', `/tickets/${ticketId}/activity`),
   syncPullRequest: (ticketId: string) => request<Ticket>('POST', `/tickets/${ticketId}/pull-request/sync`),
+  mergeTicket: (ticketId: string, method: MergeMethod) =>
+    request<Ticket>('POST', `/tickets/${ticketId}/merge`, { method }),
   githubStatus: () => request<{ auth: 'env' | 'gh' | null }>('GET', '/github'),
   listAttachments: (ticketId: string) => request<Attachment[]>('GET', `/tickets/${ticketId}/attachments`),
   uploadAttachment: (ticketId: string, file: File) => {

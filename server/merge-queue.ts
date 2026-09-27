@@ -8,11 +8,11 @@ import {
   type Ticket,
 } from '../shared/domain.ts'
 import { newId, now } from './db.ts'
-import { badRequest, conflict } from './errors.ts'
+import { badRequest, conflict, HttpError } from './errors.ts'
 import type { GitHubPullRequest } from './github.ts'
 import type { PullRequestSync } from './pull-request-sync.ts'
 import { getBoard } from './store/boards.ts'
-import { listTickets } from './store/tickets.ts'
+import { getTicket, listTickets } from './store/tickets.ts'
 
 export interface MergeQueueOptions {
   /** Wait between checks while GitHub works out whether a pull request can be merged, and after each merge. */
@@ -148,7 +148,11 @@ export function createMergeQueue(
     return github.containsCommit(b.item.repo, b.pullRequest.headSha, a.pullRequest.headSha).catch(() => false)
   }
 
-  async function plan(boardId: string): Promise<MergePlan> {
+  /**
+   * With `focus`, only that ticket's pull request is compared with the others, which is all merging it on its own
+   * needs to know.
+   */
+  async function plan(boardId: string, focus?: string): Promise<MergePlan> {
     const reviewColumnId = getBoard(boardId).reviewColumnId
     if (!reviewColumnId) throw badRequest('This board has no review column; choose one in the board settings')
     if (!(await github.auth())) {
@@ -159,7 +163,9 @@ export function createMergeQueue(
     )
     const entries = await Promise.all(tickets.map(describe))
 
-    const pairs = entries.flatMap((a, i) => entries.slice(i + 1).map((b) => [a, b] as const))
+    const pairs = entries
+      .flatMap((a, i) => entries.slice(i + 1).map((b) => [a, b] as const))
+      .filter((pair) => !focus || pair.some((entry) => entry.item.ticketId === focus))
     await Promise.all(
       pairs.map(async ([a, b]) => {
         const overlapping = [...a.files].some((file) => b.files.has(file))
@@ -242,6 +248,35 @@ export function createMergeQueue(
     }
   }
 
+  function newRun(boardId: string, method: MergeMethod, actor: string, items: MergePlanItem[]): MergeRun {
+    const run: MergeRun = {
+      id: newId(),
+      boardId,
+      actor,
+      method,
+      status: 'running',
+      startedAt: now(),
+      finishedAt: null,
+      steps: items.map((item) => ({ ...item, status: item.skip ? 'skipped' : 'pending', message: item.skip })),
+    }
+    runs.set(boardId, run)
+    return run
+  }
+
+  /** Makes sure only one run, or single merge, per board is planned or merging at a time. */
+  async function exclusive<T>(boardId: string, work: () => Promise<T>) {
+    const current = runs.get(boardId)
+    if (starting.has(boardId) || current?.status === 'running') {
+      throw conflict('merge_in_progress', "This board's pull requests are already being merged", { run: current })
+    }
+    starting.add(boardId)
+    try {
+      return await work()
+    } finally {
+      starting.delete(boardId)
+    }
+  }
+
   return {
     plan,
 
@@ -249,30 +284,40 @@ export function createMergeQueue(
     latest: (boardId: string) => runs.get(boardId) ?? null,
 
     /** Plans the merges now and starts merging in the background; follow along with `latest`. */
-    async start(boardId: string, method: MergeMethod, actor: string) {
-      const current = runs.get(boardId)
-      if (starting.has(boardId) || current?.status === 'running') {
-        throw conflict('merge_in_progress', "This board's pull requests are already being merged", { run: current })
-      }
-      starting.add(boardId)
-      try {
+    start: (boardId: string, method: MergeMethod, actor: string) =>
+      exclusive(boardId, async () => {
         const { items } = await plan(boardId)
-        const run: MergeRun = {
-          id: newId(),
-          boardId,
-          actor,
-          method,
-          status: 'running',
-          startedAt: now(),
-          finishedAt: null,
-          steps: items.map((item) => ({ ...item, status: item.skip ? 'skipped' : 'pending', message: item.skip })),
-        }
-        runs.set(boardId, run)
+        const run = newRun(boardId, method, actor, items)
         void execute(run)
         return run
-      } finally {
-        starting.delete(boardId)
-      }
+      }),
+
+    /**
+     * Merges one ticket's pull request now, as a run of its own so it never overlaps "merge all". Refuses one that
+     * builds on another pull request still in review: merging it first would merge the other's changes with it.
+     * Uses `method` if the repository allows it, otherwise the first method it does. Returns the updated ticket.
+     */
+    mergeTicket: (ticketId: string, method: MergeMethod | undefined, actor: string) => {
+      const { boardId } = getTicket(ticketId)
+      return exclusive(boardId, async () => {
+        const { items } = await plan(boardId, ticketId)
+        const item = items.find((other) => other.ticketId === ticketId)
+        if (!item) throw badRequest('Only tickets in the review column with an open pull request can be merged')
+        const parent = items.find((other) => item.after.includes(other.ticketId))
+        if (!item.skip && parent) {
+          item.skip = `Builds on the pull request of #${parent.ticketNumber}; merge that one first, or merge all`
+        }
+        if (item.skip) throw conflict('cannot_merge', item.skip)
+
+        const allowed = await github.mergeMethods(item.repo).catch(() => [...MERGE_METHODS])
+        const chosen = method && allowed.includes(method) ? method : (allowed[0] ?? 'merge')
+        const run = newRun(boardId, chosen, actor, [item])
+        await execute(run)
+        const [step] = run.steps
+        if (step.status === 'skipped') throw conflict('cannot_merge', step.message ?? "Couldn't merge it")
+        if (step.status !== 'merged') throw new HttpError(502, 'github_error', step.message ?? "Couldn't merge it")
+        return getTicket(ticketId)
+      })
     },
   }
 }
