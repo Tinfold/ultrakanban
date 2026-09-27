@@ -79,6 +79,9 @@
 #                       changes and checks out the default branch (or the pull request's branch for feedback runs).
 #                       agent-board.sh sets it. Leave it unset in a working copy of your own.
 #   LOOP_ID             label for this loop's log lines when several loops work the board (agent-board.sh numbers them)
+#   WATCH_FILES         files separated by ":"; when one of them changes, the loop exits with status 75 before its next
+#                       run, so it can be started again with the new version (agent-board.sh sets it to the installed
+#                       scripts and skill)
 #
 # Requires curl, jq, gh, timeout (coreutils), flock and uuidgen (util-linux) and claude. Logs go to stdout. Stop it with
 # Ctrl-C or SIGTERM.
@@ -769,10 +772,24 @@ if [[ ${1:-} == save-work ]]; then
   exit
 fi
 
+# The files in WATCH_FILES as they are now, to tell when one of them is replaced or changed.
+watched() {
+  local files file
+  IFS=: read -r -a files <<<"${WATCH_FILES:-}"
+  for file in ${files[@]+"${files[@]}"}; do
+    stat -c '%n %i %Y %s' "$file" 2>/dev/null || printf '%s missing\n' "$file"
+  done
+}
+watching=$(watched)
+
 log "working board $BOARD as $AGENT, claiming tickets as $WORKER (or at the effort a ticket asks for)"
 # A run stopped along with the loop left its work here; keep it now, so whichever loop resumes the ticket gets it back.
 if [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]]; then save_work; fi
 while true; do
   paused && pause "$((paused_until - $(date +%s)))"
+  if [[ $(watched) != "$watching" ]]; then
+    log "the agent scripts were updated; stopping to start again with the new ones"
+    exit 75
+  fi
   handle_feedback || claim_next || pause "$IDLE_SECONDS"
 done
