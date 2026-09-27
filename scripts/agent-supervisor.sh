@@ -23,15 +23,25 @@ self=$(readlink -f "$0")
 # The installed files and where they come from in the checkout.
 INSTALLED=(bin/agent-loop.sh:scripts/agent-loop.sh bin/agent-board.sh:scripts/agent-board.sh
   bin/agent-supervisor.sh:scripts/agent-supervisor.sh skill/SKILL.md:.claude/skills/ultrakanban/SKILL.md)
+for part in triage board ci checkout run tickets; do
+  INSTALLED+=("bin/agent-loop/$part.sh:scripts/agent-loop/$part.sh")
+done
 
 # Copies the installed files from the checkout's default branch when it has moved since they were installed.
 update_scripts() {
-  local checkout installed branch commit entry target tmp updated=
+  local checkout installed branch commit entry target tmp updated= missing=
   { read -r checkout && read -r installed; } 2>/dev/null <"$AGENT_HOME/installed-from" || return 0
   branch=$(git -C "$checkout" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null) || branch=origin/main
   branch=${branch#origin/}
   commit=$(git -C "$checkout" rev-parse --verify --quiet "$branch^{commit}" 2>/dev/null) || return 0
-  [[ $commit == "$installed" ]] && return 0
+  # A file that isn't installed yet is copied even when the commit is the same: an older version of this script may
+  # have installed that commit without it.
+  if [[ $commit == "$installed" ]]; then
+    for entry in "${INSTALLED[@]}"; do
+      [[ -f $AGENT_HOME/${entry%%:*} ]] || missing=1
+    done
+    [[ -n $missing ]] || return 0
+  fi
 
   for entry in "${INSTALLED[@]}"; do
     target=$AGENT_HOME/${entry%%:*}
