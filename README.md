@@ -163,7 +163,10 @@ afterwards. Logs: `journalctl --user -u ultrakanban-agent -u 'ultrakanban-agent@
 (`agentConcurrency`, up to 8) lets it work that many tickets at once: the unit then runs that many loops, the first in
 the clone and each other one in its own git worktree of it (`boards/<board>/worktrees/<n>`), so their branches and
 files never get in each other's way. The loops share the board's state and lock each ticket while they look at it or
-work it, so two runs never work the same ticket, and when one runs out of Claude usage they all wait. Changing the
+work it, so two runs never work the same ticket, and when one runs out of Claude usage they all wait. They claim at most
+that many new tickets at a time, too: a claimed ticket whose run fails stays in progress to be retried, and until its
+run succeeds (or someone moves it back to Todo) it takes up one of the slots, so runs that keep failing don't drag the
+whole Todo or Backlog column into progress. Changing the
 setting restarts the board's loops, which stops runs in progress (they are resumed, see below). The boards themselves
 also run side by side, with no limit across boards: three enabled boards with two parallel runs each can mean six
 agents working at once, all on your `claude` login and its usage limits.

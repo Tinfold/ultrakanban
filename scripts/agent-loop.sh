@@ -89,6 +89,10 @@
 #   RETRY_SECONDS       wait before retrying a failed run, doubled after each failure (default: 600)
 #   MAX_ATTEMPTS        failed runs in a row before waiting for new feedback (default: 3)
 #   MAX_CI_RUNS         runs in a row started only by failing CI, with no human feedback between (default: 2)
+#   CLAIM_LIMIT         most new tickets claimed whose first run hasn't finished yet (it is going, failed or stopped),
+#                       across the loops sharing STATE_DIR: no loop claims another while that many are pending, so
+#                       runs that fail right away don't drag the whole todo column into progress (default: 1;
+#                       agent-board.sh sets it to the board's agentConcurrency)
 #   SKIP_PERMISSIONS    1 passes --dangerously-skip-permissions to claude, 0 doesn't (default: 1)
 #   STRICT_MCP          1 passes --strict-mcp-config to claude, so runs load no MCP servers (the account's connectors,
 #                       plugins' or the repository's) except those given with --mcp-config in CLAUDE_ARGS: their tools
@@ -138,6 +142,7 @@ TICKET_CHECK_SECONDS=${TICKET_CHECK_SECONDS:-30}
 RETRY_SECONDS=${RETRY_SECONDS:-600}
 MAX_ATTEMPTS=${MAX_ATTEMPTS:-3}
 MAX_CI_RUNS=${MAX_CI_RUNS:-2}
+CLAIM_LIMIT=${CLAIM_LIMIT:-1}
 # Check output or annotations that mean CI itself didn't run, not that the code failed.
 INFRA_PATTERN='billing|spending limit|payments have failed|account is locked|account has been locked'
 INFRA_PATTERN+='|was not started|minutes quota|exceeded .*(minutes|quota)'
@@ -182,6 +187,8 @@ sleeper=
 # Set when Claude usage runs out: no run starts before this time (seconds since the epoch). Kept in PAUSE_FILE, so
 # the other loops working the board wait too.
 paused_until=0
+# The pending claims last reported as holding back claim_next, so the log says it once rather than every round.
+claim_held=
 # The run in progress and the process watching its ticket (see run_claude), if any.
 running=
 watcher=

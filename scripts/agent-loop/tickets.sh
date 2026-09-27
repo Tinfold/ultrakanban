@@ -184,6 +184,14 @@ backlog_on() {
     '.board.agentBacklog and any(.columns[]; (.name | ascii_downcase) == ($name | ascii_downcase))' >/dev/null
 }
 
+# How many tickets the agent claimed whose first run hasn't finished yet: going, failed (waiting to be retried, or
+# for feedback after MAX_ATTEMPTS) or stopped. Their state still has the claim; a run that finishes drops it.
+pending_claims() {
+  local files=("$STATE_DIR"/*.json)
+  [[ -e ${files[0]} ]] || { echo 0; return; }
+  jq -s 'map(select(type == "object" and .claim == true)) | length' "${files[@]}" 2>/dev/null || echo 0
+}
+
 # Claims the next ticket from the given column; prints the response body and then the HTTP status on its own line.
 claim_from() {
   post "/boards/$BOARD/tickets/claim-next" "$(jq -nc --arg agent "$worker" --arg column "$1" \
@@ -191,12 +199,22 @@ claim_from() {
 }
 
 # Claims the next ticket from the todo column (then the backlog column, if the board allows it) and works it.
-# Returns 1 if there was nothing to claim.
+# Returns 1 if there was nothing to claim, or if CLAIM_LIMIT claimed tickets are still waiting for their first run
+# to finish: those are worked (or retried) first, rather than claiming ticket after ticket while runs keep failing.
 claim_next() {
-  local response status ticket id snapshot
+  local response status ticket id snapshot pending
   paused && return 0
   use_worker "" ""
   claim_lock -x
+  pending=$(pending_claims)
+  if ((pending >= CLAIM_LIMIT)); then
+    claim_unlock
+    [[ $claim_held == "$pending" ]] || log "not claiming more tickets: $pending claimed ticket(s) haven't finished \
+their first run yet (CLAIM_LIMIT $CLAIM_LIMIT)"
+    claim_held=$pending
+    return 1
+  fi
+  claim_held=
   response=$(claim_from "$TODO_COLUMN")
   status=${response##*$'\n'}
   ticket=${response%$'\n'*}
