@@ -151,7 +151,9 @@
 /* Rich text shared by the description editor and rendered markdown (comments). */
 @layer components {
   .prose-ticket {
-    @apply text-sm leading-relaxed break-words text-foreground;
+    /* wrap-anywhere and pre's inline-size containment keep long words and code lines from widening the
+       layout around the text (grid and flex tracks size to their content's min-content width). */
+    @apply text-sm leading-relaxed wrap-anywhere text-foreground;
 
     & > * + * {
       @apply mt-2.5;
@@ -176,7 +178,7 @@
       @apply rounded-[4px] bg-muted px-1 py-0.5 font-mono text-[0.85em];
     }
     & pre {
-      @apply overflow-x-auto rounded-lg border bg-muted/60 p-3 font-mono text-xs leading-relaxed;
+      @apply overflow-x-auto rounded-lg border bg-muted/60 p-3 font-mono text-xs leading-relaxed contain-inline-size;
 
       & code {
         @apply bg-transparent p-0 text-inherit;
