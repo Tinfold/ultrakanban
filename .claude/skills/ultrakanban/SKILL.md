@@ -36,6 +36,12 @@ agents can work the same board safely.
   Don't use `/loop` or a long-lived orchestrator session for this.
 - **Read before you write.** Ticket comments and pull request review comments are how humans steer you.
 - **Never move a ticket to the done column.** It moves there by itself when the pull request is merged.
+- **People move tickets too, and their moves count.** If someone moves your ticket back to Todo or a column before
+  it (such as Backlog), to Cancelled, or unassigns or reassigns it, it is no longer yours to work: stop, don't
+  claim it back, move it or submit it for review, and say in a ticket comment what you had done (e.g. the branch you
+  pushed). If someone moves it from review back to In progress, they want more work on it: find out what from their
+  comments, or ask in a ticket comment. Moving it into review yourself is still how you submit it. Re-read the
+  ticket (`GET /api/tickets/$TICKET`) before you submit it for review, to be sure it is still yours.
 
 ## 1. Claim a ticket
 
