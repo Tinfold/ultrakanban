@@ -181,6 +181,21 @@ describe('agent claiming', () => {
     assert.equal((await claim()).body.title, 'waiting')
   })
 
+  test('claim-next gives parallel agents only the tickets that can be worked', async () => {
+    const first = await addTicket({ title: 'first', priority: 'low' })
+    const second = await addTicket({ title: 'second', priority: 'high', description: `Blocked by #${first.number}` })
+    await addTicket({ title: 'third', priority: 'urgent', description: `Depends on #${second.number}` })
+
+    const claim = (agent: string) =>
+      call<Ticket>('POST', `/boards/${boardId}/tickets/claim-next`, { agent, column: 'Todo', moveTo: 'Doing' })
+    const claims = await Promise.all(['a', 'b', 'c', 'd', 'e'].map(claim))
+    assert.deepEqual(
+      claims.map((res) => res.status),
+      [200, 404, 404, 404, 404],
+    )
+    assert.equal(claims[0].body.title, 'first')
+  })
+
   test('records activity', async () => {
     const ticket = await addTicket({ title: 'A' })
     await call('POST', `/tickets/${ticket.id}/claim`, { agent: 'alpha', moveTo: 'Done' })
