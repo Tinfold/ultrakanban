@@ -9,6 +9,7 @@ import {
   type PullRequestState,
   type Ticket,
 } from '../../shared/domain.ts'
+import { BLOCKED_TAG, parseBlockers } from '../../shared/blockers.ts'
 import { parseChecklist, setChecklistItem } from '../../shared/checklist.ts'
 import type {
   CheckItemInput,
@@ -408,24 +409,45 @@ export function releaseIdleTickets(columnId: string, input: ReleaseIdleInput, ac
 /**
  * Atomically claims the most important unassigned ticket of a column:
  * highest priority first, then earliest due date, then board order.
+ * Blocked tickets are skipped: tagged `blocked`, or waiting for an unfinished ticket (`blocked by #12`).
  */
 export function claimNextTicket(boardId: string, input: ClaimNextInput): Ticket {
   touchBoard(boardId)
   const column = resolveColumn(boardId, input.column)
   const tagIds = resolveTags(boardId, input.tags ?? [], { create: false })
   const tagFilter = tagIds.map(() => 'AND EXISTS (SELECT 1 FROM ticket_tags WHERE ticket_id = t.id AND tag_id = ?)')
-  const candidate = sql.get<{ id: string }>(
-    `SELECT t.id FROM tickets t
+  const candidates = sql.all<{ id: string; number: number; description: string }>(
+    `SELECT t.id, t.number, t.description FROM tickets t
      WHERE t.column_id = ? AND t.assignee IS NULL ${tagFilter.join(' ')}
-     ORDER BY t.priority DESC, t.due_date IS NULL, t.due_date, t.position
-     LIMIT 1`,
+       AND NOT EXISTS (SELECT 1 FROM ticket_tags tt JOIN tags g ON g.id = tt.tag_id
+                       WHERE tt.ticket_id = t.id AND lower(g.name) = ?)
+     ORDER BY t.priority DESC, t.due_date IS NULL, t.due_date, t.position`,
     column.id,
     ...tagIds,
+    BLOCKED_TAG,
   )
+  const candidate = candidates.find((ticket) => !waitsForOpenTicket(boardId, ticket))
   if (!candidate) {
     throw new HttpError(404, 'no_ticket_available', `No unassigned ticket available in "${column.name}"`)
   }
   return claimTicket(candidate.id, { agent: input.agent, moveTo: input.moveTo })
+}
+
+/**
+ * Whether a ticket's description names another ticket of the board it waits for (`blocked by #12`) that isn't
+ * finished yet: not in the board's done column (its last column if it has none) and without a merged pull request.
+ */
+function waitsForOpenTicket(boardId: string, ticket: { number: number; description: string }): boolean {
+  const numbers = parseBlockers(ticket.description).filter((number) => number !== ticket.number)
+  if (!numbers.length) return false
+  const done = workflowColumns(boardId).done ?? listColumns(boardId).at(-1)
+  return sql
+    .all<{ column_id: string; pr_state: string | null }>(
+      `SELECT column_id, pr_state FROM tickets WHERE board_id = ? AND number IN (${numbers.map(() => '?').join(', ')})`,
+      boardId,
+      ...numbers,
+    )
+    .some((blocker) => blocker.column_id !== done?.id && blocker.pr_state !== 'merged')
 }
 
 /** Atomically links the agent's pull request, assigns the ticket to it and moves it to the review column. */

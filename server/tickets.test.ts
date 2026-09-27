@@ -165,6 +165,22 @@ describe('agent claiming', () => {
     assert.equal(res.body.title, 'backend')
   })
 
+  test('claim-next skips blocked tickets', async () => {
+    const blocker = await addTicket({ title: 'blocker', column: 'Doing' })
+    await addTicket({ title: 'tagged', priority: 'urgent', tags: ['Blocked'] })
+    await addTicket({ title: 'waiting', priority: 'high', description: `Depends on #99 and #${blocker.number}.` })
+    await addTicket({ title: 'fenced', priority: 'medium', description: '```\nblocked by #1\n```' })
+    await addTicket({ title: 'free', priority: 'low' })
+
+    const claim = () => call<Ticket>('POST', `/boards/${boardId}/tickets/claim-next`, { agent: 'a', column: 'Todo' })
+    assert.equal((await claim()).body.title, 'fenced')
+    assert.equal((await claim()).body.title, 'free')
+    assert.equal((await claim()).status, 404)
+
+    await call('POST', `/tickets/${blocker.id}/move`, { column: 'Done' })
+    assert.equal((await claim()).body.title, 'waiting')
+  })
+
   test('records activity', async () => {
     const ticket = await addTicket({ title: 'A' })
     await call('POST', `/tickets/${ticket.id}/claim`, { agent: 'alpha', moveTo: 'Done' })

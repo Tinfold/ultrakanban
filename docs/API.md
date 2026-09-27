@@ -33,6 +33,9 @@ runs like this from the board settings (`agentWorkerName` in `shared/domain.ts`)
 2. Claim work atomically: `POST /api/boards/:boardId/tickets/claim-next` with
    `{ "agent": "claude/claude-opus-5-5/high", "column": "Todo", "moveTo": "In progress" }`.
    Only one agent can ever win a given ticket. Repeat on `404 no_ticket_available` later.
+   `claim-next` skips blocked tickets: those tagged `blocked`, and those whose description says they wait for another
+   ticket of the board (`blocked by #12`, `blocked on #12`, `depends on #3 and #4`, `waiting on #7`) until that ticket is in the
+   done column (the board's last column if it has none) or its pull request is merged.
    Or claim a specific ticket: `POST /api/tickets/:ticketId/claim`.
 3. Read the ticket's comments (`GET /api/tickets/:ticketId/activity`) before starting: they may be newer than
    the description. Report progress and decisions with `POST /api/tickets/:ticketId/comments`.
@@ -50,6 +53,8 @@ runs like this from the board settings (`agentWorkerName` in `shared/domain.ts`)
 7. **Don't move tickets to the done column yourself.** It only accepts tickets whose pull request is merged, and the
    server moves them there automatically once GitHub reports the merge.
 8. To give up on a ticket, hand it back with `POST /api/tickets/:ticketId/release` `{ "agent": "claude/claude-opus-5-5/high", "moveTo": "Todo" }`.
+   If you give up because it is blocked, mark it first (add `blocked by #12` to its description, or tag it `blocked`)
+   so `claim-next` doesn't hand it straight back to the next agent.
 9. For read-modify-write edits, pass the ticket's `version` as `ifVersion` so concurrent edits are rejected instead of lost.
 
 Work **one ticket per agent, one agent at a time**: claim a ticket, finish it, then start a fresh agent for the
@@ -259,7 +264,7 @@ tickets whose agent stopped or crashed.
 | POST   | `/tickets/:ticketId/claim`             | `{ agent, moveTo?: ref, ifVersion? }`                                                                                                                                                      | `Ticket`; `409` if claimed by someone else (idempotent for the same agent)                                                                                                |
 | POST   | `/tickets/:ticketId/release`           | `{ agent, moveTo?: ref, force? }`                                                                                                                                                          | `Ticket`; `409` if claimed by someone else unless `force`                                                                                                                 |
 | POST   | `/tickets/:ticketId/heartbeat`         |                                                                                                                                                                                            | `204`; says an agent is working on the ticket right now (not a change: nothing is logged)                                                                                 |
-| POST   | `/boards/:boardId/tickets/claim-next`  | `{ agent, column: ref, tags?: ref[], moveTo?: ref }`                                                                                                                                       | `Ticket`: highest priority, then earliest due date, then board order, among unassigned tickets in `column` having all `tags`                                              |
+| POST   | `/boards/:boardId/tickets/claim-next`  | `{ agent, column: ref, tags?: ref[], moveTo?: ref }`                                                                                                                                       | `Ticket`: highest priority, then earliest due date, then board order, among unassigned, unblocked tickets in `column` having all `tags` (see below)                       |
 | POST   | `/tickets/:ticketId/review`            | `{ agent, pullRequest: url, comment?: markdown, ifVersion? }`                                                                                                                              | `Ticket`: links the pull request, assigns `agent`, posts `comment`, moves to the review column; `409` if claimed by someone else, `400` if the board has no review column |
 | POST   | `/tickets/:ticketId/pull-request/sync` |                                                                                                                                                                                            | `Ticket` after checking its pull request on GitHub now                                                                                                                    |
 | GET    | `/tickets/:ticketId/checklist`         |                                                                                                                                                                                            | `ChecklistItem[]`: the description's task list items (`- [ ]` / `- [x]`), outside code blocks                                                                             |
