@@ -40,7 +40,8 @@ if [[ $(git -C "$dir/repo" config --get ultrakanban.repo 2>/dev/null) != "$repo"
   git -C "$dir/repo" config ultrakanban.repo "$repo"
 fi
 
-# One checkout per loop: the clone, then worktrees/2 up to worktrees/<concurrency>. Worktrees beyond that go.
+# One checkout per loop: the clone, then worktrees/2 up to worktrees/<concurrency>. Worktrees beyond that go, after
+# keeping the work of a run that was stopped in them, which the ticket's next run gets back.
 checkouts=("$dir/repo")
 git -C "$dir/repo" worktree prune
 for ((n = 2; n <= concurrency; n++)); do
@@ -55,6 +56,7 @@ for worktree in "$dir"/worktrees/*; do
   n=${worktree##*/}
   [[ -e $worktree ]] || continue
   [[ $n =~ ^[0-9]+$ ]] && ((n >= 2 && n <= concurrency)) && continue
+  (cd "$worktree" && KANBAN=$KANBAN BOARD=$BOARD STATE_DIR=$dir/state "$here/agent-loop.sh" save-work)
   git -C "$dir/repo" worktree remove --force "$worktree" 2>/dev/null || rm -rf "$worktree"
 done
 git -C "$dir/repo" worktree prune

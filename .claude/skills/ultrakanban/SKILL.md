@@ -129,7 +129,10 @@ In a non-interactive run (`claude -p`, e.g. started by `scripts/agent-loop.sh`),
 the feedback the prompt lists (and anything else new), finish with a ticket comment summarising what you did,
 then exit. The loop starts a new run when more feedback arrives. In the agent's own clone, the loop starts each run
 on a freshly fetched checkout with no local changes: the default branch for a new ticket (create your branch from
-it), or the pull request's branch for feedback on a pull request (commit on top of it and push).
+it), or the pull request's branch for feedback on a pull request (commit on top of it and push). The exception is a
+ticket whose previous run stopped before it finished (Claude usage ran out, the loop was restarted, the run failed):
+the loop puts that run's branch, commits and uncommitted changes back, and where it can it resumes the run's own
+conversation. The prompt says when it does; carry on from there instead of starting over.
 
 Failing CI isn't always about the code. Before fixing a failing check, read the failing job's log
 (`gh run view <run id> --log-failed`). If the failure doesn't come from the code (billing or spending limits,
