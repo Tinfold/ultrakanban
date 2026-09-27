@@ -55,7 +55,7 @@ curl -s $KANBAN/api/tickets/$TICKET            # title, description (markdown), 
 curl -s $KANBAN/api/tickets/$TICKET/activity   # comments and history, oldest first
 ```
 
-Follow any checklist in the description. Comments often contain corrections that are newer than the
+Follow any checklist (`- [ ] step`) in the description, and check its steps off on the board as you go (see below). Comments often contain corrections that are newer than the
 description — treat the newest instruction as the one that counts. If they conflict with the description or
 are unclear, ask in a comment and stop rather than guessing.
 
