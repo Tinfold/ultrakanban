@@ -40,7 +40,13 @@
 #
 # A run that fails because the account is out of Claude usage doesn't count as a failure. The loop says so on the
 # ticket, quoting claude's message, and starts no runs at all until the time the message says the limit resets
-# (RETRY_SECONDS later if it doesn't say), then retries the ticket.
+# (RETRY_SECONDS later if it doesn't say), then resumes the run.
+#
+# Runs that don't finish are resumed, not started over. Each run is a claude session, and a run cut short by the
+# usage limit or by the loop stopping (a restart of the service or the machine, a crash) is continued in that same
+# session (claude --resume), so it keeps everything it already knew and did. With AGENT_LOOP_CLEAN=1, the work such a
+# run (or a failed one) left in the checkout isn't discarded either: the loop keeps its commits and uncommitted
+# changes under refs/ultrakanban/work/<ticket> and puts them back before the ticket's next run, in whichever checkout.
 #
 # Several loops: to work several tickets at once, run one loop per checkout of the repository, e.g. the clone and git
 # worktrees of it (agent-board.sh does this for a board's agentConcurrency), all with the same BOARD, AGENT and
@@ -77,7 +83,8 @@
 #                       run, so it can be started again with the new version (agent-board.sh sets it to the installed
 #                       scripts and skill)
 #
-# Requires curl, jq, gh, timeout (coreutils), flock (util-linux) and claude. Logs go to stdout. Stop it with Ctrl-C or SIGTERM.
+# Requires curl, jq, gh, timeout (coreutils), flock and uuidgen (util-linux) and claude. Logs go to stdout. Stop it with
+# Ctrl-C or SIGTERM.
 
 set -uo pipefail
 
@@ -307,16 +314,62 @@ ci_status() {
        infra: [.[] | select(.[0] == "infra") | {name: .[1], why: (.[2] | gsub("^\\s+|\\s+$"; ""))}]}'
 }
 
+# In a dedicated clone, a run that doesn't finish (it failed, timed out, ran out of Claude usage, or the loop or the
+# machine stopped) leaves its work in the checkout, and the next checkout would discard it. So each run records its
+# ticket and starting commit in the checkout's git directory (RUN_FILE), and a successful run removes that record.
+# While the record is there, the checkout's work belongs to that ticket, and save_work keeps it before anything is
+# discarded: its local commits and all its changes, untracked files included, as one commit on top of them, under
+# refs/ultrakanban/work/<ticket> (shared by the clone and its worktrees). The commit message names the branch it was on.
+run_file() { printf '%s/ultrakanban-run' "$(git rev-parse --git-dir)"; }
+
+save_work() {
+  local file id base branch tree commit
+  file=$(run_file) || return 1
+  [[ -f $file ]] || return 0
+  read -r id base <"$file"
+  if [[ -n $id ]]; then
+    branch=$(git branch --show-current)
+    git add -A >/dev/null 2>&1
+    if tree=$(git write-tree) && [[ $tree != $(git rev-parse 'HEAD^{tree}') || $(git rev-parse HEAD) != "$base" ]]; then
+      commit=$(git commit-tree "$tree" -p HEAD -m "Unfinished work on ticket $id
+
+branch: ${branch:--}") && git update-ref "refs/ultrakanban/work/$id" "$commit" ||
+        { log "error: can't keep the unfinished work on $id; it is discarded"; rm -f "$file"; return 0; }
+      log "kept the unfinished work on $id (${branch:-detached HEAD}) as refs/ultrakanban/work/$id"
+    fi
+  fi
+  rm -f "$file"
+}
+
+# Puts back a ticket's unfinished work saved by save_work: its branch (or a detached HEAD) with its local commits, and
+# its changes uncommitted in the working tree. Prints where it is.
+restore_work() {
+  local ref=refs/ultrakanban/work/$1 branch
+  git rev-parse --verify --quiet "$ref" >/dev/null || return 1
+  branch=$(git log -1 --format=%B "$ref" | sed -n 's/^branch: //p')
+  if [[ -n $branch && $branch != - ]]; then
+    git checkout --quiet --ignore-other-worktrees -B "$branch" "$ref" || return 1
+  else
+    git checkout --quiet --detach "$ref" || return 1
+    branch=
+  fi
+  git reset --quiet 'HEAD~1' || return 1
+  git update-ref -d "$ref"
+  printf '%s at %s\n' "${branch:+branch }${branch:-a detached HEAD}" "$(git rev-parse --short HEAD)"
+}
+
 # In a dedicated clone or worktree (AGENT_LOOP_CLEAN=1, set by agent-board.sh), puts the checkout on an up-to-date
 # branch: the given one (a pull request's branch) if it exists on origin, otherwise the default branch, detached so
-# that other worktrees can have it too. Local changes are discarded, so this never happens in a normal working copy.
-# Fetches hold a lock in the repository, so loops in worktrees of one clone don't fetch at once. Prints the branch.
+# that other worktrees can have it too. Local changes are discarded (after save_work keeps those of an unfinished run),
+# so this never happens in a normal working copy. Fetches hold a lock in the repository, so loops in worktrees of one
+# clone don't fetch at once. Prints the branch.
 checkout() {
   local branch=$1 default lock
   if [[ ${AGENT_LOOP_CLEAN:-0} != 1 ]]; then
     git branch --show-current 2>/dev/null
     return 0
   fi
+  save_work
   lock=$(git rev-parse --git-common-dir)/ultrakanban-fetch.lock || return 1
   flock "$lock" git fetch --prune --quiet origin || return 1
   default=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null) ||
@@ -375,36 +428,76 @@ limit_reset() {
   printf '%s\n' "$at"
 }
 
-# Runs claude on a ticket, prints its final message (and keeps it in claude_result) and reports the tokens it used.
-# Returns claude's exit status.
+# Runs claude on a ticket with the given prompt and further arguments (the session to start or resume), prints its
+# final message (and keeps it in claude_result, and what it printed to stderr in claude_errors) and reports the tokens
+# it used. Returns claude's exit status.
 run_claude() {
-  local id=$1 output code usage response
-  output=$(mktemp) || return 1
+  local id=$1 prompt=$2 output errors code usage response
+  shift 2
+  output=$(mktemp) && errors=$(mktemp) || return 1
   (
     # Without the ticket lock's descriptor: anything claude leaves running mustn't keep the ticket locked.
     if [[ -n $lock_fd ]]; then exec {lock_fd}>&-; fi
     exec timeout --foreground "$TICKET_TIMEOUT" claude -p ${claude_args[@]+"${claude_args[@]}"} --effort "$effort" \
-      --output-format json
-  ) <<<"$2" >"$output"
+      --output-format json "$@"
+  ) <<<"$prompt" >"$output" 2>"$errors"
   code=$?
+  claude_errors=$(<"$errors")
+  [[ -n $claude_errors ]] && printf '%s\n' "$claude_errors" >&2
   claude_result=$(jq -r '.result // empty' "$output" 2>/dev/null || cat "$output")
   printf '%s\n' "$claude_result"
   if usage=$(jq -ce --arg agent "$worker" "$USAGE" "$output" 2>/dev/null); then
     response=$(post "/tickets/$id/usage" "$usage")
     [[ ${response##*$'\n'} == 201 ]] || log "can't record the token usage of the run on $id: ${response%$'\n'*}"
   fi
-  rm -f "$output"
+  rm -f "$output" "$errors"
   return "$code"
 }
 
+new_session_id() { { uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid; } | tr 'A-F' 'a-f'; }
+
 # Runs claude on a ticket. On success saves the snapshot as the ticket's watermark; on failure keeps the old one
 # and counts the failure for the backoff.
+#
+# Each run is a claude session whose id is kept in the ticket's state (with the checkout it ran in) until the run
+# ends. A run that didn't end, because the loop or the machine stopped, or that ran out of Claude usage, still has its
+# session there, so the next run on the ticket resumes it (claude --resume) with everything the run already knew and
+# did. A run that failed or timed out starts a new session instead, as resuming it would likely fail the same way.
+# Either way, the unfinished work in the checkout is put back first (save_work, restore_work).
 run_on_ticket() {
-  local id=$1 prompt=$2 snapshot=$3 fingerprint=$4 ci_runs=${5:-0} branch=${6:-} code limit why
+  local id=$1 prompt=$2 snapshot=$3 fingerprint=$4 ci_runs=${5:-0} branch=${6:-} code limit why state session \
+    start=--session-id previous work=
   # Another loop may have run out of Claude usage since this round started.
   paused && return 0
+  state=$(read_state "$id")
+  session=$(jq -r '.session.id // ""' <<<"$state")
   if branch=$(checkout "$branch"); then
-    if [[ -n $branch && ${AGENT_LOOP_CLEAN:-0} == 1 && -z $(git branch --show-current) ]]; then
+    if [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]]; then
+      printf '%s %s\n' "$id" "$(git rev-parse HEAD)" >"$(run_file)"
+      work=$(restore_work "$id") && log "ticket $id: put back the unfinished work of its previous run ($work)"
+    fi
+    if [[ -n $session ]]; then
+      start=--resume
+      previous=$(jq -r '.session.checkout // ""' <<<"$state")
+      prompt="This continues your previous run on ticket $id, which stopped before it finished: $(jq -r \
+        '.session.why // "the loop running it was stopped, for example by a restart"' <<<"$state"). Carry on from where \
+you left off rather than starting over, and check what is already done (on the ticket, the branch and the pull \
+request) before doing it again.$([[ -n $previous && $previous != "$PWD" ]] && printf '%s' "
+Earlier in this conversation you worked in $previous. This run is in $PWD, another checkout of the same \
+repository: work only in $PWD from now on, and leave $previous alone, as another run may be using it.")
+The loop's usual prompt follows.
+
+$prompt"
+    else
+      session=$(new_session_id)
+    fi
+    if [[ -n $work ]]; then
+      prompt+="
+
+The previous run on this ticket didn't finish, and the loop kept its unfinished work: the repository is on $work, \
+with that run's uncommitted changes back in the working tree (see git status and git log). Carry on from there. If the \
+pull request's branch has moved on origin since, merge it in."
+    elif [[ -n $branch && ${AGENT_LOOP_CLEAN:-0} == 1 && -z $(git branch --show-current) ]]; then
       prompt+="
 
 The repository is checked out at origin/$branch (a detached HEAD, so create your branch from it), freshly updated \
@@ -415,15 +508,24 @@ from origin with no local changes."
 The repository is checked out on $branch, freshly updated from origin$(
         [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]] && printf '%s' " with no local changes")."
     fi
-    run_claude "$id" "$prompt"
+    update_state "$id" '.session = ($v | fromjson)' \
+      "$(jq -nc --arg id "$session" --arg checkout "$PWD" '{id: $id, checkout: $checkout}')"
+    run_claude "$id" "$prompt" "$start" "$session"
     code=$?
-    checkout "" >/dev/null # back to the default branch between runs
+    if [[ $code == 0 && ${AGENT_LOOP_CLEAN:-0} == 1 ]]; then rm -f "$(run_file)"; fi
+    checkout "" >/dev/null # back to the default branch between runs, keeping the work of a run that didn't finish
   else
     code=1
     log "can't update the checkout for $id"
   fi
   if [[ $code == 0 ]]; then
     write_state "$id" "$snapshot"
+    return 0
+  fi
+  if [[ $start == --resume && $claude_errors == *"No conversation found"* ]]; then
+    # The session is gone (e.g. claude's history was cleared): start a new one next round, and don't count a failure.
+    log "can't resume the session of the previous run on $id; starting a new one"
+    update_state "$id" 'del(.session)'
     return 0
   fi
   log "claude exited with status $code on $id"
@@ -433,8 +535,9 @@ The repository is checked out on $branch, freshly updated from origin$(
     paused_until=$(limit_reset "$limit")
     printf '%s\n' "$paused_until" >"$PAUSE_FILE"
     log "Claude usage limit reached ($limit); waiting until $(date -d "@$paused_until" '+%F %T')"
-    note "$id" "Out of Claude usage, so this run did no work. Claude said: \"$limit\". The loop starts no runs on any \
-ticket until $(date -d "@$paused_until" '+%-I:%M%P %Z on %b %-d'), then picks this ticket up again."
+    update_state "$id" '.session.why = $v' "it ran out of Claude usage"
+    note "$id" "Out of Claude usage, so this run stopped. Claude said: \"$limit\". The loop starts no runs on any \
+ticket until $(date -d "@$paused_until" '+%-I:%M%P %Z on %b %-d'), then resumes this one where it left off."
     return 0
   fi
   if [[ $code == 124 ]]; then
@@ -445,7 +548,7 @@ ticket until $(date -d "@$paused_until" '+%-I:%M%P %Z on %b %-d'), then picks th
   fi
   write_state "$id" "$(read_state "$id" | jq -c --arg fp "$fingerprint" --argjson now "$(date +%s)" \
     --argjson ci "$ci_runs" '. + {failures: (if .failedFor == $fp then (.failures // 0) + 1 else 1 end),
-      failedAt: $now, failedFor: $fp, ciRuns: $ci} | if $ci == 0 then del(.capNoted) else . end')"
+      failedAt: $now, failedFor: $fp, ciRuns: $ci} | del(.session) | if $ci == 0 then del(.capNoted) else . end')"
   note "$id" "Agent run failed: $why. It is retried with backoff, up to $MAX_ATTEMPTS runs in a row; after that, \
 new feedback such as a ticket comment retries it."
 }
@@ -511,13 +614,18 @@ handle_feedback() {
     <<<"$board")
   board=
 
-  # Forget tickets the agent no longer holds.
+  # Forget tickets the agent no longer holds, and their unfinished work.
   for file in "$STATE_DIR"/*.json "$STATE_DIR"/*.lock; do
     [[ -e $file && $file != */claim.lock ]] || continue
     id=${file##*/}
     id=${id%.*}
     [[ $'\n'$tickets == *$'\n'"$id"$'\t'* ]] || rm -f "$file"
   done
+  if [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]]; then
+    for id in $(git for-each-ref --format='%(refname:lstrip=3)' refs/ultrakanban/work/); do
+      [[ $'\n'$tickets == *$'\n'"$id"$'\t'* ]] || git update-ref -d "refs/ultrakanban/work/$id"
+    done
+  fi
   claim_unlock
 
   while IFS=$'\t' read -r -u 3 id number column holder version ticket_effort pr_url repo pr_number; do
@@ -657,6 +765,13 @@ sleeper=
 paused_until=0
 trap 'log "stopped"; [[ -n $sleeper ]] && kill "$sleeper" 2>/dev/null; exit 0' INT TERM
 
+# `agent-loop.sh save-work` only keeps the work of an unfinished run in the current checkout (see save_work):
+# agent-board.sh does this before it removes a worktree.
+if [[ ${1:-} == save-work ]]; then
+  save_work
+  exit
+fi
+
 # The files in WATCH_FILES as they are now, to tell when one of them is replaced or changed.
 watched() {
   local files file
@@ -668,6 +783,8 @@ watched() {
 watching=$(watched)
 
 log "working board $BOARD as $AGENT, claiming tickets as $WORKER (or at the effort a ticket asks for)"
+# A run stopped along with the loop left its work here; keep it now, so whichever loop resumes the ticket gets it back.
+if [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]]; then save_work; fi
 while true; do
   paused && pause "$((paused_until - $(date +%s)))"
   if [[ $(watched) != "$watching" ]]; then
