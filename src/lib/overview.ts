@@ -5,6 +5,7 @@ import {
   type Overview,
   type OverviewAgent,
   type OverviewEventKind,
+  totalTokens,
   type UsageTotals,
   type WorkSession,
 } from '@shared/domain'
@@ -83,3 +84,34 @@ export function needsAttention(agents: OverviewAgent[], now: number) {
       .sort(oldest),
   }
 }
+
+/** The most colors a chart shows models in; beyond that the rest share one. */
+const MODEL_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)']
+
+export interface ModelSeries {
+  label: string
+  color: string
+  /** Models the series adds up: one, or the rest for `Other`. */
+  models: string[]
+}
+
+/** Models from the most tokens used to the least, each with its totals. */
+export const modelsByTokens = (usage: UsageTotals) =>
+  Object.entries(usage.models)
+    .map(([model, counts]) => ({ model, ...counts }))
+    .sort((a, b) => totalTokens(b) - totalTokens(a) || a.model.localeCompare(b.model))
+
+/** A chart series per model, most tokens first; when there are too many for the colors, the least used share one. */
+export function modelSeries(usage: UsageTotals, label: (model: string) => string): ModelSeries[] {
+  const models = modelsByTokens(usage).map((entry) => entry.model)
+  const shown = models.length > MODEL_COLORS.length ? models.slice(0, MODEL_COLORS.length - 1) : models
+  const series = shown.map((model, i) => ({ label: label(model), color: MODEL_COLORS[i], models: [model] }))
+  if (shown.length < models.length) {
+    series.push({ label: 'Other', color: MODEL_COLORS.at(-1)!, models: models.slice(shown.length) })
+  }
+  return series
+}
+
+/** Tokens the models of a series used. */
+export const seriesTokens = (usage: UsageTotals, series: ModelSeries) =>
+  series.models.reduce((total, model) => total + (usage.models[model] ? totalTokens(usage.models[model]) : 0), 0)

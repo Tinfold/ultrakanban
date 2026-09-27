@@ -5,8 +5,16 @@ import { PullRequestIcon } from '@/components/common/PullRequestIcon'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
 import { swatch } from '@/lib/colors'
-import { formatCost, formatDateTime, formatDuration, formatRelative, formatTokens, ticketRef } from '@/lib/format'
-import { ticketHref } from '@/lib/overview'
+import {
+  formatCost,
+  formatDateTime,
+  formatDuration,
+  formatModel,
+  formatRelative,
+  formatTokens,
+  ticketRef,
+} from '@/lib/format'
+import { modelsByTokens, ticketHref } from '@/lib/overview'
 
 const STATUSES: Record<OverviewAgent['status'], { label: string; color: Color }> = {
   working: { label: 'Working', color: 'green' },
@@ -32,6 +40,11 @@ function usageSummary({ usage }: OverviewAgent) {
     `Output: ${usage.outputTokens.toLocaleString()}`,
     `Cache writes: ${usage.cacheWriteTokens.toLocaleString()}`,
     `Cache reads: ${usage.cacheReadTokens.toLocaleString()}`,
+    // Then the tokens each model used, after a blank line.
+    ...modelsByTokens(usage).flatMap((entry, i) => [
+      ...(i ? [] : ['']),
+      `${formatModel(entry.model)}: ${totalTokens(entry).toLocaleString()}`,
+    ]),
   ].join('\n')
 }
 

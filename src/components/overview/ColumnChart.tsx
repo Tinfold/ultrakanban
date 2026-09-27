@@ -26,6 +26,8 @@ interface ColumnChartProps {
   formatTick?: (value: number) => string
   /** Smallest gridline step, e.g. 1 for counts. */
   minStep?: number
+  /** Shown below the chart. */
+  footer?: ReactNode
   id?: string
   className?: string
 }
@@ -34,7 +36,8 @@ const AXIS_LABELS = 7
 
 /** Rounds the axis up to 1, 2 or 5 × 10ⁿ steps, about four gridlines. */
 function niceTicks(max: number, minStep: number) {
-  const raw = Math.max(max / 4, minStep)
+  // An empty chart without a smallest step still needs a step, or it has no gridlines to scale to.
+  const raw = Math.max(max / 4, minStep) || 1
   const magnitude = 10 ** Math.floor(Math.log10(raw))
   const step = [1, 2, 5, 10].map((factor) => factor * magnitude).find((candidate) => candidate >= raw)!
   const top = Math.max(step, Math.ceil(max / step) * step)
@@ -52,6 +55,7 @@ export function ColumnChart({
   formatValue,
   formatTick = formatValue,
   minStep = 0,
+  footer,
   id,
   className,
 }: ColumnChartProps) {
@@ -63,7 +67,7 @@ export function ColumnChart({
   const [open, setOpen] = useState<number | null>(null)
 
   return (
-    <figure id={id} className={cn('relative grid gap-4 rounded-xl border bg-card p-4', className)}>
+    <figure id={id} className={cn('relative grid content-start gap-4 rounded-xl border bg-card p-4', className)}>
       <figcaption className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
         <div>
           <h2 className="text-sm font-medium">{title}</h2>
@@ -170,6 +174,8 @@ export function ColumnChart({
           ))}
         </div>
       </div>
+
+      {footer}
 
       {/* Tables ignore the width sr-only sets, so a wrapper hides it. */}
       <div className="sr-only">

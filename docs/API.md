@@ -262,12 +262,16 @@ called, subagents included); other agents can report theirs the same way. Runs t
 answering a question, say) are reported to the board instead, and count toward the agent's and the board's totals just
 the same, with `ticketId: null`.
 
-| Method | Path                       | Body                                                                                               | Returns                                              |
-| ------ | -------------------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| POST   | `/tickets/:ticketId/usage` | `{ agent, inputTokens, outputTokens, cacheReadTokens?, cacheWriteTokens?, costUsd?, durationMs? }` | `TokenUsage` (201)                                   |
-| GET    | `/tickets/:ticketId/usage` |                                                                                                    | `TokenUsage[]` (oldest first)                        |
-| POST   | `/boards/:boardId/usage`   | same as for a ticket                                                                               | `TokenUsage` (201) with `ticketId: null`             |
-| GET    | `/boards/:boardId/usage`   |                                                                                                    | `TokenUsage[]` (oldest first), on its tickets or not |
+A run can also say how its tokens split between the models it called (`models`, one entry per model, from
+`claude -p`'s `modelUsage`; the agent loop sends it), so the overview can show token usage by model. The overview
+counts a run that doesn't as one of the model in its agent's name (`opus` for `claude/opus/high`), or of `unknown`.
+
+| Method | Path                       | Body                                                                                                                                                                                               | Returns                                              |
+| ------ | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| POST   | `/tickets/:ticketId/usage` | `{ agent, inputTokens, outputTokens, cacheReadTokens?, cacheWriteTokens?, costUsd?, durationMs?, models?: { model, inputTokens, outputTokens, cacheReadTokens?, cacheWriteTokens?, costUsd? }[] }` | `TokenUsage` (201)                                   |
+| GET    | `/tickets/:ticketId/usage` |                                                                                                                                                                                                    | `TokenUsage[]` (oldest first)                        |
+| POST   | `/boards/:boardId/usage`   | same as for a ticket                                                                                                                                                                               | `TokenUsage` (201) with `ticketId: null`             |
+| GET    | `/boards/:boardId/usage`   |                                                                                                                                                                                                    | `TokenUsage[]` (oldest first), on its tickets or not |
 
 ```ts
 interface TokenUsage {
@@ -281,6 +285,8 @@ interface TokenUsage {
   cacheWriteTokens: number // input written to the prompt cache
   costUsd: number | null // estimated cost, if the agent reported one
   durationMs: number | null
+  // The same split by model (e.g. claude-opus-5-5), most tokens first; empty if the agent didn't report it
+  models: { model; inputTokens; outputTokens; cacheReadTokens; cacheWriteTokens; costUsd: number | null }[]
   createdAt: string
 }
 ```
@@ -349,7 +355,19 @@ interface Overview {
   completions: { ticketId; boardId; at: string; cycleMs: number | null; reviewMs: number | null }[] // oldest first
   // Token usage reported within the range, oldest first
   // (ticketId is null for runs reported to a board rather than a ticket)
-  usage: { at; agent; ticketId; boardId; inputTokens; outputTokens; cacheReadTokens; cacheWriteTokens; costUsd }[]
+  // (models as in TokenUsage; a run that didn't report them has one entry for the model in its agent's name, or unknown)
+  usage: {
+    at
+    agent
+    ticketId
+    boardId
+    inputTokens
+    outputTokens
+    cacheReadTokens
+    cacheWriteTokens
+    costUsd
+    models
+  }[]
   recent: (Activity & { ticket: { number; title; boardId; boardName } })[] // latest 30, newest first
 }
 
@@ -361,6 +379,7 @@ interface UsageTotals {
   cacheWriteTokens
   costUsd
   runs
+  models: Record<string, { inputTokens; outputTokens; cacheReadTokens; cacheWriteTokens; costUsd; runs }> // by model
 }
 ```
 

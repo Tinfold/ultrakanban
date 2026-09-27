@@ -183,16 +183,27 @@ export const mergeRunSchema = z.object({ method: z.enum(MERGE_METHODS) })
 export const mergeTicketSchema = z.object({ method: z.enum(MERGE_METHODS).optional() })
 
 const tokens = z.int().min(0)
+const cost = z.number().min(0).nullable().default(null)
 
-/** Tokens an agent run used on a ticket or board, e.g. from `claude -p --output-format json`. */
-export const recordUsageSchema = z.object({
-  agent: name,
+const tokenCounts = {
   inputTokens: tokens,
   outputTokens: tokens,
   cacheReadTokens: tokens.default(0),
   cacheWriteTokens: tokens.default(0),
-  costUsd: z.number().min(0).nullable().default(null),
+  costUsd: cost,
+}
+
+/** Tokens an agent run used on a ticket or board, e.g. from `claude -p --output-format json`. */
+export const recordUsageSchema = z.object({
+  agent: name,
+  ...tokenCounts,
   durationMs: tokens.nullable().default(null),
+  /** The same split by the models the run called (claude's `modelUsage`), one entry per model. */
+  models: z
+    .array(z.object({ model: name, ...tokenCounts }))
+    .max(50)
+    .refine((models) => new Set(models.map((entry) => entry.model)).size === models.length, 'Models must be unique')
+    .default([]),
 })
 
 export const commentSchema = z.object({ body: z.string().trim().min(1).max(20_000) })

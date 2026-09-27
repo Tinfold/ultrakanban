@@ -155,6 +155,19 @@ const MIGRATIONS = [
   -- How many runs the board's agent works at once, each in its own git worktree (1 when null).
   ALTER TABLE boards ADD COLUMN agent_concurrency INTEGER;
   `,
+  `
+  -- A run's tokens split by the models it called, when the agent reports that.
+  CREATE TABLE token_usage_models (
+    usage_id INTEGER NOT NULL REFERENCES token_usage(id) ON DELETE CASCADE,
+    model TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    cache_read_tokens INTEGER NOT NULL,
+    cache_write_tokens INTEGER NOT NULL,
+    cost_usd REAL,
+    PRIMARY KEY (usage_id, model)
+  );
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

@@ -16,13 +16,15 @@ import {
   type PullRequestState,
   totalTokens,
   type UsageTotals,
+  UNKNOWN_MODEL,
   type WorkSession,
   type WorkState,
+  workerModel,
 } from '../../shared/domain.ts'
 import { sql } from '../db.ts'
 import { type ActivityRow, toActivity } from './activity.ts'
 import { listBoards } from './boards.ts'
-import { toUsage, type UsageRow } from './usage.ts'
+import { queryUsage } from './usage.ts'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const RECENT_LIMIT = 30
@@ -189,32 +191,24 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
   }
 
   // Tokens agents' runs used.
-  const usage = sql
-    .all<UsageRow>('SELECT * FROM token_usage WHERE created_at >= ? ORDER BY created_at, id', since)
-    .map((row): OverviewUsage => {
-      const {
-        createdAt,
-        agent,
-        ticketId,
-        boardId,
-        inputTokens,
-        outputTokens,
-        cacheReadTokens,
-        cacheWriteTokens,
-        costUsd,
-      } = toUsage(row)
-      return {
-        at: createdAt,
-        agent,
-        ticketId,
-        boardId,
-        inputTokens,
-        outputTokens,
-        cacheReadTokens,
-        cacheWriteTokens,
-        costUsd,
-      }
-    })
+  const usage = queryUsage('created_at >= ?', since).map((run): OverviewUsage => {
+    const counts = {
+      inputTokens: run.inputTokens,
+      outputTokens: run.outputTokens,
+      cacheReadTokens: run.cacheReadTokens,
+      cacheWriteTokens: run.cacheWriteTokens,
+      costUsd: run.costUsd,
+    }
+    return {
+      at: run.createdAt,
+      agent: run.agent,
+      ticketId: run.ticketId,
+      boardId: run.boardId,
+      ...counts,
+      // Runs that didn't report their models ran the one in the agent's name, if it has one.
+      models: run.models.length ? run.models : [{ model: workerModel(run.agent) ?? UNKNOWN_MODEL, ...counts }],
+    }
+  })
   const usageBy = new Map<string, UsageTotals>()
   const tokensOn = new Map<string, number>()
   for (const run of usage) {
