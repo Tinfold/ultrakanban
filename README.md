@@ -162,7 +162,7 @@ afterwards. Logs: `journalctl --user -u ultrakanban-agent -u 'ultrakanban-agent@
 the clone and each other one in its own git worktree of it (`boards/<board>/worktrees/<n>`), so their branches and
 files never get in each other's way. The loops share the board's state and lock each ticket while they look at it or
 work it, so two runs never work the same ticket, and when one runs out of Claude usage they all wait. Changing the
-setting restarts the board's loops, which stops runs in progress (they are picked up again). The boards themselves
+setting restarts the board's loops, which stops runs in progress (they are resumed, see below). The boards themselves
 also run side by side, with no limit across boards: three enabled boards with two parallel runs each can mean six
 agents working at once, all on your `claude` login and its usage limits.
 
@@ -203,7 +203,17 @@ isn't from the code.
 A failed run saves nothing and is retried with backoff (`RETRY_SECONDS`, doubling, up to `MAX_ATTEMPTS` in a row,
 then again when new feedback arrives), with a ticket note saying why it failed. Running out of Claude usage doesn't
 count as a failure: the note quotes claude's limit message, and the loop starts no runs on any ticket until the time
-the message says the limit resets. Other settings are listed at the top of the script. It needs `curl`, `jq`,
+the message says the limit resets.
+
+Runs that don't finish pick up where they left off. Each run is a `claude` session whose id the loop keeps with the
+ticket until the run ends. When a run is cut short by the usage limit, or by the loop stopping (restarting the service,
+changing the board's agent settings, a reboot or a crash), the ticket's next run resumes that session with
+`claude --resume`, so it still knows what it read, decided and did, even when another of the board's loops picks it
+up. (A run that failed or timed out gets a new session instead, since resuming it would likely fail the same way.) The
+work such a run left in the checkout is kept too: before the loop cleans a checkout it saves an unfinished run's
+branch, local commits and uncommitted changes, untracked files included, under `refs/ultrakanban/work/<ticket>` in
+the board's clone, and puts them back before the ticket's next run, telling the agent. Worktrees removed when
+**Parallel runs** goes down have theirs saved first. Other settings are listed at the top of the script. It needs `curl`, `jq`,
 `timeout`, git, an authenticated `gh` and the skill.
 
 **Permissions:** the loop passes `--dangerously-skip-permissions`, so with the agent switched on, `claude` runs
