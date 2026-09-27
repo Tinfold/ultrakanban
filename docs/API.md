@@ -223,8 +223,8 @@ The loop runs Claude Code with `agentModel` and `agentEffort` and claims tickets
 and `agentEffort` override the board's for that ticket: the loop runs it with them and under that name.
 `agentConcurrency` is how many tickets the agent works at once: the host runs that many loops, each in its own git
 worktree of the board's clone, and never two on the same ticket. With `agentBacklog` on, the agent takes new tickets
-from the `Backlog` column once the `Todo` column has none left (the loop's `TODO_COLUMN` and `BACKLOG_COLUMN` name
-them). With `agentAllSkills` off, runs only get the ultrakanban skill, unless the repository has skills of its own.
+from the `Backlog` column once the `Todo` column has none left and the `In progress` column holds fewer than
+`agentConcurrency` tickets (the loop's `TODO_COLUMN`, `BACKLOG_COLUMN` and `IN_PROGRESS_COLUMN` name them). With `agentAllSkills` off, runs only get the ultrakanban skill, unless the repository has skills of its own.
 
 ## Columns and tags
 
