@@ -150,7 +150,9 @@ Then, per board, open **Board menu → Board settings**, set the **GitHub reposi
 create one on GitHub with the server's login and link it) and switch on
 **Run the agent on this board** (or `PATCH /api/boards/:id` with `githubRepo` and `agentEnabled`). The supervisor
 ([`scripts/agent-supervisor.sh`](scripts/agent-supervisor.sh)) checks the boards every 30 seconds and keeps one
-`ultrakanban-agent@<board>` unit running per enabled board. It stops the loop when the board is switched off or
+`ultrakanban-agent@<board>` unit running per enabled board. Each loop runs one `claude -p` at a time, but the loops
+of different boards run side by side, with no limit across boards: three enabled boards can mean three agents working
+at once, all on your `claude` login and its usage limits. It stops the loop when the board is switched off or
 deleted, and systemd restarts a loop that dies, with backoff up to 15 minutes. Each board gets its own clone,
 made with `gh repo clone`, under `~/.local/share/ultrakanban-agent/boards/<board>/repo`; your own working copies
 are never touched. Before every run the loop fetches and checks out the default branch (or, for feedback on a
