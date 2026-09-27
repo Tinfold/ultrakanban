@@ -177,6 +177,10 @@ export const releaseTicketSchema = z.object({
   force: z.boolean().optional(),
 })
 
+export const releaseIdleSchema = z.object({
+  moveTo: ref,
+})
+
 export const claimNextSchema = z.object({
   agent: name,
   column: ref,
@@ -281,6 +285,7 @@ export type CheckItemInput = z.input<typeof checkItemSchema>
 export type MoveTicketInput = z.input<typeof moveTicketSchema>
 export type ClaimTicketInput = z.input<typeof claimTicketSchema>
 export type ReleaseTicketInput = z.input<typeof releaseTicketSchema>
+export type ReleaseIdleInput = z.input<typeof releaseIdleSchema>
 export type SubmitForReviewInput = z.input<typeof submitForReviewSchema>
 export type ClaimNextInput = z.input<typeof claimNextSchema>
 export type MergeRunInput = z.input<typeof mergeRunSchema>

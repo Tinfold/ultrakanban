@@ -10,6 +10,7 @@ export const queryKeys = {
   attachments: (ticketId: string) => ['attachments', ticketId] as const,
   allAttachments: ['attachments'] as const,
   github: ['github'] as const,
+  idleTickets: (columnId: string) => ['idle-tickets', columnId] as const,
   mergePlan: (boardId: string) => ['merge-plan', boardId] as const,
   mergeRun: (boardId: string) => ['merge-run', boardId] as const,
   overview: (days: OverviewRange) => ['overview', days] as const,
@@ -33,6 +34,15 @@ export const useTicketAttachments = (ticketId: string) =>
 /** Keeps showing the previous range while another one loads. */
 export const useOverview = (days: OverviewRange) =>
   useQuery({ queryKey: queryKeys.overview(days), queryFn: () => api.overview(days), placeholderData: keepPreviousData })
+
+/** A column's tickets no agent is working on. Checked every minute, since tickets become idle as time passes. */
+export const useIdleTickets = (columnId: string, enabled: boolean) =>
+  useQuery({
+    queryKey: queryKeys.idleTickets(columnId),
+    queryFn: () => api.idleTickets(columnId),
+    enabled,
+    refetchInterval: 60_000,
+  })
 
 /** Asks GitHub about every pull request in review, so it is only loaded while needed. */
 export const useMergePlan = (boardId: string, enabled: boolean) =>

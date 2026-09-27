@@ -82,6 +82,13 @@ export function useBoardActions(boardId: string) {
           () => api.deleteColumn(columnId, moveTicketsTo),
           (d) => updates.removeColumn(d, columnId, moveTicketsTo),
         ),
+      /** Unassigns the column's idle tickets and moves them to another column. */
+      releaseIdleTickets: async (columnId: string, moveTo: string) => {
+        const released = await run(() => api.releaseIdleTickets(columnId, moveTo))
+        await queryClient.invalidateQueries({ queryKey: queryKeys.idleTickets(columnId) })
+        if (released) toast.success(`Moved ${released.length} ticket${released.length === 1 ? '' : 's'}`)
+        return released
+      },
 
       createTag: (input: CreateTagInput) => run(() => api.createTag(boardId, input), undefined, updates.addTag),
       updateTag: (tagId: string, patch: updates.TagPatch) =>

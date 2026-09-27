@@ -30,7 +30,9 @@
 # state, and it is claimed again from the todo column like any other ticket. While a run is going, the loop checks its
 # ticket every TICKET_CHECK_SECONDS, and stops the run when someone else takes the ticket away from the agent: moves it
 # back to the queue like that, or to the done or cancelled column, unassigns or reassigns it, or deletes it. Moving a
-# ticket into the review column, or tickets the agent doesn't hold, changes nothing for the loop.
+# ticket into the review column, or tickets the agent doesn't hold, changes nothing for the loop. Each of those checks
+# also sends the board a heartbeat for the ticket (POST /tickets/:id/heartbeat): the board counts tickets without one
+# (and without other activity) for 10 minutes as idle, and offers to move them back to the todo column.
 #
 # Before each run the loop takes a snapshot of what it hands over: the newest ticket activity id, the newest pull
 # request comment, review and inline comment ids, and the failing checks and conflict state of the pull request's
@@ -85,7 +87,8 @@
 #   CANCELLED_COLUMN    column for tickets whose pull request was closed without merging (default: Cancelled)
 #   IDLE_SECONDS        wait between rounds when there is nothing to do (default: 300)
 #   TICKET_TIMEOUT      stop a run that takes longer than this, as accepted by timeout(1) (default: 4h)
-#   TICKET_CHECK_SECONDS  how often a run's ticket is checked for having been taken away from the agent (default: 30)
+#   TICKET_CHECK_SECONDS  how often a run's ticket is checked for having been taken away from the agent, and a
+#                       heartbeat sent for it; keep it well under 10 minutes (default: 30)
 #   RETRY_SECONDS       wait before retrying a failed run, doubled after each failure (default: 600)
 #   MAX_ATTEMPTS        failed runs in a row before waiting for new feedback (default: 3)
 #   MAX_CI_RUNS         runs in a row started only by failing CI, with no human feedback between (default: 2)

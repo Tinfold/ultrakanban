@@ -177,6 +177,10 @@ const MIGRATIONS = [
   -- Whether the board's agent runs load every skill, not only the ultrakanban skill (see scripts/agent-loop.sh).
   ALTER TABLE boards ADD COLUMN agent_all_skills INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  -- When an agent last said it is working on the ticket (POST /tickets/:id/heartbeat); not a change to the ticket.
+  ALTER TABLE tickets ADD COLUMN agent_seen_at TEXT;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'
