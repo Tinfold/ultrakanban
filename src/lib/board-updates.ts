@@ -7,6 +7,7 @@ import {
   type Tag,
   type Ticket,
 } from '@shared/domain'
+import { pendingDeletes } from './pending-deletes'
 
 export type BoardPatch = Partial<
   Pick<
@@ -83,6 +84,22 @@ export const removeTicket = (detail: BoardDetail, ticketId: string): BoardDetail
   ...detail,
   tickets: detail.tickets.filter((ticket) => ticket.id !== ticketId),
 })
+
+export function withoutPendingDeletes(detail: BoardDetail): BoardDetail {
+  const tickets = detail.tickets.filter((ticket) => !pendingDeletes.has(ticket.id))
+  return tickets.length === detail.tickets.length ? detail : { ...detail, tickets }
+}
+
+/** Where a ticket is: its column and its index there, which `moveTicket` takes to put it back. */
+export function placementOf(detail: BoardDetail, ticketId: string) {
+  const ticket = detail.tickets.find((candidate) => candidate.id === ticketId)
+  if (!ticket) return undefined
+  const position = detail.tickets
+    .filter((other) => other.columnId === ticket.columnId)
+    .sort(byPosition)
+    .findIndex((other) => other.id === ticketId)
+  return { columnId: ticket.columnId, position }
+}
 
 export function moveTicket(detail: BoardDetail, ticketId: string, columnId: string, position?: number): BoardDetail {
   const ids = detail.tickets

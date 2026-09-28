@@ -1,6 +1,7 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import type { OverviewRange } from '@shared/domain'
 import { api } from '@/lib/api'
+import { withoutPendingDeletes } from '@/lib/board-updates'
 
 export const queryKeys = {
   boards: ['boards'] as const,
@@ -19,8 +20,14 @@ export const queryKeys = {
 
 export const useBoards = () => useQuery({ queryKey: queryKeys.boards, queryFn: api.listBoards })
 
+/** Tickets waiting to be deleted stay hidden, even when the board is refetched meanwhile. */
 export const useBoard = (boardId: string) =>
-  useQuery({ queryKey: queryKeys.board(boardId), queryFn: () => api.getBoard(boardId), retry: false })
+  useQuery({
+    queryKey: queryKeys.board(boardId),
+    queryFn: () => api.getBoard(boardId),
+    select: withoutPendingDeletes,
+    retry: false,
+  })
 
 export const useTicketActivity = (ticketId: string) =>
   useQuery({ queryKey: queryKeys.activity(ticketId), queryFn: () => api.listActivity(ticketId) })
