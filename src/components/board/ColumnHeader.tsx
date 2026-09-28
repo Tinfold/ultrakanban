@@ -3,6 +3,7 @@ import {
   ArrowRightIcon,
   GaugeIcon,
   ListRestartIcon,
+  GitMergeConflictIcon,
   GitMergeIcon,
   MoreHorizontalIcon,
   PaletteIcon,
@@ -64,6 +65,13 @@ export function ColumnHeader({ column, ticketCount, onAddTicket, handleProps }: 
         ticket.columnId === column.id &&
         (ticket.pullRequest?.state === 'open' || ticket.pullRequest?.state === 'unknown'),
     )
+  const conflicts =
+    column.id === detail.board.reviewColumnId
+      ? detail.tickets.filter(
+          (ticket) =>
+            ticket.columnId === column.id && ticket.pullRequest?.state === 'open' && ticket.pullRequest.conflicts,
+        ).length
+      : 0
 
   // Idle tickets go back to the todo column, or else the column before this one.
   const idleTarget = WORKING_COLUMN.test(column.name)
@@ -125,6 +133,19 @@ export function ColumnHeader({ column, ticketCount, onAddTicket, handleProps }: 
           onClick={() => setMerging(true)}
         >
           <GitMergeIcon />
+        </Button>
+      )}
+      {conflicts > 0 && (
+        <Button
+          size="xs"
+          variant="ghost"
+          className="gap-1 px-1.5 text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
+          aria-label={`Ask the agent to fix the merge conflicts of ${conflicts} ticket${conflicts === 1 ? '' : 's'}`}
+          title="Fix conflicts: ask the agent to fix these merge conflicts now"
+          onClick={() => void actions.fixConflicts()}
+        >
+          <GitMergeConflictIcon />
+          Fix <span className="tabular-nums">{conflicts}</span>
         </Button>
       )}
       {canRelease && (

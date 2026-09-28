@@ -543,3 +543,24 @@ export function addComment(id: string, body: string, actor: string) {
   touchBoard(ticket.boardId)
   return logActivity(id, actor, 'comment', { body })
 }
+
+export const FIX_CONFLICTS_COMMENT =
+  'The pull request has merge conflicts with its base branch. Please fix them: merge the base branch into the ' +
+  "pull request's branch, resolve the conflicts and push."
+
+/**
+ * Asks for the merge conflicts of the review column's open pull requests to be fixed, with a comment on each of their
+ * tickets: new feedback for the agent that holds it. Returns the tickets commented on.
+ */
+export function requestConflictFixes(boardId: string, actor: string): Ticket[] {
+  const review = workflowColumns(boardId).review
+  if (!review) throw badRequest('The board has no review column')
+  const tickets = sql
+    .all<TicketRow>(
+      `${SELECT_TICKETS} WHERE t.column_id = ? AND t.pr_state = 'open' AND t.pr_conflicts = 1 ORDER BY t.position`,
+      review.id,
+    )
+    .map(toTicket)
+  for (const ticket of tickets) addComment(ticket.id, FIX_CONFLICTS_COMMENT, actor)
+  return tickets.map((ticket) => getTicket(ticket.id))
+}

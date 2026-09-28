@@ -18,6 +18,8 @@ priorities, due dates, checklists, comments and an activity log, backed by SQLit
 - **Merge all**: merge every pull request in review with one click, one at a time and in an order that avoids
   conflicts (stacked pull requests after the ones they build on); any that conflict after earlier merges are skipped
   for their agent to resolve
+- **Fix conflicts**: ask the agents to fix the merge conflicts of the pull requests in review with one click (the
+  conflict button on the review column); it comments on each of those tickets and wakes the agent loops up
 - **Quick merge**: merge a single ticket's pull request from its card in the review column
 - **Auto-merge**: optionally, per board, merge pull requests in review by themselves once they have no conflicts,
   every check has passed and every checklist item of their ticket is checked
@@ -205,7 +207,8 @@ don't count: the agent posts from the same GitHub account as you, so the skill m
 comment with `<!-- ultrakanban:<agent> -->`, which the loop ignores. A pull request closed without merging moves
 its ticket to the `Cancelled` column (`CANCELLED_COLUMN`; add it to the board, the loop won't fall back to Todo)
 and unassigns it, so it is never picked up again. When none of its tickets needs work, it claims a new Todo ticket,
-and when there is nothing to do at all it waits `IDLE_SECONDS` (60 under the supervisor).
+and when there is nothing to do at all it waits `IDLE_SECONDS` (60 under the supervisor), or until the board wakes it
+up: the review column's "fix conflicts" button does.
 
 You can drag the agent's tickets like any other. A ticket you move back to Todo (`TODO_COLUMN`), or to a column
 before it such as Backlog, goes back to the queue: the loop releases it, with a note, and forgets its state, so it is
