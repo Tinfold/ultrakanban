@@ -22,6 +22,8 @@ export interface TicketFilter {
 export interface ViewPrefs {
   sort: SortKey
   filter: TicketFilter
+  /** Whether archived tickets (long done) are shown; search finds them either way. */
+  showArchived?: boolean
 }
 
 export const DEFAULT_VIEW: ViewPrefs = {
@@ -47,9 +49,17 @@ function matchesQuery(ticket: Ticket, query: string, tagsById: Map<string, Tag>)
   )
 }
 
-export function filterTickets(tickets: Ticket[], filter: TicketFilter, query: string, tagsById: Map<string, Tag>) {
+export function filterTickets(
+  tickets: Ticket[],
+  filter: TicketFilter,
+  query: string,
+  tagsById: Map<string, Tag>,
+  showArchived = false,
+) {
+  const searching = query.trim() !== ''
   return tickets.filter(
     (ticket) =>
+      (showArchived || searching || !ticket.archived) &&
       (!filter.priorities.length || filter.priorities.includes(ticket.priority)) &&
       (!filter.tagIds.length || filter.tagIds.some((tagId) => ticket.tagIds.includes(tagId))) &&
       (!filter.assignees.length || filter.assignees.includes(ticket.assignee)) &&

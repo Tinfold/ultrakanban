@@ -320,3 +320,75 @@ describe('boards', () => {
     assert.deepEqual(events, [boardId])
   })
 })
+
+describe('archiving done tickets', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000
+
+  /** Runs `fn` with the clock moved forward by the given days. */
+  async function later<T>(days: number, fn: () => Promise<T>) {
+    mock.timers.enable({ apis: ['Date'], now: Date.now() + days * DAY_MS })
+    try {
+      return await fn()
+    } finally {
+      mock.timers.reset()
+    }
+  }
+
+  const titles = (tickets: Ticket[]) => tickets.map((ticket) => ticket.title).sort()
+
+  async function setUp() {
+    await call('PATCH', `/boards/${boardId}`, { doneColumn: 'Done', archiveDoneDays: 7 })
+    const done = await addTicket({ title: 'Done', column: 'Doing' })
+    await call('POST', `/tickets/${done.id}/move`, { column: 'Done', force: true })
+    await addTicket({ title: 'Doing', column: 'Doing' })
+    return done
+  }
+
+  test('leaves tickets done for longer than the board setting out of the board', async () => {
+    await setUp()
+
+    const board = await later(8, () => call<BoardDetail>('GET', `/boards/${boardId}`))
+    assert.equal(board.body.board.archiveDoneDays, 7)
+    assert.deepEqual(titles(board.body.tickets), ['Doing'])
+    assert.equal(board.body.archivedCount, 1)
+
+    const all = await later(8, () => call<BoardDetail>('GET', `/boards/${boardId}?archived=true`))
+    assert.deepEqual(all.body.tickets.map((ticket) => [ticket.title, ticket.archived]).sort(), [
+      ['Doing', false],
+      ['Done', true],
+    ])
+    assert.equal(all.body.archivedCount, 0)
+
+    const recent = await later(6, () => call<BoardDetail>('GET', `/boards/${boardId}`))
+    assert.deepEqual(titles(recent.body.tickets), ['Doing', 'Done'])
+  })
+
+  test('keeps archived tickets in the ticket list and search', async () => {
+    const done = await setUp()
+
+    const search = await later(8, () => call<Ticket[]>('GET', `/boards/${boardId}/tickets?q=done`))
+    assert.deepEqual(titles(search.body), ['Done'])
+    assert.equal(search.body[0].archived, true)
+    assert.equal((await later(8, () => call<Ticket>('GET', `/tickets/${done.id}`))).body.archived, true)
+  })
+
+  test('counts from when the ticket entered the done column, and never archives without the setting', async () => {
+    const old = await addTicket({ title: 'Old', column: 'Doing' })
+    await later(30, async () => {
+      await call('PATCH', `/boards/${boardId}`, { doneColumn: 'Done', archiveDoneDays: 7 })
+      const moved = await call<Ticket>('POST', `/tickets/${old.id}/move`, { column: 'Done', force: true })
+      assert.equal(moved.body.archived, false)
+    })
+    assert.equal((await later(36, () => call<Ticket>('GET', `/tickets/${old.id}`))).body.archived, false)
+    assert.equal((await later(38, () => call<Ticket>('GET', `/tickets/${old.id}`))).body.archived, true)
+
+    await call('PATCH', `/boards/${boardId}`, { archiveDoneDays: null })
+    assert.equal((await later(38, () => call<Ticket>('GET', `/tickets/${old.id}`))).body.archived, false)
+  })
+
+  test('rejects invalid archive ages', async () => {
+    for (const archiveDoneDays of [0, 1.5, -1, '7']) {
+      assert.equal((await call('PATCH', `/boards/${boardId}`, { archiveDoneDays })).status, 400)
+    }
+  })
+})

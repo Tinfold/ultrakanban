@@ -21,6 +21,7 @@ interface BoardRow {
   agent_backlog: number
   agent_all_skills: number
   auto_merge: number
+  archive_done_days: number | null
   ticket_count: number
   created_at: string
   updated_at: string
@@ -45,6 +46,7 @@ const toBoard = (row: BoardRow): BoardSummary => ({
   agentBacklog: row.agent_backlog === 1,
   agentAllSkills: row.agent_all_skills === 1,
   autoMerge: row.auto_merge === 1,
+  archiveDoneDays: row.archive_done_days,
   ticketCount: row.ticket_count,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -60,8 +62,17 @@ export function getBoard(id: string): BoardSummary {
   return toBoard(row)
 }
 
-export function getBoardDetail(id: string): BoardDetail {
-  return { board: getBoard(id), columns: listColumns(id), tags: listTags(id), tickets: listTickets(id) }
+/** The board with its tickets, leaving out archived ones unless `archived` is set. */
+export function getBoardDetail(id: string, { archived = false } = {}): BoardDetail {
+  const tickets = listTickets(id)
+  const shown = archived ? tickets : tickets.filter((ticket) => !ticket.archived)
+  return {
+    board: getBoard(id),
+    columns: listColumns(id),
+    tags: listTags(id),
+    tickets: shown,
+    archivedCount: tickets.length - shown.length,
+  }
 }
 
 export function createBoard(input: CreateBoardInput): BoardSummary {
@@ -88,6 +99,7 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     agentBacklog,
     agentAllSkills,
     autoMerge,
+    archiveDoneDays,
   } = input
   return updateBoard(id, {
     reviewColumn,
@@ -101,6 +113,7 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     agentBacklog,
     agentAllSkills,
     autoMerge,
+    archiveDoneDays,
   })
 }
 
@@ -121,6 +134,7 @@ export function updateBoard(id: string, input: UpdateBoardInput): BoardSummary {
     agent_backlog: input.agentBacklog === undefined ? undefined : Number(input.agentBacklog),
     agent_all_skills: input.agentAllSkills === undefined ? undefined : Number(input.agentAllSkills),
     auto_merge: input.autoMerge === undefined ? undefined : Number(input.autoMerge),
+    archive_done_days: input.archiveDoneDays,
   })
   const board = getBoard(id)
   if (board.agentEnabled && !board.githubRepo) {
