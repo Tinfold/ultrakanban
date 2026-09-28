@@ -113,6 +113,9 @@
 #   AGENT_LOOP_CLEAN    1 when running in a dedicated clone: before each run the loop fetches, discards local
 #                       changes and checks out the default branch (or the pull request's branch for feedback runs).
 #                       agent-board.sh sets it. Leave it unset in a working copy of your own.
+#   MAX_BUILD_GB        with AGENT_LOOP_CLEAN=1, the most GB of ignored files (build output such as target/ or
+#                       node_modules/) a checkout keeps between runs; over it, they are all removed before the next
+#                       run, which then builds from scratch. 0 never removes them (default: 20)
 #   LOOP_ID             label for this loop's log lines when several loops work the board (agent-board.sh numbers them)
 #   WATCH_FILES         files separated by ":"; when one of them changes, the loop exits with status 75 before its next
 #                       run, so it can be started again with the new version (agent-board.sh sets it to the installed
@@ -145,6 +148,7 @@ TICKET_CHECK_SECONDS=${TICKET_CHECK_SECONDS:-30}
 RETRY_SECONDS=${RETRY_SECONDS:-600}
 MAX_ATTEMPTS=${MAX_ATTEMPTS:-3}
 MAX_CI_RUNS=${MAX_CI_RUNS:-2}
+MAX_BUILD_GB=${MAX_BUILD_GB:-20}
 CLAIM_LIMIT=${CLAIM_LIMIT:-1}
 # Check output or annotations that mean CI itself didn't run, not that the code failed.
 INFRA_PATTERN='billing|spending limit|payments have failed|account is locked|account has been locked'

@@ -280,6 +280,11 @@ KANBAN=http://localhost:4317 BOARD=$BOARD AGENT_LOOP_CLEAN=1 ~/ultrakanban/scrip
 several tickets at once by hand, start one loop per checkout (the clone plus `git worktree add --detach` ones), with
 the same `BOARD`, agent settings and `STATE_DIR`.
 
+A reset keeps build output (ignored files such as `target/` or `node_modules/`) so builds stay incremental, until a
+checkout's ignored files pass `MAX_BUILD_GB` (default 20): then the loop removes them all before the next run. Each
+board's clone and worktree has its own, so a Rust board with several parallel runs could otherwise fill the disk.
+`MAX_BUILD_GB=0` keeps them.
+
 ## Development
 
 ```sh
