@@ -179,10 +179,18 @@ interface Ticket {
   version: number // increments on every change
   commentCount: number
   attachmentCount: number
+  run: AgentRun | null // the agent run working it right now, as its heartbeats tell (see below)
+  waitingSince: string | null // when its agent started waiting for an answer: the newest comment is its assignee's and it isn't in review or done
   movedAt: string // when it entered its current column
   archived: boolean // in the done column for longer than the board's archiveDoneDays (see Boards)
   createdAt: string
   updatedAt: string
+}
+
+interface AgentRun {
+  startedAt: string // its first heartbeat
+  seenAt: string // its latest heartbeat
+  step: string | null // what it is doing, as its agent last said
 }
 
 interface ChecklistItem {
@@ -280,6 +288,11 @@ happened on it (no activity) for 10 minutes. `scripts/agent-loop.sh` sends one e
 run is working the ticket; the board offers to move a working column's idle tickets back to its todo column, e.g.
 tickets whose agent stopped or crashed.
 
+Heartbeats also make up the ticket's `run`, which its card shows: a heartbeat starts a run unless one is going on,
+and can say what the run is doing (`step`; a heartbeat without one keeps the run's step). The run ends with
+`DELETE /tickets/:ticketId/heartbeat`, or after 10 minutes without a heartbeat. Cards show a run as stalled after 3
+minutes without one.
+
 ## Tickets
 
 | Method | Path                                   | Body / query                                                                                                                                                                               | Returns                                                                                                                                                                                                                                                                          |
@@ -293,7 +306,8 @@ tickets whose agent stopped or crashed.
 | POST   | `/tickets/:ticketId/move`              | `{ column: ref, position?, ifVersion?, force? }`                                                                                                                                           | `Ticket` (appended when `position` is omitted)                                                                                                                                                                                                                                   |
 | POST   | `/tickets/:ticketId/claim`             | `{ agent, moveTo?: ref, ifVersion? }`                                                                                                                                                      | `Ticket`; `409` if claimed by someone else (idempotent for the same agent)                                                                                                                                                                                                       |
 | POST   | `/tickets/:ticketId/release`           | `{ agent, moveTo?: ref, force? }`                                                                                                                                                          | `Ticket`; `409` if claimed by someone else unless `force`                                                                                                                                                                                                                        |
-| POST   | `/tickets/:ticketId/heartbeat`         |                                                                                                                                                                                            | `204`; says an agent is working on the ticket right now (not a change: nothing is logged)                                                                                                                                                                                        |
+| POST   | `/tickets/:ticketId/heartbeat`         | `{ step? }` (optional)                                                                                                                                                                     | `204`; says an agent is working on the ticket right now (not a change: nothing is logged)                                                                                                                                                                                        |
+| DELETE | `/tickets/:ticketId/heartbeat`         |                                                                                                                                                                                            | `204`; says the agent's run on the ticket has ended                                                                                                                                                                                                                              |
 | POST   | `/boards/:boardId/tickets/claim-next`  | `{ agent, column: ref, tags?: ref[], moveTo?: ref }`                                                                                                                                       | `Ticket`: highest priority, then earliest due date, then board order, among unassigned, unblocked tickets in `column` having all `tags` (see below)                                                                                                                              |
 | POST   | `/tickets/:ticketId/review`            | `{ agent, pullRequest?: url, comment?: markdown, ifVersion? }`                                                                                                                             | `Ticket`: links the pull request, assigns `agent`, posts `comment`, moves to the review column; `409` if claimed by someone else, `400` if the board has no review column, or without `pullRequest` unless the ticket is a `question` answered in `comment` (or already has one) |
 | POST   | `/tickets/:ticketId/pull-request/sync` |                                                                                                                                                                                            | `Ticket` after checking its pull request on GitHub now                                                                                                                                                                                                                           |
@@ -387,6 +401,7 @@ interface Overview {
       column
       state: 'working' | 'review'
       since: string
+      waitingSince: string | null // as on the ticket
       pullRequest: { url; state } | null
     }[]
     workedMs: number // within the range; ongoing work counts up to generatedAt

@@ -273,6 +273,56 @@ describe('idle tickets', () => {
     assert.equal((await call('POST', '/tickets/missing/heartbeat')).status, 404)
   })
 
+  test('shows the run working a ticket, from its first heartbeat until it ends', async () => {
+    const ticket = await addTicket({ title: 'A' })
+    const run = async () => (await call<Ticket>('GET', `/tickets/${ticket.id}`)).body.run
+    const events: string[] = []
+    const unsubscribe = subscribe((event) => events.push(event.boardId))
+    assert.equal(ticket.run, null)
+
+    await call('POST', `/tickets/${ticket.id}/heartbeat`, { step: 'Working the ticket' })
+    const started = await run()
+    assert.equal(started?.step, 'Working the ticket')
+    assert.equal(started?.seenAt, started?.startedAt)
+
+    const later1 = await later(1, async () => {
+      // Without a step, a heartbeat keeps the run's step, and nothing changes that boards need to show.
+      assert.equal((await call('POST', `/tickets/${ticket.id}/heartbeat`)).status, 204)
+      return run()
+    })
+    assert.equal(later1?.startedAt, started?.startedAt)
+    assert.equal(later1?.step, 'Working the ticket')
+    assert.ok(later1!.seenAt > started!.seenAt)
+    assert.equal(events.length, 1)
+
+    await call('POST', `/tickets/${ticket.id}/heartbeat`, { step: 'Fixing CI' })
+    assert.equal((await run())?.step, 'Fixing CI')
+    assert.equal(events.length, 2)
+
+    assert.equal((await call('DELETE', `/tickets/${ticket.id}/heartbeat`)).status, 204)
+    assert.equal(await run(), null)
+    assert.equal(events.length, 3)
+    unsubscribe()
+    assert.equal((await call('DELETE', '/tickets/missing/heartbeat')).status, 404)
+    assert.equal((await call('POST', `/tickets/${ticket.id}/heartbeat`, { step: 'x'.repeat(201) })).status, 400)
+  })
+
+  test('a run without a heartbeat for a while is over, and the next heartbeat starts a new one', async () => {
+    const ticket = await addTicket({ title: 'A' })
+    await call('POST', `/tickets/${ticket.id}/heartbeat`, { step: 'Working the ticket' })
+    const started = (await call<Ticket>('GET', `/tickets/${ticket.id}`)).body.run!
+
+    const minutes = AGENT_IDLE_MINUTES + 1
+    const [stale, restarted] = await later(minutes, async () => {
+      const stale = (await call<Ticket>('GET', `/tickets/${ticket.id}`)).body.run
+      await call('POST', `/tickets/${ticket.id}/heartbeat`)
+      return [stale, (await call<Ticket>('GET', `/tickets/${ticket.id}`)).body.run]
+    })
+    assert.equal(stale, null)
+    assert.ok(restarted!.startedAt > started.startedAt)
+    assert.equal(restarted!.step, null)
+  })
+
   test('refuses to move idle tickets into their own column', async () => {
     const column = await doingColumn()
     const res = await call('POST', `/columns/${column.id}/release-idle`, { moveTo: 'Doing' })

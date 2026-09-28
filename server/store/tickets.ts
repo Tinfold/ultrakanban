@@ -1,6 +1,7 @@
 import {
   AGENT_IDLE_MINUTES,
   type AgentEffort,
+  type AgentRun,
   type CheckStatus,
   type Column,
   parsePullRequestUrl,
@@ -18,6 +19,7 @@ import type {
   ClaimNextInput,
   ClaimTicketInput,
   CreateTicketInput,
+  HeartbeatInput,
   ListTicketsQuery,
   MoveTicketInput,
   ReleaseIdleInput,
@@ -27,6 +29,7 @@ import type {
 } from '../../shared/schemas.ts'
 import { newId, now, reorder, sql, touchBoard, updateRow } from '../db.ts'
 import { badRequest, conflict, HttpError, notFound } from '../errors.ts'
+import { publish } from '../events.ts'
 import { logActivity } from './activity.ts'
 import { getColumn, listColumns, resolveColumn, workflowColumns } from './columns.ts'
 import { resolveTags } from './tags.ts'
@@ -49,6 +52,9 @@ interface TicketRow {
   pr_conflicts: number
   pr_checks: string | null
   pr_checked_at: string | null
+  agent_seen_at: string | null
+  run_started_at: string | null
+  run_step: string | null
   position: number
   version: number
   moved_at: string
@@ -58,13 +64,27 @@ interface TicketRow {
   tag_ids: string | null
   comment_count: number
   attachment_count: number
+  waiting_since: string | null
 }
+
+/**
+ * When the ticket's agent started waiting for an answer: the newest comment on it is from its assignee, while it's
+ * worked (not in the review or done column, and its pull request wasn't closed). Null when it isn't waiting.
+ * Needs the ticket as `t`.
+ */
+export const WAITING_SINCE = `
+  (SELECT CASE WHEN a.actor = t.assignee THEN a.created_at END
+   FROM activity a JOIN boards b ON b.id = t.board_id
+   WHERE a.ticket_id = t.id AND a.type = 'comment'
+     AND t.column_id IS NOT b.review_column_id AND t.column_id IS NOT b.done_column_id AND t.pr_state != 'closed'
+   ORDER BY a.id DESC LIMIT 1)`
 
 const SELECT_TICKETS = `
   SELECT t.*,
     (SELECT group_concat(tag_id) FROM ticket_tags WHERE ticket_id = t.id) AS tag_ids,
     (SELECT count(*) FROM activity WHERE ticket_id = t.id AND type = 'comment') AS comment_count,
     (SELECT count(*) FROM attachments WHERE ticket_id = t.id) AS attachment_count,
+    ${WAITING_SINCE} AS waiting_since,
     (SELECT archive_done_days FROM boards WHERE id = t.board_id AND done_column_id = t.column_id) AS archive_days
   FROM tickets t`
 
@@ -82,6 +102,15 @@ function toPullRequest(url: string, row: TicketRow): PullRequest {
     checks: row.pr_checks as CheckStatus | null,
     checkedAt: row.pr_checked_at,
   }
+}
+
+type RunRow = Pick<TicketRow, 'agent_seen_at' | 'run_started_at' | 'run_step'>
+
+/** The run working a ticket: one has started, hasn't ended, and sent a heartbeat within `AGENT_IDLE_MINUTES`. */
+function runOf(row: RunRow): AgentRun | null {
+  const { agent_seen_at: seenAt, run_started_at: startedAt, run_step: step } = row
+  if (!startedAt || !seenAt || Date.parse(seenAt) < Date.now() - AGENT_IDLE_MINUTES * 60_000) return null
+  return { startedAt, seenAt, step }
 }
 
 const toTicket = (row: TicketRow): Ticket => ({
@@ -102,6 +131,8 @@ const toTicket = (row: TicketRow): Ticket => ({
   version: row.version,
   commentCount: row.comment_count,
   attachmentCount: row.attachment_count,
+  run: runOf(row),
+  waitingSince: row.waiting_since,
   movedAt: row.moved_at,
   archived: row.archive_days !== null && Date.parse(row.moved_at) < Date.now() - row.archive_days * DAY_MS,
   createdAt: row.created_at,
@@ -397,10 +428,41 @@ export function releaseTicket(id: string, input: ReleaseTicketInput): Ticket {
   return getTicket(id)
 }
 
-/** Notes that an agent is working on the ticket right now. Not a change to the ticket: nothing is logged or bumped. */
-export function recordHeartbeat(id: string) {
-  const { changes } = sql.run('UPDATE tickets SET agent_seen_at = ? WHERE id = ?', now(), id)
-  if (!changes) throw notFound('Ticket', id)
+const getRunRow = (id: string) => {
+  const row = sql.get<RunRow & { board_id: string }>(
+    'SELECT board_id, agent_seen_at, run_started_at, run_step FROM tickets WHERE id = ?',
+    id,
+  )
+  if (!row) throw notFound('Ticket', id)
+  return row
+}
+
+/**
+ * Notes that an agent is working on the ticket right now, starting a run unless one is going on (see `AgentRun`), and
+ * what the run is doing if the agent says (it keeps its step otherwise). Not a change to the ticket: nothing is logged
+ * or bumped, but boards are told when a run starts or its step changes, so they show it.
+ */
+export function recordHeartbeat(id: string, input: HeartbeatInput) {
+  const row = getRunRow(id)
+  const run = runOf(row)
+  const at = now()
+  const step = input.step === undefined ? (run?.step ?? null) : input.step || null
+  sql.run(
+    'UPDATE tickets SET agent_seen_at = ?, run_started_at = ?, run_step = ? WHERE id = ?',
+    at,
+    run?.startedAt ?? at,
+    step,
+    id,
+  )
+  if (!run || step !== run.step) publish({ boardId: row.board_id })
+}
+
+/** Ends the run working the ticket, if any: the agent says it has stopped. */
+export function endRun(id: string) {
+  const row = getRunRow(id)
+  if (!row.run_started_at) return
+  sql.run('UPDATE tickets SET run_started_at = NULL, run_step = NULL WHERE id = ?', id)
+  publish({ boardId: row.board_id })
 }
 
 /**

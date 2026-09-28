@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import type { Ticket } from '@shared/domain'
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { ColorDot } from '@/components/common/TagChip'
+import { WaitingBadge } from '@/components/common/WaitingBadge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import {
@@ -82,6 +83,7 @@ function TicketDetail({ ticket, onClose }: { ticket: Ticket; onClose: () => void
             <span className="truncate">{column.name}</span>
           </span>
         )}
+        <WaitingBadge ticket={ticket} className="ml-2 text-xs [&_svg]:size-3.5" />
         <div className="ml-auto flex items-center gap-0.5">
           <Button variant="ghost" size="icon-sm" aria-label="Copy link" onClick={copyLink}>
             {copied ? <CheckIcon /> : <LinkIcon />}

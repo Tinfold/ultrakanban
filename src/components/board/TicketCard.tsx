@@ -15,12 +15,14 @@ import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { PullRequestIcon } from '@/components/common/PullRequestIcon'
 import { TagChip } from '@/components/common/TagChip'
 import { UserAvatar } from '@/components/common/UserAvatar'
+import { WaitingBadge } from '@/components/common/WaitingBadge'
 import { dueState, formatDueDate, ticketRef } from '@/lib/format'
 import { checklistProgress } from '@/lib/markdown'
 import { CONFLICTS_HINT } from '@/lib/pull-request'
 import { cn } from '@/lib/utils'
 import { useBoardContext } from './board-context'
 import { QuickMergeButton } from './QuickMergeButton'
+import { RunStatus } from './RunStatus'
 
 const DUE_STYLES = {
   overdue: 'text-red-600 dark:text-red-400',
@@ -45,7 +47,8 @@ export function TicketCard({ ticket, overlay }: TicketCardProps) {
     checklist.total > 0 ||
     ticket.commentCount > 0 ||
     ticket.attachmentCount > 0 ||
-    ticket.pullRequest
+    ticket.pullRequest ||
+    ticket.waitingSince
   const canMerge =
     !overlay &&
     ticket.columnId === detail.board.reviewColumnId &&
@@ -73,6 +76,7 @@ export function TicketCard({ ticket, overlay }: TicketCardProps) {
       )}
       {hasMeta && (
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground [&_svg]:size-3">
+          <WaitingBadge ticket={ticket} />
           {blockers.length > 0 && (
             <span
               className="flex items-center gap-1 text-amber-600 dark:text-amber-400"
@@ -126,6 +130,7 @@ export function TicketCard({ ticket, overlay }: TicketCardProps) {
           {canMerge && <QuickMergeButton ticket={ticket} />}
         </div>
       )}
+      {ticket.run && <RunStatus run={ticket.run} />}
     </div>
   )
 }
