@@ -8,6 +8,7 @@ import {
   type Priority,
   type PullRequest,
   type PullRequestState,
+  QUESTION_TAG,
   type Ticket,
 } from '../../shared/domain.ts'
 import { BLOCKED_TAG, parseBlockers } from '../../shared/blockers.ts'
@@ -54,8 +55,10 @@ interface TicketRow {
   run_step: string | null
   position: number
   version: number
+  moved_at: string
   created_at: string
   updated_at: string
+  archive_days: number | null
   tag_ids: string | null
   comment_count: number
   attachment_count: number
@@ -65,7 +68,8 @@ const SELECT_TICKETS = `
   SELECT t.*,
     (SELECT group_concat(tag_id) FROM ticket_tags WHERE ticket_id = t.id) AS tag_ids,
     (SELECT count(*) FROM activity WHERE ticket_id = t.id AND type = 'comment') AS comment_count,
-    (SELECT count(*) FROM attachments WHERE ticket_id = t.id) AS attachment_count
+    (SELECT count(*) FROM attachments WHERE ticket_id = t.id) AS attachment_count,
+    (SELECT archive_done_days FROM boards WHERE id = t.board_id AND done_column_id = t.column_id) AS archive_days
   FROM tickets t`
 
 const BOARD_ORDER = 'ORDER BY (SELECT position FROM columns WHERE id = t.column_id), t.position'
@@ -111,9 +115,13 @@ const toTicket = (row: TicketRow): Ticket => ({
   commentCount: row.comment_count,
   attachmentCount: row.attachment_count,
   run: runOf(row),
+  movedAt: row.moved_at,
+  archived: row.archive_days !== null && Date.parse(row.moved_at) < Date.now() - row.archive_days * DAY_MS,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 })
+
+const DAY_MS = 24 * 60 * 60 * 1000
 
 const priorityRank = (priority: Priority) => PRIORITIES.indexOf(priority)
 
@@ -194,23 +202,40 @@ function place(ticket: Ticket, columnId: string, position?: number) {
     )
     .map((row) => row.id)
   ids.splice(position ?? ids.length, 0, ticket.id)
-  if (columnId !== ticket.columnId) sql.run('UPDATE tickets SET column_id = ? WHERE id = ?', columnId, ticket.id)
+  if (columnId !== ticket.columnId) {
+    sql.run('UPDATE tickets SET column_id = ?, moved_at = ? WHERE id = ?', columnId, now(), ticket.id)
+  }
   reorder('tickets', ids)
 }
 
-/** The board's done column only accepts tickets whose pull request is merged, unless forced. */
+/** Whether a ticket is tagged as a question (`QUESTION_TAG`), answered in a comment rather than a pull request. */
+function isQuestion(ticketId: string) {
+  return Boolean(
+    sql.get(
+      `SELECT 1 FROM ticket_tags tt JOIN tags g ON g.id = tt.tag_id WHERE tt.ticket_id = ? AND lower(g.name) = ?`,
+      ticketId,
+      QUESTION_TAG,
+    ),
+  )
+}
+
+/**
+ * The board's done column only accepts tickets whose pull request is merged, and questions without a pull request,
+ * unless forced.
+ */
 function assertCanEnter(
-  ticket: Pick<Ticket, 'boardId' | 'pullRequest'> & { columnId: string | null },
+  ticket: Pick<Ticket, 'boardId' | 'pullRequest'> & { id: string | null; columnId: string | null },
   target: Column,
   force = false,
 ) {
   if (force || target.id === ticket.columnId || ticket.pullRequest?.state === 'merged') return
   if (target.id !== workflowColumns(ticket.boardId).done?.id) return
+  if (!ticket.pullRequest && ticket.id && isQuestion(ticket.id)) return
   throw conflict(
     'pull_request_not_merged',
     ticket.pullRequest
       ? `Tickets enter "${target.name}" when their pull request is merged; ${ticket.pullRequest.url} is ${ticket.pullRequest.state}. It will move automatically once merged.`
-      : `Tickets enter "${target.name}" only with a merged pull request. Link one with POST /api/tickets/:id/review.`,
+      : `Tickets enter "${target.name}" only with a merged pull request, or as questions (tagged "${QUESTION_TAG}") without one. Link one with POST /api/tickets/:id/review.`,
     { ticket },
   )
 }
@@ -250,7 +275,7 @@ export function createTicket(boardId: string, input: CreateTicketInput, actor: s
   touchBoard(boardId)
   const column = input.column ? resolveColumn(boardId, input.column) : listColumns(boardId)[0]
   if (!column) throw badRequest('Board has no columns; create a column first')
-  assertCanEnter({ boardId, columnId: null, pullRequest: null }, column, input.force)
+  assertCanEnter({ id: null, boardId, columnId: null, pullRequest: null }, column, input.force)
 
   const { number } = sql.get<{ number: number }>(
     'UPDATE boards SET next_number = next_number + 1 WHERE id = ? RETURNING next_number - 1 AS number',
@@ -261,8 +286,8 @@ export function createTicket(boardId: string, input: CreateTicketInput, actor: s
   const timestamp = now()
   sql.run(
     `INSERT INTO tickets (id, board_id, column_id, number, title, description, priority, assignee, due_date,
-       agent_effort, agent_model, position, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       agent_effort, agent_model, position, moved_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     boardId,
     column.id,
@@ -275,6 +300,7 @@ export function createTicket(boardId: string, input: CreateTicketInput, actor: s
     input.agentEffort ?? null,
     input.agentModel ?? null,
     count,
+    timestamp,
     timestamp,
     timestamp,
   )
@@ -508,9 +534,17 @@ export function submitForReview(id: string, input: SubmitForReviewInput): Ticket
   }
   const { review } = workflowColumns(ticket.boardId)
   if (!review) throw badRequest('This board has no review column; choose one in the board settings')
+  if (!input.pullRequest && !ticket.pullRequest) {
+    if (!isQuestion(id)) {
+      throw badRequest(
+        `Submit a pull request for review, or tag the ticket "${QUESTION_TAG}" to answer it with a comment instead`,
+      )
+    }
+    if (!input.comment) throw badRequest('Give the answer to the question as the comment')
+  }
 
   touchBoard(ticket.boardId)
-  linkPullRequest(ticket, input.pullRequest, input.agent)
+  if (input.pullRequest) linkPullRequest(ticket, input.pullRequest, input.agent)
   assign(ticket, input.agent, input.agent)
   if (ticket.columnId !== review.id) relocate(ticket, review.id, undefined, input.agent)
   if (input.comment) logActivity(id, input.agent, 'comment', { body: input.comment })

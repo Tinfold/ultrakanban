@@ -117,6 +117,10 @@ curl -s -X POST $KANBAN/api/tickets/$TICKET/review \
 
 This links the pull request, keeps the ticket yours and moves it to the review column in one step.
 
+**Questions need no pull request.** A ticket tagged `question` asks for an answer, not a change: investigate, then
+submit it with the answer as the comment and no `pullRequest` (`{"agent":"<you>","comment":"<the answer>"}`). A
+person reads it and closes the ticket. Open a pull request only if the ticket also asks for a change.
+
 ## 6. Answer review feedback
 
 After submitting, check both places for feedback until the pull request is merged or you are told to stop.

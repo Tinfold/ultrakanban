@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import {
+  boardDetailQuerySchema,
   boardExportSchema,
   claimNextSchema,
   createBoardSchema,
@@ -54,7 +55,10 @@ export const boardRoutes = ({ pullRequests, mergeQueue }: AppServices) =>
         201,
       )
     })
-    .get('/:boardId', (c) => c.json(getBoardDetail(c.req.param('boardId'))))
+    .get('/:boardId', (c) => {
+      const query = boardDetailQuerySchema.parse({ archived: c.req.query('archived') })
+      return c.json(getBoardDetail(c.req.param('boardId'), query))
+    })
     .patch('/:boardId', async (c) => {
       const input = await readJson(c, updateBoardSchema)
       return c.json(transaction(() => updateBoard(c.req.param('boardId'), input)))

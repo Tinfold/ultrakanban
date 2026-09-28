@@ -28,6 +28,12 @@ export const AGENT_MAX_CONCURRENCY = 8
 export const AGENT_IDLE_MINUTES = 10
 
 /**
+ * Name of the tag that marks a ticket as a question (case-insensitive): it is answered in a comment rather than with a
+ * pull request, so it can go to review and then to the done column without one.
+ */
+export const QUESTION_TAG = 'question'
+
+/**
  * A run on a ticket looks stalled when its agent hasn't sent a heartbeat for this long. scripts/agent-loop.sh sends
  * one every 30 seconds by default (TICKET_CHECK_SECONDS).
  */
@@ -195,6 +201,11 @@ export interface BoardSummary {
    * no conflicts, every check passed and every checklist item of the ticket checked.
    */
   autoMerge: boolean
+  /**
+   * Days a ticket stays in the done column before it is archived: left out of the board (`GET /boards/:id`) unless
+   * asked for, but still found by the ticket list and search. Never archived when not set.
+   */
+  archiveDoneDays: number | null
   ticketCount: number
   createdAt: string
   updatedAt: string
@@ -242,6 +253,10 @@ export interface Ticket {
   attachmentCount: number
   /** The agent run working the ticket right now, if any (see `AgentRun`). */
   run: AgentRun | null
+  /** When the ticket entered its current column. */
+  movedAt: string
+  /** Whether it has been in the board's done column for longer than the board's `archiveDoneDays`. */
+  archived: boolean
   createdAt: string
   updatedAt: string
 }
@@ -264,6 +279,8 @@ export interface BoardDetail {
   columns: Column[]
   tags: Tag[]
   tickets: Ticket[]
+  /** Archived tickets left out of `tickets`; 0 when they were asked for. */
+  archivedCount: number
 }
 
 export type Activity =

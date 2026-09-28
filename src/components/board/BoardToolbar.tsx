@@ -15,6 +15,7 @@ interface BoardToolbarProps {
   onPrefsChange: (prefs: ViewPrefs) => void
   visibleCount: number
   totalCount: number
+  archivedCount: number
   onNewTicket: () => void
 }
 
@@ -25,6 +26,7 @@ export function BoardToolbar({
   onPrefsChange,
   visibleCount,
   totalCount,
+  archivedCount,
   onNewTicket,
 }: BoardToolbarProps) {
   const searchRef = useRef<HTMLInputElement>(null)
@@ -59,7 +61,13 @@ export function BoardToolbar({
           )}
         </InputGroupAddon>
       </InputGroup>
-      <FilterMenu filter={prefs.filter} onChange={(filter) => onPrefsChange({ ...prefs, filter })} />
+      <FilterMenu
+        filter={prefs.filter}
+        onChange={(filter) => onPrefsChange({ ...prefs, filter })}
+        archivedCount={archivedCount}
+        showArchived={!!prefs.showArchived}
+        onShowArchivedChange={(showArchived) => onPrefsChange({ ...prefs, showArchived })}
+      />
       <SortMenu value={prefs.sort} onChange={(sort) => onPrefsChange({ ...prefs, sort })} />
       <span className="ml-auto hidden text-xs text-muted-foreground tabular-nums md:inline">
         {visibleCount === totalCount ? `${totalCount} tickets` : `${visibleCount} of ${totalCount} tickets`}

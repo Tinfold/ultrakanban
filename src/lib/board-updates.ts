@@ -24,6 +24,7 @@ export type BoardPatch = Partial<
     | 'agentBacklog'
     | 'agentAllSkills'
     | 'autoMerge'
+    | 'archiveDoneDays'
   >
 >
 export type TicketPatch = Partial<
@@ -91,9 +92,12 @@ export function moveTicket(detail: BoardDetail, ticketId: string, columnId: stri
   const positions = new Map(ids.map((id, index) => [id, index]))
   return {
     ...detail,
-    tickets: detail.tickets.map((ticket) =>
-      positions.has(ticket.id) ? { ...ticket, columnId, position: positions.get(ticket.id)! } : ticket,
-    ),
+    tickets: detail.tickets.map((ticket) => {
+      if (!positions.has(ticket.id)) return ticket
+      // Entering another column restarts the time towards archiving.
+      const moved = ticket.id === ticketId && ticket.columnId !== columnId
+      return { ...ticket, columnId, position: positions.get(ticket.id)!, ...(moved && { archived: false }) }
+    }),
   }
 }
 

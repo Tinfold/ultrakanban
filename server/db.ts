@@ -190,6 +190,16 @@ const MIGRATIONS = [
   ALTER TABLE boards ADD COLUMN auto_merge INTEGER NOT NULL DEFAULT 0;
   `,
   `
+  -- Days after which tickets in the done column are archived: left out of GET /boards/:id. Never when NULL.
+  ALTER TABLE boards ADD COLUMN archive_done_days INTEGER;
+  -- When the ticket entered its current column.
+  ALTER TABLE tickets ADD COLUMN moved_at TEXT;
+  UPDATE tickets SET moved_at = coalesce(
+    (SELECT max(created_at) FROM activity WHERE ticket_id = tickets.id AND type IN ('created', 'moved')),
+    created_at
+  );
+  `,
+  `
   -- The agent run working the ticket (see POST /tickets/:id/heartbeat): when its first heartbeat came, and what it
   -- last said it is doing. Cleared when the run ends; a run without a heartbeat for AGENT_IDLE_MINUTES is over too.
   ALTER TABLE tickets ADD COLUMN run_started_at TEXT;
