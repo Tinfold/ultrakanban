@@ -151,8 +151,9 @@ loop stopped starting runs for CI on this ticket. Comment on the ticket to let i
     use_worker "${ticket_model#-}" "${ticket_effort#-}"
     adopt "$id" "$number" "$holder" "$version" || continue
     items=$(jq -r '.items | map(.text) | join("\n\n---\n\n")' <<<"$triage")
-    log "ticket #$number ($id): $(jq -r '.items | map(.text | split("\n")[0] | rtrimstr(":")) | join("; ")' \
-      <<<"$triage")"
+    run_step=$(jq -r '.items | map(.text | split("\n")[0] | rtrimstr(":")) | join("; ")' <<<"$triage")
+    log "ticket #$number ($id): $run_step"
+    run_step=${run_step:0:200}
     run_on_ticket "$id" "$(intro)
 
 Ticket $id is already yours. The loop started this run for this new feedback:
@@ -252,6 +253,7 @@ their first run yet (CLAIM_LIMIT $CLAIM_LIMIT)"
   snapshot=$(get "/tickets/$id/activity" | jq -c '{activity: (map(.id) | max // 0)}') || snapshot='{}'
   write_state "$id" "$(jq -c '. + {claim: true}' <<<"$snapshot")"
   claim_unlock
+  run_step="Working the ticket"
   run_on_ticket "$id" "$(intro)
 
 Ticket $id is already claimed for you and in progress. Work only this ticket; do not claim another.

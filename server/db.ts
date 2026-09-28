@@ -189,6 +189,12 @@ const MIGRATIONS = [
   -- Whether the server merges the review column's pull requests once they are ready (see server/merge-queue.ts).
   ALTER TABLE boards ADD COLUMN auto_merge INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  -- The agent run working the ticket (see POST /tickets/:id/heartbeat): when its first heartbeat came, and what it
+  -- last said it is doing. Cleared when the run ends; a run without a heartbeat for AGENT_IDLE_MINUTES is over too.
+  ALTER TABLE tickets ADD COLUMN run_started_at TEXT;
+  ALTER TABLE tickets ADD COLUMN run_step TEXT;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'
