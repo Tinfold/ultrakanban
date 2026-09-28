@@ -25,6 +25,7 @@ import {
 import { sql } from '../db.ts'
 import { type ActivityRow, toActivity } from './activity.ts'
 import { listBoards } from './boards.ts'
+import { WAITING_SINCE } from './tickets.ts'
 import { queryUsage } from './usage.ts'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -40,6 +41,7 @@ interface TicketRow {
   pr_url: string | null
   pr_state: string
   created_at: string
+  waiting_since: string | null
 }
 
 interface ColumnRow {
@@ -103,7 +105,9 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
   }
 
   const tickets = sql.all<TicketRow>(
-    'SELECT id, board_id, column_id, number, title, assignee, pr_url, pr_state, created_at FROM tickets',
+    `SELECT id, board_id, column_id, number, title, assignee, pr_url, pr_state, created_at,
+       ${WAITING_SINCE} AS waiting_since
+     FROM tickets t`,
   )
   const ticketsById = new Map(tickets.map((ticket) => [ticket.id, ticket]))
 
@@ -240,6 +244,7 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
       column: columnNames.get(ticket.column_id)!,
       state,
       since: stateSince.get(ticket.id) ?? ticket.created_at,
+      waitingSince: ticket.waiting_since,
       pullRequest: ticket.pr_url ? { url: ticket.pr_url, state: ticket.pr_state as PullRequestState } : null,
     })
   }

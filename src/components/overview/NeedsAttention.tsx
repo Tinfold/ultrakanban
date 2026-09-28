@@ -8,8 +8,17 @@ import { PULL_REQUEST_STATE_LABELS } from '@/lib/pull-request'
 
 type HeldTicket = OverviewTicket & { agent: string }
 
-function Group({ title, tickets, now }: { title: string; tickets: HeldTicket[]; now: number }) {
+interface GroupProps {
+  title: string
+  tickets: HeldTicket[]
+  now: number
+  /** Time them from when their agent started waiting for an answer, rather than from when they entered their column. */
+  waiting?: boolean
+}
+
+function Group({ title, tickets, now, waiting }: GroupProps) {
   if (!tickets.length) return null
+  const timedFrom = (ticket: HeldTicket) => (waiting && ticket.waitingSince) || ticket.since
   return (
     <div className="grid grid-cols-1 gap-1">
       <h3 className="px-2 text-xs text-muted-foreground">{title}</h3>
@@ -31,11 +40,15 @@ function Group({ title, tickets, now }: { title: string; tickets: HeldTicket[]; 
                 </span>
               </span>
               <time
-                dateTime={ticket.since}
-                title={`In ${ticket.column} since ${formatDateTime(ticket.since)}`}
+                dateTime={timedFrom(ticket)}
+                title={
+                  waiting
+                    ? `Waiting for an answer since ${formatDateTime(timedFrom(ticket))}`
+                    : `In ${ticket.column} since ${formatDateTime(ticket.since)}`
+                }
                 className="shrink-0 text-muted-foreground tabular-nums"
               >
-                {formatDuration(now - Date.parse(ticket.since))}
+                {formatDuration(now - Date.parse(timedFrom(ticket)))}
               </time>
             </Link>
             {ticket.pullRequest && (
@@ -59,18 +72,20 @@ function Group({ title, tickets, now }: { title: string; tickets: HeldTicket[]; 
 }
 
 interface NeedsAttentionProps {
+  waiting: HeldTicket[]
   review: HeldTicket[]
   stalled: HeldTicket[]
   now: number
 }
 
-export function NeedsAttention({ review, stalled, now }: NeedsAttentionProps) {
-  if (!review.length && !stalled.length) {
+export function NeedsAttention({ waiting, review, stalled, now }: NeedsAttentionProps) {
+  if (!waiting.length && !review.length && !stalled.length) {
     return <p className="px-1 text-sm text-muted-foreground">Nothing is waiting on you.</p>
   }
 
   return (
     <div className="grid grid-cols-1 gap-3 rounded-xl border bg-card p-2">
+      <Group title="Agent waiting for an answer, oldest first" tickets={waiting} now={now} waiting />
       <Group title="Waiting for review, oldest first" tickets={review} now={now} />
       <Group title="Worked for over a day without moving" tickets={stalled} now={now} />
     </div>

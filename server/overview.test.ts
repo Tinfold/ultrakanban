@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { beforeEach, describe, test } from 'node:test'
-import { type Overview, type TokenUsage } from '../shared/domain.ts'
+import { type Overview, type Ticket, type TokenUsage } from '../shared/domain.ts'
 import { getOverview } from './store/overview.ts'
 import { addTicket, boardId, call, pullRequestStatuses, useBoard } from './test-app.ts'
 
@@ -86,6 +86,44 @@ describe('overview', () => {
     assert.deepEqual([held.status, held.tickets.length], ['idle', 0])
     assert.deepEqual([board.open, board.working, board.review], [0, 0, 0])
     assert.ok(overview.sessions.filter((session) => session.agent === agent).every((session) => session.end !== null))
+  })
+
+  test("a ticket waits on you while the newest comment is its agent's, until it goes to review", async () => {
+    const agent = 'asking-agent'
+    const ticket = await addTicket({ title: 'A' })
+    const waitingSince = async () => (await call<Ticket>('GET', `/tickets/${ticket.id}`)).body.waitingSince
+    const heldWaitingSince = async () =>
+      (await call<Overview>('GET', '/overview')).body.agents.find((entry) => entry.name === agent)!.tickets[0]
+        .waitingSince
+
+    await call('POST', `/tickets/${ticket.id}/comments`, { body: 'Before anyone works it' }, agent)
+    assert.equal(await waitingSince(), null)
+
+    await call('POST', `/tickets/${ticket.id}/claim`, { agent, moveTo: 'In progress' })
+    await call('POST', `/tickets/${ticket.id}/comments`, { body: 'Should it do X?' }, 'someone-else')
+    assert.equal(await waitingSince(), null)
+
+    const { body: question } = await call<{ createdAt: string }>(
+      'POST',
+      `/tickets/${ticket.id}/comments`,
+      { body: 'Should it do X or Y?' },
+      agent,
+    )
+    assert.equal(await waitingSince(), question.createdAt)
+    assert.equal(await heldWaitingSince(), question.createdAt)
+    // Other activity, such as moving it, doesn't answer the question.
+    await call('POST', `/tickets/${ticket.id}/move`, { column: 'Todo' })
+    assert.equal(await waitingSince(), question.createdAt)
+    await call('POST', `/tickets/${ticket.id}/move`, { column: 'In progress' })
+
+    await call('POST', `/tickets/${ticket.id}/comments`, { body: 'Y' }, 'tester')
+    assert.equal(await waitingSince(), null)
+    assert.equal(await heldWaitingSince(), null)
+
+    // Submitting for review comments too, but a ticket in review waits for its review instead.
+    await call('POST', `/tickets/${ticket.id}/review`, { agent, pullRequest: PR, comment: 'Done' })
+    assert.equal(await waitingSince(), null)
+    assert.equal(await heldWaitingSince(), null)
   })
 
   test('overview counts parallel runs under one agent name as separate working agents', async () => {

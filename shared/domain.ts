@@ -245,6 +245,11 @@ export interface Ticket {
   version: number
   commentCount: number
   attachmentCount: number
+  /**
+   * When its agent started waiting on an answer: set while the newest comment is from its assignee and it's worked
+   * (not in review or done).
+   */
+  waitingSince: string | null
   /** When the ticket entered its current column. */
   movedAt: string
   /** Whether it has been in the board's done column for longer than the board's `archiveDoneDays`. */
@@ -402,6 +407,8 @@ export interface OverviewTicket {
   state: WorkState
   /** When the ticket entered its current state. */
   since: string
+  /** When its agent started waiting on an answer (see `Ticket.waitingSince`). */
+  waitingSince: string | null
   pullRequest: Pick<PullRequest, 'url' | 'state'> | null
 }
 
