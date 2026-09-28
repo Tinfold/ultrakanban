@@ -2,6 +2,7 @@ import {
   AGENT_IDLE_MINUTES,
   type AgentEffort,
   type AgentRun,
+  type CheckStatus,
   type Column,
   parsePullRequestUrl,
   PRIORITIES,
@@ -49,6 +50,7 @@ interface TicketRow {
   pr_state: string
   pr_title: string | null
   pr_conflicts: number
+  pr_checks: string | null
   pr_checked_at: string | null
   agent_seen_at: string | null
   run_started_at: string | null
@@ -104,6 +106,7 @@ function toPullRequest(url: string, row: TicketRow): PullRequest {
     state: row.pr_state as PullRequestState,
     title: row.pr_title,
     conflicts: Boolean(row.pr_conflicts),
+    checks: row.pr_checks as CheckStatus | null,
     checkedAt: row.pr_checked_at,
   }
 }
@@ -590,17 +593,22 @@ export interface PullRequestStatus {
    * which keeps the last known answer.
    */
   conflicts?: boolean | null
+  /** Combined status of its checks; `null` (or left out) when it has none, or while GitHub is still running them. */
+  checks?: CheckStatus | null
 }
 
 /** Stores a pull request's state without side effects (used when importing). */
-export function setPullRequestStatus(ticketId: string, { state, title, conflicts }: PullRequestStatus) {
+export function setPullRequestStatus(ticketId: string, { state, title, conflicts, checks }: PullRequestStatus) {
   const open = state === 'open' || state === 'draft'
   sql.run(
-    `UPDATE tickets SET pr_state = ?, pr_title = ?, pr_conflicts = coalesce(?, pr_conflicts), pr_checked_at = ?
+    `UPDATE tickets SET pr_state = ?, pr_title = ?, pr_conflicts = coalesce(?, pr_conflicts),
+       pr_checks = CASE WHEN ? THEN coalesce(?, pr_checks) ELSE NULL END, pr_checked_at = ?
      WHERE id = ? AND pr_url IS NOT NULL`,
     state,
     title,
     open ? (conflicts == null ? null : Number(conflicts)) : 0,
+    Number(open),
+    checks ?? null,
     now(),
     ticketId,
   )
@@ -617,8 +625,13 @@ export function applyPullRequestStatus(ticketId: string, url: string, status: Pu
   if (previous?.url !== url || previous.state === 'merged') return ticket
 
   setPullRequestStatus(ticketId, status)
-  const { conflicts } = getTicket(ticketId).pullRequest!
-  if (previous.state === status.state && previous.title === status.title && previous.conflicts === conflicts) {
+  const { conflicts, checks } = getTicket(ticketId).pullRequest!
+  if (
+    previous.state === status.state &&
+    previous.title === status.title &&
+    previous.conflicts === conflicts &&
+    previous.checks === checks
+  ) {
     return ticket
   }
 

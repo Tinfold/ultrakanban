@@ -70,6 +70,7 @@ export function linkPullRequest(detail: BoardDetail, ticketId: string, url: stri
               state: 'unknown',
               title: null,
               conflicts: false,
+              checks: null,
               checkedAt: null,
             },
           }

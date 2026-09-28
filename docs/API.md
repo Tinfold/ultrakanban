@@ -209,6 +209,7 @@ interface PullRequest {
   state: 'unknown' | 'open' | 'draft' | 'merged' | 'closed' // unknown until GitHub has been checked
   title: string | null
   conflicts: boolean // GitHub last found merge conflicts with its base branch (open and draft pull requests only)
+  checks: 'pending' | 'passing' | 'failing' | null // combined status of its checks; null when it has none, or isn't open or draft
   checkedAt: string | null
 }
 

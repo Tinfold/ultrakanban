@@ -205,6 +205,11 @@ const MIGRATIONS = [
   ALTER TABLE tickets ADD COLUMN run_started_at TEXT;
   ALTER TABLE tickets ADD COLUMN run_step TEXT;
   `,
+  `
+  -- Combined status of the pull request's checks ('pending', 'passing', 'failing'), as GitHub last reported;
+  -- NULL when it has none, or isn't open or draft.
+  ALTER TABLE tickets ADD COLUMN pr_checks TEXT;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'
