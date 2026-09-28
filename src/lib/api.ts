@@ -1,5 +1,6 @@
 import type {
   Activity,
+  AgentSuggestion,
   ApiErrorBody,
   Attachment,
   BoardDetail,
@@ -89,6 +90,12 @@ export const api = {
   updateTag: (tagId: string, input: UpdateTagInput) => request<Tag>('PATCH', `/tags/${tagId}`, input),
   deleteTag: (tagId: string) => request<void>('DELETE', `/tags/${tagId}`),
 
+  /** A model and effort for a ticket about to be created, from how similar tickets went. */
+  agentSuggestion: (boardId: string, input: { title: string; tags: string[]; steps: number }) => {
+    const search = new URLSearchParams({ title: input.title, steps: String(input.steps) })
+    for (const tag of input.tags) search.append('tag', tag)
+    return request<AgentSuggestion>('GET', `/boards/${boardId}/agent-suggestion?${search}`)
+  },
   createTicket: (boardId: string, input: CreateTicketInput) =>
     request<Ticket>('POST', `/boards/${boardId}/tickets`, input),
   updateTicket: (ticketId: string, input: UpdateTicketInput) => request<Ticket>('PATCH', `/tickets/${ticketId}`, input),

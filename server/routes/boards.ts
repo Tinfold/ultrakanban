@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import {
+  agentSuggestionQuerySchema,
   boardDetailQuerySchema,
   boardExportSchema,
   bulkTicketsSchema,
@@ -30,6 +31,7 @@ import {
   listTickets,
   requestConflictFixes,
 } from '../store/tickets.ts'
+import { suggestAgent } from '../store/suggestions.ts'
 import { exportBoard, importBoard } from '../store/transfer.ts'
 import { listBoardUsage, recordBoardUsage } from '../store/usage.ts'
 
@@ -131,6 +133,14 @@ export const boardRoutes = ({ pullRequests, mergeQueue }: AppServices) =>
       const tickets = transaction(() => requestConflictFixes(boardId, actorOf(c)))
       wake({ boardId })
       return c.json({ tickets })
+    })
+    .get('/:boardId/agent-suggestion', (c) => {
+      const query = agentSuggestionQuerySchema.parse({
+        title: c.req.query('title'),
+        tag: c.req.queries('tag'),
+        steps: c.req.query('steps'),
+      })
+      return c.json(suggestAgent(c.req.param('boardId'), query))
     })
     .get('/:boardId/usage', (c) => c.json(listBoardUsage(c.req.param('boardId'))))
     .post('/:boardId/usage', async (c) => {
