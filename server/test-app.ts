@@ -6,6 +6,7 @@ import { type Ticket } from '../shared/domain.ts'
 import { createApp } from './app.ts'
 import { createAttachmentFiles } from './attachment-files.ts'
 import { createMergeQueue } from './merge-queue.ts'
+import { createNotifier, type Notification } from './notifications.ts'
 import { type GitHubAuth, GitHubError, type GitHubPullRequest, type NewRepository } from './github.ts'
 import { createPullRequestSync } from './pull-request-sync.ts'
 import type { PullRequestStatus } from './store/tickets.ts'
@@ -67,8 +68,19 @@ const pullRequests = createPullRequestSync({
     return `https://github.com/${repo}/pull/${number}#issuecomment-${prComments.length}`
   },
 })
-export const mergeQueue = createMergeQueue(pullRequests, { pollMs: 0 })
-export const app = createApp({ attachmentFiles: createAttachmentFiles(attachmentDir), pullRequests, mergeQueue })
+/** Fake notification target: the notifications sent, with the board's `notifyUrl` each went to. */
+export const notifications: (Notification & { target: string })[] = []
+const notifier = createNotifier(
+  async (target, notification) => void notifications.push({ ...notification, target }),
+  '',
+)
+export const mergeQueue = createMergeQueue(pullRequests, { pollMs: 0, notifier })
+export const app = createApp({
+  attachmentFiles: createAttachmentFiles(attachmentDir),
+  pullRequests,
+  mergeQueue,
+  notifier,
+})
 
 export async function call<T>(method: string, path: string, body?: unknown, actor = 'tester') {
   const res = await app.request(`/api${path}`, {

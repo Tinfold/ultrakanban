@@ -9,7 +9,7 @@
     "dev:web": "vite",
     "build": "tsc -b && vite build",
     "start": "NODE_ENV=production node --experimental-strip-types --disable-warning=ExperimentalWarning server/index.ts",
-    "test": "ULTRAKANBAN_DB=:memory: tsx --test --disable-warning=ExperimentalWarning \"server/**/*.test.ts\"",
+    "test": "ULTRAKANBAN_DB=:memory: tsx --test --disable-warning=ExperimentalWarning \"server/**/*.test.ts\" \"src/**/*.test.ts\"",
     "typecheck": "tsc -b",
     "lint": "oxlint",
     "format": "prettier --write .",

@@ -215,6 +215,18 @@ const MIGRATIONS = [
   ALTER TABLE tickets ADD COLUMN parent_id TEXT REFERENCES tickets(id) ON DELETE SET NULL;
   CREATE INDEX tickets_parent ON tickets(parent_id);
   `,
+  `
+  -- Where the board sends a message when a ticket needs a person (see server/notifications.ts). None when NULL.
+  ALTER TABLE boards ADD COLUMN notify_url TEXT;
+  -- Notifications sent, so none is sent twice: one per ticket and key (e.g. the comment or commit it is about).
+  CREATE TABLE notifications (
+    ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (ticket_id, key)
+  );
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'
