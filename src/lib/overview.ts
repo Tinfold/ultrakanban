@@ -5,6 +5,8 @@ import {
   type Overview,
   type OverviewAgent,
   type OverviewEventKind,
+  type OverviewTicketUsage,
+  type Tag,
   totalTokens,
   type UsageTotals,
   type WorkSession,
@@ -115,3 +117,67 @@ export function modelSeries(usage: UsageTotals, label: (model: string) => string
 /** Tokens the models of a series used. */
 export const seriesTokens = (usage: UsageTotals, series: ModelSeries) =>
   series.models.reduce((total, model) => total + (usage.models[model] ? totalTokens(usage.models[model]) : 0), 0)
+
+/** What the overview's ticket usage table sorts by. */
+export type UsageSort = 'tokens' | 'cost' | 'runs'
+
+const usageValue = (usage: OverviewTicketUsage['usage'], sort: UsageSort) =>
+  sort === 'tokens' ? usage.tokens : sort === 'cost' ? (usage.costUsd ?? 0) : usage.runs
+
+/** Tickets sorted by `sort`, highest first. */
+export const sortTicketUsage = (tickets: OverviewTicketUsage[], sort: UsageSort) =>
+  tickets.toSorted(
+    (a, b) =>
+      usageValue(b.usage, sort) - usageValue(a.usage, sort) ||
+      b.usage.tokens - a.usage.tokens ||
+      a.boardName.localeCompare(b.boardName) ||
+      a.number - b.number,
+  )
+
+/** A tag's tickets' usage: added up, and per ticket on average. */
+export interface TagUsage {
+  /** `null` for tickets without tags. */
+  tag: Pick<Tag, 'name' | 'color'> | null
+  tickets: number
+  total: OverviewTicketUsage['usage']
+  perTicket: { runs: number; tokens: number; costUsd: number | null }
+}
+
+/**
+ * Ticket usage grouped by tag name across boards, so kinds of tickets can be compared; a ticket with several tags
+ * counts towards each. Sorted by the average per ticket of `sort`, highest first.
+ */
+export function usageByTag(tickets: OverviewTicketUsage[], sort: UsageSort): TagUsage[] {
+  const groups = new Map<string, Omit<TagUsage, 'perTicket'>>()
+  for (const ticket of tickets) {
+    const tags = ticket.tags.length ? ticket.tags : [null]
+    for (const tag of tags) {
+      const name = tag ? tag.name.toLowerCase() : ''
+      const group = groups.get(name) ?? {
+        tag: tag && { name: tag.name, color: tag.color },
+        tickets: 0,
+        total: { runs: 0, tokens: 0, costUsd: null },
+      }
+      groups.set(name, group)
+      group.tickets++
+      group.total.runs += ticket.usage.runs
+      group.total.tokens += ticket.usage.tokens
+      if (ticket.usage.costUsd !== null) group.total.costUsd = (group.total.costUsd ?? 0) + ticket.usage.costUsd
+    }
+  }
+  return [...groups.values()]
+    .map((group): TagUsage => ({
+      ...group,
+      perTicket: {
+        runs: group.total.runs / group.tickets,
+        tokens: group.total.tokens / group.tickets,
+        costUsd: group.total.costUsd === null ? null : group.total.costUsd / group.tickets,
+      },
+    }))
+    .sort(
+      (a, b) =>
+        usageValue(b.perTicket, sort) - usageValue(a.perTicket, sort) ||
+        b.tickets - a.tickets ||
+        (a.tag?.name ?? '').localeCompare(b.tag?.name ?? ''),
+    )
+}

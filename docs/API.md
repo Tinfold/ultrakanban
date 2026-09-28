@@ -174,6 +174,9 @@ interface Ticket {
   version: number // increments on every change
   commentCount: number
   attachmentCount: number
+  // Token usage added up over all agent runs on it (see Token usage); costUsd sums the runs that reported a cost,
+  // and is null when none did
+  usage: { runs: number; tokens: number; costUsd: number | null }
   createdAt: string
   updatedAt: string
 }
@@ -293,7 +296,7 @@ Agents report the tokens each run used on a ticket, and the [overview](#overview
 day. `scripts/agent-loop.sh` reports every `claude -p` run it starts (from `--output-format json`, all models the run
 called, subagents included); other agents can report theirs the same way. Runs that weren't on a ticket (an assistant
 answering a question, say) are reported to the board instead, and count toward the agent's and the board's totals just
-the same, with `ticketId: null`.
+the same, with `ticketId: null`. Every ticket carries its runs' totals in `usage`.
 
 A run can also say how its tokens split between the models it called (`models`, one entry per model, from
 `claude -p`'s `modelUsage`; the agent loop sends it), so the overview can show token usage by model. The overview
@@ -401,6 +404,8 @@ interface Overview {
     costUsd
     models
   }[]
+  // Tickets with runs within the range, most tokens first, with the usage of all their runs (as in Ticket)
+  tickets: { id; boardId; boardName; number; title; column: string; tags: Tag[]; usage }[]
   recent: (Activity & { ticket: { number; title; boardId; boardName } })[] // latest 30, newest first
 }
 

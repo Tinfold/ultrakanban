@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { beforeEach, describe, test } from 'node:test'
-import { type Overview, type TokenUsage } from '../shared/domain.ts'
+import { type Overview, type Ticket, type TokenUsage } from '../shared/domain.ts'
 import { getOverview } from './store/overview.ts'
 import { addTicket, boardId, call, pullRequestStatuses, useBoard } from './test-app.ts'
 
@@ -284,6 +284,46 @@ describe('overview', () => {
         [null, boardId],
       ],
     )
+  })
+
+  test('tickets add up the usage of their runs, and the overview lists them by it', async () => {
+    const agent = 'ticket-usage-agent'
+    const cheap = await addTicket({ title: 'Cheap', tags: ['docs'] })
+    const pricey = await addTicket({ title: 'Pricey', tags: ['bug', 'ui'] })
+    const unused = await addTicket({ title: 'Unused' })
+    assert.deepEqual(unused.usage, { runs: 0, tokens: 0, costUsd: null })
+
+    await call('POST', `/tickets/${cheap.id}/usage`, { agent, inputTokens: 1, outputTokens: 2 })
+    await call('POST', `/tickets/${pricey.id}/usage`, {
+      agent,
+      inputTokens: 100,
+      outputTokens: 20,
+      cacheReadTokens: 1000,
+      cacheWriteTokens: 50,
+      costUsd: 1.25,
+    })
+    await call('POST', `/tickets/${pricey.id}/usage`, { agent, inputTokens: 10, outputTokens: 5, costUsd: 0.5 })
+
+    // Cost stays unknown until a run reports one; runs that don't report one add none.
+    const { body: cheapNow } = await call<Ticket>('GET', `/tickets/${cheap.id}`)
+    assert.deepEqual(cheapNow.usage, { runs: 1, tokens: 3, costUsd: null })
+    const { body: listed } = await call<Ticket[]>('GET', `/boards/${boardId}/tickets`)
+    assert.deepEqual(listed.find((ticket) => ticket.id === pricey.id)?.usage, { runs: 2, tokens: 1185, costUsd: 1.75 })
+
+    const { body: overview } = await call<Overview>('GET', '/overview')
+    const onBoard = overview.tickets.filter((entry) => entry.boardId === boardId)
+    assert.deepEqual(
+      onBoard.map((entry) => [entry.number, entry.title, entry.column, entry.tags.map((tag) => tag.name), entry.usage]),
+      [
+        [pricey.number, 'Pricey', 'Todo', ['bug', 'ui'], { runs: 2, tokens: 1185, costUsd: 1.75 }],
+        [cheap.number, 'Cheap', 'Todo', ['docs'], { runs: 1, tokens: 3, costUsd: null }],
+      ],
+    )
+    assert.equal(onBoard[0].boardName, 'Workflow')
+
+    // Tickets without runs within the range aren't listed.
+    const later = getOverview(7, new Date(Date.now() + 8 * 24 * 60 * 60 * 1000))
+    assert.ok(!later.tickets.some((entry) => entry.boardId === boardId))
   })
 
   test('overview hides cleared agents until they do something again', async () => {

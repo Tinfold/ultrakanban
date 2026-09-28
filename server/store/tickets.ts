@@ -53,13 +53,20 @@ interface TicketRow {
   tag_ids: string | null
   comment_count: number
   attachment_count: number
+  usage_runs: number
+  usage_tokens: number | null
+  usage_cost: number | null
 }
 
 const SELECT_TICKETS = `
   SELECT t.*,
     (SELECT group_concat(tag_id) FROM ticket_tags WHERE ticket_id = t.id) AS tag_ids,
     (SELECT count(*) FROM activity WHERE ticket_id = t.id AND type = 'comment') AS comment_count,
-    (SELECT count(*) FROM attachments WHERE ticket_id = t.id) AS attachment_count
+    (SELECT count(*) FROM attachments WHERE ticket_id = t.id) AS attachment_count,
+    (SELECT count(*) FROM token_usage WHERE ticket_id = t.id) AS usage_runs,
+    (SELECT sum(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) FROM token_usage
+      WHERE ticket_id = t.id) AS usage_tokens,
+    (SELECT sum(cost_usd) FROM token_usage WHERE ticket_id = t.id) AS usage_cost
   FROM tickets t`
 
 const BOARD_ORDER = 'ORDER BY (SELECT position FROM columns WHERE id = t.column_id), t.position'
@@ -95,6 +102,7 @@ const toTicket = (row: TicketRow): Ticket => ({
   version: row.version,
   commentCount: row.comment_count,
   attachmentCount: row.attachment_count,
+  usage: { runs: row.usage_runs, tokens: row.usage_tokens ?? 0, costUsd: row.usage_cost },
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 })

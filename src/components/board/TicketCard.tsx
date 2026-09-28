@@ -1,12 +1,19 @@
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { CalendarIcon, GitMergeConflictIcon, MessageSquareIcon, PaperclipIcon, SquareCheckIcon } from 'lucide-react'
+import {
+  CalendarIcon,
+  CoinsIcon,
+  GitMergeConflictIcon,
+  MessageSquareIcon,
+  PaperclipIcon,
+  SquareCheckIcon,
+} from 'lucide-react'
 import type { Ticket } from '@shared/domain'
 import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { PullRequestIcon } from '@/components/common/PullRequestIcon'
 import { TagChip } from '@/components/common/TagChip'
 import { UserAvatar } from '@/components/common/UserAvatar'
-import { dueState, formatDueDate, ticketRef } from '@/lib/format'
+import { dueState, formatDueDate, formatUsage, formatUsageShort, ticketRef } from '@/lib/format'
 import { checklistProgress } from '@/lib/markdown'
 import { CONFLICTS_HINT } from '@/lib/pull-request'
 import { cn } from '@/lib/utils'
@@ -29,7 +36,12 @@ export function TicketCard({ ticket, overlay }: TicketCardProps) {
   const checklist = checklistProgress(ticket.description)
   const tags = ticket.tagIds.flatMap((tagId) => tagsById.get(tagId) ?? [])
   const hasMeta =
-    ticket.dueDate || checklist.total > 0 || ticket.commentCount > 0 || ticket.attachmentCount > 0 || ticket.pullRequest
+    ticket.dueDate ||
+    checklist.total > 0 ||
+    ticket.commentCount > 0 ||
+    ticket.attachmentCount > 0 ||
+    ticket.usage.runs > 0 ||
+    ticket.pullRequest
   const canMerge =
     !overlay &&
     ticket.columnId === detail.board.reviewColumnId &&
@@ -95,6 +107,12 @@ export function TicketCard({ ticket, overlay }: TicketCardProps) {
             <span className="flex items-center gap-1 tabular-nums">
               <MessageSquareIcon />
               {ticket.commentCount}
+            </span>
+          )}
+          {ticket.usage.runs > 0 && (
+            <span className="flex items-center gap-1 tabular-nums" title={formatUsage(ticket.usage)}>
+              <CoinsIcon />
+              {formatUsageShort(ticket.usage)}
             </span>
           )}
           {canMerge && <QuickMergeButton ticket={ticket} />}
