@@ -93,6 +93,7 @@ export const api = {
   moveTicket: (ticketId: string, input: MoveTicketInput) => request<Ticket>('POST', `/tickets/${ticketId}/move`, input),
   deleteTicket: (ticketId: string) => request<void>('DELETE', `/tickets/${ticketId}`),
   listActivity: (ticketId: string) => request<Activity[]>('GET', `/tickets/${ticketId}/activity`),
+  approvePlan: (ticketId: string) => request<Ticket>('POST', `/tickets/${ticketId}/approve`),
   syncPullRequest: (ticketId: string) => request<Ticket>('POST', `/tickets/${ticketId}/pull-request/sync`),
   mergeTicket: (ticketId: string, method: MergeMethod) =>
     request<Ticket>('POST', `/tickets/${ticketId}/merge`, { method }),

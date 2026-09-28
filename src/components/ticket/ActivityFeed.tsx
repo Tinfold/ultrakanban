@@ -37,7 +37,7 @@ function PullRequestLink({ url }: { url: string }) {
   )
 }
 
-function describe(entry: Exclude<Activity, { type: 'comment' | 'attachment' }>) {
+function describe(entry: Exclude<Activity, { type: 'comment' | 'plan' | 'attachment' }>) {
   switch (entry.type) {
     case 'pull_request': {
       const { event, url } = entry.data
@@ -77,6 +77,8 @@ function describe(entry: Exclude<Activity, { type: 'comment' | 'attachment' }>) 
       )
     case 'released':
       return entry.actor === entry.data.assignee ? <>released this</> : <>unassigned {entry.data.assignee}</>
+    case 'approved':
+      return <>approved the plan{entry.data.estimate && <> (size {entry.data.estimate})</>}</>
   }
 }
 
@@ -108,12 +110,18 @@ interface ActivityItemProps {
 }
 
 function ActivityItem({ entry, attachmentsById, onViewAttachment }: ActivityItemProps) {
-  if (entry.type === 'comment') {
+  if (entry.type === 'comment' || entry.type === 'plan') {
     return (
       <li className="rounded-lg border bg-card">
         <div className="flex items-center gap-2 border-b px-3 py-2 text-xs">
           <UserAvatar name={entry.actor} size="xs" />
           <span className="font-medium">{entry.actor}</span>
+          {entry.type === 'plan' && (
+            <span className="text-muted-foreground">
+              posted a plan, size <span className="font-medium text-foreground">{entry.data.estimate}</span>
+              {entry.data.held && ', and waits for approval'}
+            </span>
+          )}
           <Timestamp iso={entry.createdAt} />
         </div>
         <Markdown className="px-3 py-2.5">{entry.data.body}</Markdown>

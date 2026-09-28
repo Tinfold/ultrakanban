@@ -22,6 +22,7 @@ import { useBoardContext } from '../board/board-context'
 import { ActivityFeed } from './ActivityFeed'
 import { AttachmentsSection } from './attachments'
 import { DescriptionEditor } from './DescriptionEditor'
+import { PlanApproval } from './PlanApproval'
 import { SubticketsSection } from './SubticketsSection'
 import { TicketProperties } from './TicketProperties'
 import { TitleInput } from './TitleInput'
@@ -156,6 +157,7 @@ function TicketDetail({ ticket, onClose }: { ticket: Ticket; onClose: () => void
           </aside>
 
           <div className="grid min-w-0 content-start gap-8 md:col-start-1">
+            <PlanApproval ticket={ticket} />
             <DescriptionEditor
               value={ticket.description}
               onChange={saveDescription.schedule}

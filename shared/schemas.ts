@@ -9,6 +9,7 @@ import {
   parsePullRequestUrl,
   PRIORITIES,
   PULL_REQUEST_STATES,
+  TICKET_SIZES,
 } from './domain.ts'
 
 const name = z.string().trim().min(1).max(200)
@@ -45,6 +46,7 @@ const agentModel = z
 const agentEffort = z.enum(AGENT_EFFORTS).nullable()
 const agentConcurrency = z.int().min(1).max(AGENT_MAX_CONCURRENCY).nullable()
 const archiveDoneDays = z.int().min(1).max(3650).nullable()
+const ticketSize = z.enum(TICKET_SIZES)
 /** Skips the merged-pull-request requirement of the board's done column. Meant for humans, not agents. */
 const force = z.boolean().optional()
 
@@ -64,6 +66,7 @@ export const createBoardSchema = z.object({
   agentAllSkills: z.boolean().optional(),
   autoMerge: z.boolean().optional(),
   archiveDoneDays: archiveDoneDays.optional(),
+  approvalSize: ticketSize.nullable().optional(),
 })
 
 export const updateBoardSchema = z.object({
@@ -81,6 +84,7 @@ export const updateBoardSchema = z.object({
   agentAllSkills: z.boolean().optional(),
   autoMerge: z.boolean().optional(),
   archiveDoneDays: archiveDoneDays.optional(),
+  approvalSize: ticketSize.nullable().optional(),
 })
 
 /** Creates a repository on GitHub and links it to the board. */
@@ -175,6 +179,19 @@ export const submitForReviewSchema = z.object({
   pullRequest: pullRequestUrl.optional(),
   /** Markdown summary posted as a comment, e.g. what changed and how it was verified, or a question's answer. */
   comment: z.string().trim().min(1).max(20_000).optional(),
+  ifVersion: version.optional(),
+})
+
+/** The plan an agent posts when it starts a ticket, with its size estimate (POST /tickets/:id/plan). */
+export const postPlanSchema = z.object({
+  agent: name,
+  estimate: ticketSize,
+  /** Markdown: what it will change and how, in a few lines. */
+  plan: z.string().trim().min(1).max(20_000),
+})
+
+/** Approves the plan of a ticket that waits for approval (POST /tickets/:id/approve). */
+export const approvePlanSchema = z.object({
   ifVersion: version.optional(),
 })
 
@@ -312,6 +329,8 @@ export type ReleaseTicketInput = z.input<typeof releaseTicketSchema>
 export type HeartbeatInput = z.input<typeof heartbeatSchema>
 export type ReleaseIdleInput = z.input<typeof releaseIdleSchema>
 export type SubmitForReviewInput = z.input<typeof submitForReviewSchema>
+export type PostPlanInput = z.input<typeof postPlanSchema>
+export type ApprovePlanInput = z.input<typeof approvePlanSchema>
 export type ClaimNextInput = z.input<typeof claimNextSchema>
 export type MergeRunInput = z.input<typeof mergeRunSchema>
 export type MergeTicketInput = z.input<typeof mergeTicketSchema>

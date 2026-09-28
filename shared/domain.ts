@@ -45,6 +45,23 @@ export const CANCELLED_COLUMN = 'cancelled'
  */
 export const AGENT_RUN_STALLED_MINUTES = 3
 
+/** Sizes an agent estimates a ticket at when it posts its plan (`POST /tickets/:id/plan`), smallest first. */
+export const TICKET_SIZES = ['S', 'M', 'L'] as const
+export type TicketSize = (typeof TICKET_SIZES)[number]
+
+/**
+ * Whether a ticket estimated at `size` waits for a person's approval on a board that holds tickets of `approvalSize`
+ * and larger (see `BoardSummary.approvalSize`).
+ */
+export const needsApproval = (size: TicketSize, approvalSize: TicketSize | null) =>
+  approvalSize !== null && TICKET_SIZES.indexOf(size) >= TICKET_SIZES.indexOf(approvalSize)
+
+/**
+ * Where a ticket is with approval of its agent's plan: `pending` while the agent waits for a person to approve it
+ * (`POST /tickets/:id/approve`) before it works the ticket, `approved` once someone has.
+ */
+export type Approval = 'pending' | 'approved'
+
 /**
  * Name a board's agent claims tickets under: `<agent>/<model>/<effort>`, e.g. `claude/opus/high`. The agent name
  * itself belongs to the board's controller (scripts/agent-loop.sh), which starts one of these workers per run.
@@ -218,6 +235,11 @@ export interface BoardSummary {
    * asked for, but still found by the ticket list and search. Never archived when not set.
    */
   archiveDoneDays: number | null
+  /**
+   * Smallest size estimate (see `TICKET_SIZES`) at which the agent waits for a person to approve its plan before it
+   * works a ticket, e.g. `L` holds only large tickets and `S` every one. Never waits when not set.
+   */
+  approvalSize: TicketSize | null
   ticketCount: number
   createdAt: string
   updatedAt: string
@@ -268,10 +290,14 @@ export interface Ticket {
   /** The agent run working the ticket right now, if any (see `AgentRun`). */
   run: AgentRun | null
   /**
-   * When its agent started waiting on an answer: set while the newest comment is from its assignee and it's worked
-   * (not in review or done).
+   * When its agent started waiting on a person: set while the newest comment is from its assignee, or its assignee's
+   * plan is newer than every comment and waits for approval, and it's worked (not in review or done).
    */
   waitingSince: string | null
+  /** The size its agent estimated it at in its latest plan (`POST /tickets/:id/plan`); null before it posted one. */
+  estimate: TicketSize | null
+  /** Whether its agent's plan waits for approval or has it (see `Approval`); null when it doesn't need any. */
+  approval: Approval | null
   /** When the ticket entered its current column. */
   movedAt: string
   /** Whether it has been in the board's done column for longer than the board's `archiveDoneDays`. */
@@ -326,6 +352,8 @@ export type Activity =
   | ActivityBase<'claimed', { assignee: string }>
   | ActivityBase<'released', { assignee: string }>
   | ActivityBase<'comment', { body: string }>
+  | ActivityBase<'plan', { body: string; estimate: TicketSize; held: boolean }>
+  | ActivityBase<'approved', { estimate: TicketSize | null }>
   | ActivityBase<'attachment', { attachmentId: string; filename: string; contentType: AttachmentType }>
   | ActivityBase<'pull_request', { url: string; event: 'linked' | 'unlinked' | Exclude<PullRequestState, 'unknown'> }>
 
@@ -458,8 +486,10 @@ export interface OverviewTicket {
   state: WorkState
   /** When the ticket entered its current state. */
   since: string
-  /** When its agent started waiting on an answer (see `Ticket.waitingSince`). */
+  /** When its agent started waiting on an answer or approval (see `Ticket.waitingSince`). */
   waitingSince: string | null
+  /** Whether its agent's plan waits for approval or has it (see `Ticket.approval`). */
+  approval: Approval | null
   pullRequest: Pick<PullRequest, 'url' | 'state'> | null
 }
 

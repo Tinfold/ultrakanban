@@ -18,6 +18,9 @@ priorities, due dates, checklists, comments and an activity log, backed by SQLit
   `question`) are answered in a comment instead, and you close them yourself by moving them to Done
 - **Sub-tickets**: agents split a big ticket into sub-tickets that link back to it; its card shows how many are done,
   and the agent comes back to it only once they all are
+- **Plans and approval**: agents post a short plan with a size estimate (S, M or L) when they start a ticket;
+  optionally, per board, tickets estimated at a given size or larger wait for you to approve the plan on the ticket
+  before the agent spends more tokens on them
 - **Merge all**: merge every pull request in review with one click, one at a time and in an order that avoids
   conflicts (stacked pull requests after the ones they build on); any that conflict after earlier merges are skipped
   for their agent to resolve
@@ -190,6 +193,13 @@ priorities or drag tickets into the order of your roadmap to decide what it work
 those whose description says they wait for another ticket (`blocked by #12`, `depends on #3 and #4`) until that ticket
 is done or its pull request is merged, and tickets whose sub-tickets aren't all done yet. An agent that finds a ticket blocked marks it this way before handing it back,
 so the loop doesn't keep claiming it only to find out again that it can't be done yet.
+
+**Approval.** Each run that starts a ticket first posts a short plan with a size estimate (S, M or L), shown in the
+ticket's activity and on its card. Set **Wait for approval of the plan on** (`approvalSize`) to hold large tickets, or
+medium and large ones, or every ticket: the run stops after posting the plan, and the ticket waits in **In progress**
+with an **Awaiting approval** badge (and in the overview's waiting list) until you press **Approve plan** on the ticket.
+That starts the next run, which does the work. Comment on the ticket instead to ask for a different plan: the agent
+answers and posts a revised one, and waits again. Move the ticket back to Backlog or cancel it to drop it.
 
 **Names.** The board's **Agent name** (default `claude`) names the loop, which controls the work; its notes on
 tickets come from `<agent>-loop`. The runs it starts claim tickets as `<agent>/<model>/<effort>`, from the board's

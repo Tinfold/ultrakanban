@@ -3,6 +3,7 @@ import { bodyLimit } from 'hono/body-limit'
 import { ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES } from '../../shared/domain.ts'
 import { parseChecklist } from '../../shared/checklist.ts'
 import {
+  approvePlanSchema,
   checkItemSchema,
   claimTicketSchema,
   commentSchema,
@@ -10,6 +11,7 @@ import {
   heartbeatSchema,
   mergeTicketSchema,
   moveTicketSchema,
+  postPlanSchema,
   recordUsageSchema,
   releaseTicketSchema,
   submitForReviewSchema,
@@ -24,6 +26,7 @@ import { listActivity } from '../store/activity.ts'
 import { createAttachment, listAttachments } from '../store/attachments.ts'
 import {
   addComment,
+  approvePlan,
   checkItem,
   claimTicket,
   createTicket,
@@ -31,6 +34,7 @@ import {
   getTicket,
   listSubtickets,
   moveTicket,
+  postPlan,
   recordHeartbeat,
   endRun,
   releaseTicket,
@@ -66,6 +70,15 @@ export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles }: AppS
       if (!Number.isInteger(index) || index < 0) throw badRequest('Checklist item index must be a whole number, from 0')
       const input = await readJson(c, checkItemSchema)
       return c.json(transaction(() => checkItem(c.req.param('ticketId'), index, input, actorOf(c))))
+    })
+    .post('/:ticketId/plan', async (c) => {
+      const input = await readJson(c, postPlanSchema)
+      return c.json(transaction(() => postPlan(c.req.param('ticketId'), input)))
+    })
+    .post('/:ticketId/approve', async (c) => {
+      // The body is optional: it only carries ifVersion.
+      const input = (await c.req.text()) ? await readJson(c, approvePlanSchema) : {}
+      return c.json(transaction(() => approvePlan(c.req.param('ticketId'), input, actorOf(c))))
     })
     .post('/:ticketId/review', async (c) => {
       const input = await readJson(c, submitForReviewSchema)

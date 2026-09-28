@@ -25,6 +25,7 @@ export type BoardPatch = Partial<
     | 'agentAllSkills'
     | 'autoMerge'
     | 'archiveDoneDays'
+    | 'approvalSize'
   >
 >
 export type TicketPatch = Partial<

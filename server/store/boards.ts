@@ -1,4 +1,4 @@
-import type { AgentEffort, BoardDetail, BoardSummary } from '../../shared/domain.ts'
+import type { AgentEffort, BoardDetail, BoardSummary, TicketSize } from '../../shared/domain.ts'
 import type { CreateBoardInput, UpdateBoardInput } from '../../shared/schemas.ts'
 import { newId, now, sql, touchBoard, updateRow } from '../db.ts'
 import { badRequest, notFound } from '../errors.ts'
@@ -22,6 +22,7 @@ interface BoardRow {
   agent_all_skills: number
   auto_merge: number
   archive_done_days: number | null
+  approval_size: TicketSize | null
   ticket_count: number
   created_at: string
   updated_at: string
@@ -47,6 +48,7 @@ const toBoard = (row: BoardRow): BoardSummary => ({
   agentAllSkills: row.agent_all_skills === 1,
   autoMerge: row.auto_merge === 1,
   archiveDoneDays: row.archive_done_days,
+  approvalSize: row.approval_size,
   ticketCount: row.ticket_count,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -100,6 +102,7 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     agentAllSkills,
     autoMerge,
     archiveDoneDays,
+    approvalSize,
   } = input
   return updateBoard(id, {
     reviewColumn,
@@ -114,6 +117,7 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     agentAllSkills,
     autoMerge,
     archiveDoneDays,
+    approvalSize,
   })
 }
 
@@ -135,6 +139,7 @@ export function updateBoard(id: string, input: UpdateBoardInput): BoardSummary {
     agent_all_skills: input.agentAllSkills === undefined ? undefined : Number(input.agentAllSkills),
     auto_merge: input.autoMerge === undefined ? undefined : Number(input.autoMerge),
     archive_done_days: input.archiveDoneDays,
+    approval_size: input.approvalSize,
   })
   const board = getBoard(id)
   if (board.agentEnabled && !board.githubRepo) {

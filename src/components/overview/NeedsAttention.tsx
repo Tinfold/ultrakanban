@@ -43,7 +43,7 @@ function Group({ title, tickets, now, waiting }: GroupProps) {
                 dateTime={timedFrom(ticket)}
                 title={
                   waiting
-                    ? `Waiting for an answer since ${formatDateTime(timedFrom(ticket))}`
+                    ? `Waiting for ${ticket.approval === 'pending' ? 'approval of its plan' : 'an answer'} since ${formatDateTime(timedFrom(ticket))}`
                     : `In ${ticket.column} since ${formatDateTime(ticket.since)}`
                 }
                 className="shrink-0 text-muted-foreground tabular-nums"
@@ -85,7 +85,7 @@ export function NeedsAttention({ waiting, review, stalled, now }: NeedsAttention
 
   return (
     <div className="grid grid-cols-1 gap-3 rounded-xl border bg-card p-2">
-      <Group title="Agent waiting for an answer, oldest first" tickets={waiting} now={now} waiting />
+      <Group title="Agent waiting for an answer or approval, oldest first" tickets={waiting} now={now} waiting />
       <Group title="Waiting for review, oldest first" tickets={review} now={now} />
       <Group title="Worked for over a day without moving" tickets={stalled} now={now} />
     </div>
