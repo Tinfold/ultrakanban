@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import {
   boardDetailQuerySchema,
   boardExportSchema,
+  bulkTicketsSchema,
   claimNextSchema,
   createBoardSchema,
   createColumnSchema,
@@ -23,6 +24,7 @@ import { createBoard, deleteBoard, getBoard, getBoardDetail, listBoards, updateB
 import { createColumn } from '../store/columns.ts'
 import { createTag } from '../store/tags.ts'
 import {
+  bulkUpdateTickets,
   claimNextTicket,
   createTicket,
   getTicketByNumber,
@@ -121,6 +123,11 @@ export const boardRoutes = ({ pullRequests, mergeQueue }: AppServices) =>
       const ticket = transaction(() => createTicket(c.req.param('boardId'), input, actorOf(c)))
       pullRequests.checkSoon(ticket)
       return c.json(ticket, 201)
+    })
+    .post('/:boardId/tickets/bulk', async (c) => {
+      const boardId = getBoard(c.req.param('boardId')).id
+      const input = await readJson(c, bulkTicketsSchema)
+      return c.json({ tickets: transaction(() => bulkUpdateTickets(boardId, input, actorOf(c))) })
     })
     .post('/:boardId/tickets/claim-next', async (c) => {
       const input = await readJson(c, claimNextSchema)

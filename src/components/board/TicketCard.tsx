@@ -3,6 +3,8 @@ import { CSS } from '@dnd-kit/utilities'
 import {
   BanIcon,
   CalendarIcon,
+  CircleCheckIcon,
+  CircleIcon,
   CoinsIcon,
   CornerLeftUpIcon,
   GitMergeConflictIcon,
@@ -26,6 +28,7 @@ import { cn } from '@/lib/utils'
 import { useBoardContext } from './board-context'
 import { QuickMergeButton } from './QuickMergeButton'
 import { RunStatus } from './RunStatus'
+import { useSelection } from './selection-context'
 
 const DUE_STYLES = {
   overdue: 'text-red-600 dark:text-red-400',
@@ -36,9 +39,12 @@ const DUE_STYLES = {
 interface TicketCardProps {
   ticket: Ticket
   overlay?: boolean
+  /** Shows whether the ticket is selected, while tickets are being selected. */
+  selecting?: boolean
+  selected?: boolean
 }
 
-export function TicketCard({ ticket, overlay }: TicketCardProps) {
+export function TicketCard({ ticket, overlay, selecting, selected }: TicketCardProps) {
   const { detail, tagsById, ticketsById } = useBoardContext()
   const checklist = checklistProgress(ticket.description)
   const tags = ticket.tagIds.flatMap((tagId) => tagsById.get(tagId) ?? [])
@@ -58,6 +64,7 @@ export function TicketCard({ ticket, overlay }: TicketCardProps) {
     ticket.waitingSince
   const canMerge =
     !overlay &&
+    !selecting &&
     ticket.columnId === detail.board.reviewColumnId &&
     (ticket.pullRequest?.state === 'open' || ticket.pullRequest?.state === 'unknown')
 
@@ -66,9 +73,16 @@ export function TicketCard({ ticket, overlay }: TicketCardProps) {
       className={cn(
         'rounded-lg border bg-card px-3 py-2.5 text-card-foreground shadow-xs transition-[border-color,box-shadow] hover:border-foreground/15',
         overlay && 'rotate-[1.5deg] cursor-grabbing border-foreground/20 shadow-xl',
+        selected && 'border-primary/60 bg-primary/5 ring-1 ring-primary/60 hover:border-primary/60',
       )}
     >
       <div className="flex items-center gap-1.5">
+        {selecting &&
+          (selected ? (
+            <CircleCheckIcon className="size-3.5 shrink-0 text-primary" aria-label="Selected" />
+          ) : (
+            <CircleIcon className="size-3.5 shrink-0 text-muted-foreground/60" aria-label="Not selected" />
+          ))}
         <PriorityIcon priority={ticket.priority} className="size-3.5" />
         <span className="font-mono text-[11px] text-muted-foreground">{ticketRef(ticket.number)}</span>
         {parent && (
@@ -181,6 +195,8 @@ interface SortableTicketCardProps {
 }
 
 export function SortableTicketCard({ ticket, onOpen }: SortableTicketCardProps) {
+  const selection = useSelection()
+  const selected = selection.isSelected(ticket.id)
   const { setNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({
     id: ticket.id,
     data: { type: 'ticket' },
@@ -197,14 +213,22 @@ export function SortableTicketCard({ ticket, onOpen }: SortableTicketCardProps) 
       )}
       aria-label={`${ticketRef(ticket.number)} ${ticket.title}`}
       {...attributes}
+      aria-pressed={selection.selecting ? selected : undefined}
       {...listeners}
-      onClick={() => onOpen(ticket.id)}
+      onClick={(event) => {
+        // Ctrl/cmd-click and shift-click select tickets; once any is, a plain click (or tap) does too.
+        if (event.shiftKey || event.metaKey || event.ctrlKey || selection.selecting) {
+          event.preventDefault()
+          selection.click(ticket.id, event.shiftKey)
+        } else onOpen(ticket.id)
+      }}
       onKeyDown={(event) => {
-        if (event.key === 'Enter') onOpen(ticket.id)
+        if (event.key === 'Enter' && selection.selecting) selection.click(ticket.id, event.shiftKey)
+        else if (event.key === 'Enter') onOpen(ticket.id)
         else listeners?.onKeyDown?.(event)
       }}
     >
-      <TicketCard ticket={ticket} />
+      <TicketCard ticket={ticket} selecting={selection.selecting} selected={selected} />
     </div>
   )
 }

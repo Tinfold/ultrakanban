@@ -177,6 +177,30 @@ export const moveTicketSchema = z.object({
   force,
 })
 
+/**
+ * Changes several tickets of a board at once, all or nothing: moves them (appended, in the order given), sets their
+ * priority, adds and removes tags, or deletes them.
+ */
+export const bulkTicketsSchema = z
+  .object({
+    tickets: z.array(ref).min(1).max(500),
+    moveTo: ref.optional(),
+    force,
+    priority: priority.optional(),
+    addTags: z.array(ref).max(50).optional(),
+    removeTags: z.array(ref).max(50).optional(),
+    delete: z.literal(true).optional(),
+  })
+  .refine(
+    (input) => input.moveTo || input.priority || input.addTags?.length || input.removeTags?.length || input.delete,
+    {
+      message: 'Say what to do: moveTo, priority, addTags, removeTags or delete',
+    },
+  )
+  .refine((input) => !input.delete || !(input.moveTo || input.priority || input.addTags || input.removeTags), {
+    message: 'delete cannot be combined with other changes',
+  })
+
 export const submitForReviewSchema = z.object({
   agent: name,
   /** Left out for a question ticket (tagged `question`), which is answered in `comment` instead. */
@@ -319,6 +343,7 @@ export type CreateSubticketInput = z.input<typeof createSubticketSchema>
 export type UpdateTicketInput = z.input<typeof updateTicketSchema>
 export type CheckItemInput = z.input<typeof checkItemSchema>
 export type MoveTicketInput = z.input<typeof moveTicketSchema>
+export type BulkTicketsInput = z.input<typeof bulkTicketsSchema>
 export type ClaimTicketInput = z.input<typeof claimTicketSchema>
 export type ReleaseTicketInput = z.input<typeof releaseTicketSchema>
 export type HeartbeatInput = z.input<typeof heartbeatSchema>
