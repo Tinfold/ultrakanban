@@ -144,6 +144,27 @@ describe('pull request workflow', () => {
     pullRequestStatuses.clear()
   })
 
+  test('tracks the combined status of the pull request checks', async () => {
+    const url = 'https://github.com/acme/app/pull/78'
+    const ticket = await addTicket({ title: 'A', pullRequest: url })
+    const sync = async () =>
+      (await call<Ticket>('POST', `/tickets/${ticket.id}/pull-request/sync`)).body.pullRequest?.checks
+
+    assert.equal(ticket.pullRequest?.checks, null)
+    pullRequestStatuses.set(url, { state: 'open', title: 'Some PR', checks: 'pending' })
+    assert.equal(await sync(), 'pending')
+    pullRequestStatuses.set(url, { state: 'open', title: 'Some PR', checks: 'failing' })
+    assert.equal(await sync(), 'failing')
+    // GitHub hasn't worked it out yet: the last answer stands.
+    pullRequestStatuses.set(url, { state: 'open', title: 'Some PR', checks: null })
+    assert.equal(await sync(), 'failing')
+    pullRequestStatuses.set(url, { state: 'open', title: 'Some PR', checks: 'passing' })
+    assert.equal(await sync(), 'passing')
+    pullRequestStatuses.set(url, { state: 'closed', title: 'Some PR', checks: 'passing' })
+    assert.equal(await sync(), null)
+    pullRequestStatuses.clear()
+  })
+
   test('asks for the merge conflicts in the review column to be fixed', async () => {
     const sync = async (ticket: Ticket) => call('POST', `/tickets/${ticket.id}/pull-request/sync`)
     const conflicting = await addTicket({ title: 'A', column: 'Review', pullRequest: `${PR}1` })

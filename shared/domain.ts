@@ -55,6 +55,10 @@ export const PULL_REQUEST_STATES = ['unknown', 'open', 'draft', 'merged', 'close
 /** `unknown` until GitHub has been checked (or when it can't be reached). */
 export type PullRequestState = (typeof PULL_REQUEST_STATES)[number]
 
+export const CHECK_STATUSES = ['pending', 'passing', 'failing'] as const
+/** GitHub's combined status for the pull request's head commit. */
+export type CheckStatus = (typeof CHECK_STATUSES)[number]
+
 export interface PullRequest {
   url: string
   /** `owner/name` */
@@ -64,6 +68,8 @@ export interface PullRequest {
   title: string | null
   /** Whether GitHub last found that it can't merge cleanly into its base branch (only open and draft ones). */
   conflicts: boolean
+  /** Combined status of its checks; `null` when it has none, or isn't open or draft. */
+  checks: CheckStatus | null
   checkedAt: string | null
 }
 

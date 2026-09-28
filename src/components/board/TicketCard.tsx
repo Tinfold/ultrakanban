@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { openBlockers } from '@shared/blockers'
 import type { Ticket } from '@shared/domain'
+import { CheckStatusIcon } from '@/components/common/CheckStatusIcon'
 import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { PullRequestIcon } from '@/components/common/PullRequestIcon'
 import { TagChip } from '@/components/common/TagChip'
@@ -101,6 +102,7 @@ export function TicketCard({ ticket, overlay }: TicketCardProps) {
           {ticket.pullRequest && (
             <span className="flex items-center gap-1 tabular-nums" title={ticket.pullRequest.title ?? undefined}>
               <PullRequestIcon state={ticket.pullRequest.state} />#{ticket.pullRequest.number}
+              {ticket.pullRequest.checks && <CheckStatusIcon status={ticket.pullRequest.checks} />}
             </span>
           )}
           {ticket.pullRequest?.conflicts && (
