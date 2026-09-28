@@ -11,6 +11,7 @@ import { parseChecklist } from '../shared/checklist.ts'
 import { newId, now } from './db.ts'
 import { badRequest, conflict, HttpError } from './errors.ts'
 import type { GitHubPullRequest } from './github.ts'
+import type { Notifier } from './notifications.ts'
 import type { PullRequestSync } from './pull-request-sync.ts'
 import { getBoard, listBoards } from './store/boards.ts'
 import { getTicket, listTickets } from './store/tickets.ts'
@@ -20,6 +21,8 @@ export interface MergeQueueOptions {
   pollMs?: number
   /** Checks before going ahead without GitHub's answer. */
   maxPolls?: number
+  /** Tells boards without auto-merge when a pull request is ready to merge. */
+  notifier?: Notifier
 }
 
 export type MergeQueue = ReturnType<typeof createMergeQueue>
@@ -100,7 +103,7 @@ function mergeOrder(entries: PlanEntry[]) {
  */
 export function createMergeQueue(
   pullRequests: PullRequestSync,
-  { pollMs = 2000, maxPolls = 15 }: MergeQueueOptions = {},
+  { pollMs = 2000, maxPolls = 15, notifier }: MergeQueueOptions = {},
 ) {
   const { github } = pullRequests
   /** The latest run per board. */
@@ -304,17 +307,8 @@ export function createMergeQueue(
    * ready too. Returns the run, or null when none were ready (or another run is going), without starting one.
    */
   async function autoMerge(boardId: string) {
-    const reviewColumnId = getBoard(boardId).reviewColumnId
-    if (!reviewColumnId) return null
     // Asks GitHub only when a ticket could be ready: most of the time none is.
-    const candidates = listTickets(boardId, { column: reviewColumnId }).filter(
-      (ticket) =>
-        ticket.pullRequest &&
-        !['merged', 'closed'].includes(ticket.pullRequest.state) &&
-        !ticket.pullRequest.conflicts &&
-        checklistDone(ticket),
-    )
-    if (!candidates.length) return null
+    if (!mergeCandidates(boardId).length) return null
     const current = runs.get(boardId)
     if (starting.has(boardId) || current?.status === 'running') return null
 
@@ -338,18 +332,57 @@ export function createMergeQueue(
     })
   }
 
-  /** Runs `autoMerge` on every board that has it switched on, one board at a time. */
+  /** The review column's tickets whose pull request could be ready to merge, going by what the board knows. */
+  function mergeCandidates(boardId: string) {
+    const reviewColumnId = getBoard(boardId).reviewColumnId
+    if (!reviewColumnId) return []
+    return listTickets(boardId, { column: reviewColumnId }).filter(
+      (ticket) =>
+        ticket.pullRequest &&
+        !['merged', 'closed'].includes(ticket.pullRequest.state) &&
+        !ticket.pullRequest.conflicts &&
+        checklistDone(ticket),
+    )
+  }
+
+  /**
+   * Notifies the board of each pull request in its review column that is ready to merge (see `autoMerge`), once
+   * per commit. Returns the tickets it notified about.
+   */
+  async function notifyReady(boardId: string) {
+    const notified: Ticket[] = []
+    for (const ticket of mergeCandidates(boardId)) {
+      const { repo, number, url } = ticket.pullRequest!
+      const pullRequest = await github.getPullRequest(repo, number).catch(() => null)
+      if (!pullRequest || !readyToMerge(pullRequest)) continue
+      const message = `${pullRequest.title}: every check passed and it has no conflicts. ${url}`
+      if (notifier?.notify(ticket, 'ready', `ready:${pullRequest.headSha}`, message)) notified.push(ticket)
+    }
+    return notified
+  }
+
+  /**
+   * Runs `autoMerge` on every board that has it switched on, and `notifyReady` on the other boards that send
+   * notifications, one board at a time.
+   */
   async function autoMergeAll() {
-    for (const board of listBoards().filter((board) => board.autoMerge)) {
-      await autoMerge(board.id).catch((error) =>
-        console.warn(`Auto-merge failed for board ${board.id}: ${errorMessage(error)}`),
-      )
+    for (const board of listBoards()) {
+      if (board.autoMerge) {
+        await autoMerge(board.id).catch((error) =>
+          console.warn(`Auto-merge failed for board ${board.id}: ${errorMessage(error)}`),
+        )
+      } else if (board.notifyUrl && notifier) {
+        await notifyReady(board.id).catch((error) =>
+          console.warn(`Checking for ready pull requests failed for board ${board.id}: ${errorMessage(error)}`),
+        )
+      }
     }
   }
 
   return {
     plan,
     autoMerge,
+    notifyReady,
     autoMergeAll,
 
     /** Runs `autoMergeAll` now and then every `intervalMs`, never two at once. */

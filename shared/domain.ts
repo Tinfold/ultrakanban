@@ -240,6 +240,11 @@ export interface BoardSummary {
    * works a ticket, e.g. `L` holds only large tickets and `S` every one. Never waits when not set.
    */
   approvalSize: TicketSize | null
+  /**
+   * Where to send a message when a ticket needs a person (an agent asks a question, CI needs someone, a pull request
+   * is ready to merge): an ntfy topic, a Discord webhook or any other webhook URL. Nothing is sent when not set.
+   */
+  notifyUrl: string | null
   ticketCount: number
   createdAt: string
   updatedAt: string

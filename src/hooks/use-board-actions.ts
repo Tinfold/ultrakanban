@@ -5,7 +5,12 @@ import type { BoardDetail, MergeMethod } from '@shared/domain'
 import type { CreateColumnInput, CreateTagInput, CreateTicketInput } from '@shared/schemas'
 import { api, errorMessage } from '@/lib/api'
 import * as updates from '@/lib/board-updates'
+import { ticketRef } from '@/lib/format'
+import { pendingDeletes, UNDO_DELAY } from '@/lib/pending-deletes'
 import { queryKeys } from './queries'
+
+// Deletes still waiting for their undo toast to close are sent before the page goes away.
+window.addEventListener('pagehide', () => pendingDeletes.flush())
 
 export type BoardActions = ReturnType<typeof useBoardActions>
 
@@ -120,12 +125,28 @@ export function useBoardActions(boardId: string) {
           (d) => updates.patchTicket(d, ticketId, patch),
         )
       },
-      /** `force` skips the done column's merged pull request requirement. */
-      moveTicket: (ticketId: string, columnId: string, position?: number, force?: boolean) =>
-        run(
-          () => api.moveTicket(ticketId, { column: columnId, position, force }),
-          (d) => updates.moveTicket(d, ticketId, columnId, position),
-        ),
+      /**
+       * `force` skips the done column's merged pull request requirement. Offers to undo the move, since drags misfire
+       * easily on touch screens.
+       */
+      moveTicket: async (ticketId: string, columnId: string, position?: number, force?: boolean) => {
+        const detail = queryClient.getQueryData<BoardDetail>(boardKey)
+        const from = detail && updates.placementOf(detail, ticketId)
+        const move = (to: string, at?: number, forced?: boolean) =>
+          run(
+            () => api.moveTicket(ticketId, { column: to, position: at, force: forced }),
+            (d) => updates.moveTicket(d, ticketId, to, at),
+          )
+        const ticket = await move(columnId, position, force)
+        if (ticket && from) {
+          const column = detail.columns.find((candidate) => candidate.id === columnId)
+          toast(`Moved ${ticketRef(ticket.number)}${column ? ` to ${column.name}` : ''}`, {
+            // It was there before, so it may go back even if that is the done column.
+            action: { label: 'Undo', onClick: () => void move(from.columnId, from.position, true) },
+          })
+        }
+        return ticket
+      },
       linkPullRequest: (ticketId: string, url: string | null) =>
         run(
           () => api.updateTicket(ticketId, { pullRequest: url }),
@@ -146,11 +167,24 @@ export function useBoardActions(boardId: string) {
         if (ticket?.pullRequest) toast.success(`Merged ${ticket.pullRequest.repo}#${ticket.pullRequest.number}`)
         return ticket
       },
-      deleteTicket: (ticketId: string) =>
-        run(
-          () => api.deleteTicket(ticketId),
-          (d) => updates.removeTicket(d, ticketId),
-        ),
+      /** Hides the ticket at once but only deletes it when the undo toast closes. */
+      deleteTicket: (ticketId: string) => {
+        const ticket = queryClient.getQueryData<BoardDetail>(boardKey)?.tickets.find(({ id }) => id === ticketId)
+        pendingDeletes.schedule(ticketId, () => void run(() => api.deleteTicket(ticketId)))
+        void queryClient.cancelQueries({ queryKey: boardKey })
+        update((d) => updates.removeTicket(d, ticketId))
+        const undo = () => {
+          if (!pendingDeletes.cancel(ticketId)) return void toast.error('The ticket was already deleted')
+          if (ticket) update((d) => updates.addTicket(d, ticket))
+          void queryClient.invalidateQueries({ queryKey: boardKey })
+        }
+        toast(`Deleted ${ticket ? ticketRef(ticket.number) : 'the ticket'}`, {
+          duration: UNDO_DELAY,
+          action: { label: 'Undo', onClick: undo },
+          onDismiss: () => pendingDeletes.commit(ticketId),
+          onAutoClose: () => pendingDeletes.commit(ticketId),
+        })
+      },
       addComment: async (ticketId: string, body: string) => {
         const comment = await run(() => api.addComment(ticketId, body))
         await queryClient.invalidateQueries({ queryKey: queryKeys.activity(ticketId) })

@@ -71,10 +71,12 @@ heartbeat() {
 # Tells the board the run on a ticket has ended.
 end_run() { curl -s -o /dev/null -X DELETE "$KANBAN/api/tickets/$1/heartbeat" -H "X-Actor: $worker"; }
 
-# Comments on a ticket as the loop rather than the agent.
+# Comments on a ticket as the loop rather than the agent. With a third argument "notify", the comment needs a
+# person, so the board also sends its notification (if it has a notifyUrl).
 note() {
   curl -s -o /dev/null -X POST "$KANBAN/api/tickets/$1/comments" \
-    -H 'Content-Type: application/json' -H "X-Actor: $LOOP_ACTOR" -d "$(jq -nc --arg body "$2" '{body: $body}')"
+    -H 'Content-Type: application/json' -H "X-Actor: $LOOP_ACTOR" \
+    -d "$(jq -nc --arg body "$2" --arg notify "${3:-}" '{body: $body} + if $notify == "notify" then {notify: true} else {} end')"
 }
 
 # All pages of a GitHub REST list as one array.

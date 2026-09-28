@@ -40,10 +40,11 @@ export class ApiError extends Error {
 }
 
 /** Sends JSON, or `FormData` as multipart (the browser sets its content type). */
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, keepalive?: boolean): Promise<T> {
   const json = body !== undefined && !(body instanceof FormData)
   const response = await fetch(`/api${path}`, {
     method,
+    keepalive,
     headers: { 'X-Actor': readActor(), ...(json && { 'Content-Type': 'application/json' }) },
     body: json ? JSON.stringify(body) : (body as FormData | undefined),
   })
@@ -91,7 +92,8 @@ export const api = {
     request<Ticket>('POST', `/boards/${boardId}/tickets`, input),
   updateTicket: (ticketId: string, input: UpdateTicketInput) => request<Ticket>('PATCH', `/tickets/${ticketId}`, input),
   moveTicket: (ticketId: string, input: MoveTicketInput) => request<Ticket>('POST', `/tickets/${ticketId}/move`, input),
-  deleteTicket: (ticketId: string) => request<void>('DELETE', `/tickets/${ticketId}`),
+  /** Kept alive so a delete sent as the page closes still arrives. */
+  deleteTicket: (ticketId: string) => request<void>('DELETE', `/tickets/${ticketId}`, undefined, true),
   listActivity: (ticketId: string) => request<Activity[]>('GET', `/tickets/${ticketId}/activity`),
   approvePlan: (ticketId: string) => request<Ticket>('POST', `/tickets/${ticketId}/approve`),
   syncPullRequest: (ticketId: string) => request<Ticket>('POST', `/tickets/${ticketId}/pull-request/sync`),

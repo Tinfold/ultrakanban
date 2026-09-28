@@ -135,6 +135,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
       autoMerge: data.get('autoMerge') === 'on',
       archiveDoneDays: archiveDays >= 1 ? Math.round(archiveDays) : null,
       approvalSize: approvalSize === NONE ? null : (approvalSize as TicketSize),
+      notifyUrl: text('notifyUrl'),
     })
     onClose()
   }
@@ -380,6 +381,25 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
           <p className="text-xs text-muted-foreground">
             The agent posts a short plan with a size estimate (S, M or L) when it starts a ticket. Tickets estimated at
             these sizes wait until someone approves the plan on the ticket, before the agent spends more tokens on them.
+          </p>
+        </div>
+      </fieldset>
+
+      <fieldset className="grid gap-3 border-t pt-4">
+        <legend className="sr-only">Notifications</legend>
+        <div className="grid gap-2">
+          <Label htmlFor="board-settings-notify">Notify at</Label>
+          <Input
+            id="board-settings-notify"
+            name="notifyUrl"
+            type="url"
+            defaultValue={detail.board.notifyUrl ?? ''}
+            placeholder="https://ntfy.sh/your-topic"
+          />
+          <p className="text-xs text-muted-foreground">
+            Sends a message when a ticket needs you: an agent asks a question, CI needs someone to look at it, a plan
+            waits for approval, a question is answered or a pull request is ready to merge. Takes an ntfy topic, a
+            Discord webhook or any other webhook URL, which gets the notification as JSON. Leave empty to send nothing.
           </p>
         </div>
       </fieldset>

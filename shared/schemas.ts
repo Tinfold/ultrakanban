@@ -47,6 +47,12 @@ const agentEffort = z.enum(AGENT_EFFORTS).nullable()
 const agentConcurrency = z.int().min(1).max(AGENT_MAX_CONCURRENCY).nullable()
 const archiveDoneDays = z.int().min(1).max(3650).nullable()
 const ticketSize = z.enum(TICKET_SIZES)
+const notifyUrl = z
+  .string()
+  .trim()
+  .max(2000)
+  .regex(/^https?:\/\/\S+$/, 'Must be an http(s) URL')
+  .nullable()
 /** Skips the merged-pull-request requirement of the board's done column. Meant for humans, not agents. */
 const force = z.boolean().optional()
 
@@ -67,6 +73,7 @@ export const createBoardSchema = z.object({
   autoMerge: z.boolean().optional(),
   archiveDoneDays: archiveDoneDays.optional(),
   approvalSize: ticketSize.nullable().optional(),
+  notifyUrl: notifyUrl.optional(),
 })
 
 export const updateBoardSchema = z.object({
@@ -85,6 +92,7 @@ export const updateBoardSchema = z.object({
   autoMerge: z.boolean().optional(),
   archiveDoneDays: archiveDoneDays.optional(),
   approvalSize: ticketSize.nullable().optional(),
+  notifyUrl: notifyUrl.optional(),
 })
 
 /** Creates a repository on GitHub and links it to the board. */
@@ -250,7 +258,11 @@ export const recordUsageSchema = z.object({
     .default([]),
 })
 
-export const commentSchema = z.object({ body: z.string().trim().min(1).max(20_000) })
+export const commentSchema = z.object({
+  body: z.string().trim().min(1).max(20_000),
+  /** Also sends the board's notification (its `notifyUrl`): the comment needs a person, e.g. CI didn't run. */
+  notify: z.boolean().optional(),
+})
 
 export const listTicketsQuerySchema = z.object({
   column: ref.optional(),
