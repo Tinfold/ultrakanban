@@ -21,9 +21,15 @@
 #   - checks on the pull request's latest commit that ran and failed (see ci_status for what counts)
 #   - merge conflicts with the base branch
 #   - someone else moving the ticket into the in-progress column, e.g. back from review: they want more work on it
+#   - someone approving the ticket's plan (POST /tickets/:id/approve), when it waited for approval
 # A pull request closed without merging moves its ticket to the cancelled column. Only when none of its tickets
 # needs work does it claim the next ticket from the todo column, or, when the board's agentBacklog setting is on and
 # the todo column has none left and fewer than CLAIM_LIMIT tickets are in progress, from the backlog column.
+#
+# The first run on a claimed ticket posts a plan with a size estimate (POST /tickets/:id/plan) before it starts the
+# work. When the board holds tickets of that size for approval (its approvalSize setting), the run exits there and the
+# ticket waits in the in-progress column, without a run, until someone approves the plan: that starts the next run.
+# Comments on it meanwhile start runs that answer them and may post a revised plan, but don't start the work.
 #
 # People can drag the agent's tickets around the board too. A ticket someone moves back to the todo column, or to a
 # column before it such as a backlog, goes back to the queue: the loop releases it (unassigns it) and forgets its

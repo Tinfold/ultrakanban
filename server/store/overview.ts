@@ -1,5 +1,6 @@
 import {
   type Activity,
+  type Approval,
   addUsage,
   AGENT_DEFAULTS,
   AGENT_EFFORTS,
@@ -44,6 +45,7 @@ interface TicketRow {
   pr_url: string | null
   pr_state: string
   created_at: string
+  approval: Approval | null
   waiting_since: string | null
 }
 
@@ -105,7 +107,7 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
   }
 
   const tickets = sql.all<TicketRow>(
-    `SELECT id, board_id, column_id, number, title, assignee, pr_url, pr_state, created_at,
+    `SELECT id, board_id, column_id, number, title, assignee, pr_url, pr_state, created_at, approval,
        ${WAITING_SINCE} AS waiting_since
      FROM tickets t`,
   )
@@ -277,6 +279,7 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
       state,
       since: stateSince.get(ticket.id) ?? ticket.created_at,
       waitingSince: ticket.waiting_since,
+      approval: ticket.approval,
       pullRequest: ticket.pr_url ? { url: ticket.pr_url, state: ticket.pr_state as PullRequestState } : null,
     })
   }

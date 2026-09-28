@@ -155,6 +155,13 @@ export function useBoardActions(boardId: string) {
           (d) => updates.linkPullRequest(d, ticketId, url),
           updates.addTicket,
         ),
+      /** Approves the plan the ticket's agent waits on, so it goes on to work the ticket. */
+      approvePlan: async (ticketId: string) => {
+        const ticket = await run(() => api.approvePlan(ticketId), undefined, updates.addTicket)
+        await queryClient.invalidateQueries({ queryKey: queryKeys.activity(ticketId) })
+        if (ticket) toast.success('Plan approved; the agent will carry on')
+        return ticket
+      },
       syncPullRequest: (ticketId: string) => run(() => api.syncPullRequest(ticketId), undefined, updates.addTicket),
       /** Merges the ticket's pull request, which moves the ticket to the done column. */
       mergeTicket: async (ticketId: string, method: MergeMethod) => {

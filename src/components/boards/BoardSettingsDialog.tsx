@@ -17,11 +17,26 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { useGitHubStatus } from '@/hooks/queries'
-import { AGENT_DEFAULTS, AGENT_EFFORTS, AGENT_MAX_CONCURRENCY, type AgentEffort, agentWorkerName } from '@shared/domain'
+import {
+  AGENT_DEFAULTS,
+  AGENT_EFFORTS,
+  AGENT_MAX_CONCURRENCY,
+  type AgentEffort,
+  agentWorkerName,
+  TICKET_SIZES,
+  type TicketSize,
+} from '@shared/domain'
 
 const NONE = '__none'
 const DEFAULT_EFFORT = '__default'
 const DEFAULT_CONCURRENCY = '__default'
+
+/** Choices for which estimated sizes the agent waits for approval on, by the smallest one held. */
+const APPROVAL_CHOICES: Record<TicketSize, string> = {
+  L: 'Large (L) tickets',
+  M: 'Medium and large (M, L) tickets',
+  S: 'Every ticket',
+}
 
 function ColumnSelect({ id, name, value }: { id: string; name: string; value: string | null }) {
   const { detail } = useBoardContext()
@@ -103,6 +118,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
     }
     const text = (field: string) => String(data.get(field) ?? '').trim() || null
     const archiveDays = Number(text('archiveDoneDays'))
+    const approvalSize = String(data.get('approvalSize') ?? NONE)
     void actions.updateBoard({
       name,
       description: String(data.get('description') ?? ''),
@@ -118,6 +134,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
       agentAllSkills: data.get('agentAllSkills') === 'on',
       autoMerge: data.get('autoMerge') === 'on',
       archiveDoneDays: archiveDays >= 1 ? Math.round(archiveDays) : null,
+      approvalSize: approvalSize === NONE ? null : (approvalSize as TicketSize),
       notifyUrl: text('notifyUrl'),
     })
     onClose()
@@ -346,6 +363,26 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
             in each request a run makes, which costs tokens.
           </p>
         </div>
+        <div className="grid gap-2">
+          <Label htmlFor="board-settings-approval">Wait for approval of the plan on</Label>
+          <Select name="approvalSize" defaultValue={detail.board.approvalSize ?? NONE}>
+            <SelectTrigger id="board-settings-approval" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NONE}>No tickets</SelectItem>
+              {[...TICKET_SIZES].reverse().map((size) => (
+                <SelectItem key={size} value={size}>
+                  {APPROVAL_CHOICES[size]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            The agent posts a short plan with a size estimate (S, M or L) when it starts a ticket. Tickets estimated at
+            these sizes wait until someone approves the plan on the ticket, before the agent spends more tokens on them.
+          </p>
+        </div>
       </fieldset>
 
       <fieldset className="grid gap-3 border-t pt-4">
@@ -360,9 +397,9 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
             placeholder="https://ntfy.sh/your-topic"
           />
           <p className="text-xs text-muted-foreground">
-            Sends a message when a ticket needs you: an agent asks a question, CI needs someone to look at it, a
-            question is answered or a pull request is ready to merge. Takes an ntfy topic, a Discord webhook or any
-            other webhook URL, which gets the notification as JSON. Leave empty to send nothing.
+            Sends a message when a ticket needs you: an agent asks a question, CI needs someone to look at it, a plan
+            waits for approval, a question is answered or a pull request is ready to merge. Takes an ntfy topic, a
+            Discord webhook or any other webhook URL, which gets the notification as JSON. Leave empty to send nothing.
           </p>
         </div>
       </fieldset>

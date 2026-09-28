@@ -99,6 +99,7 @@ export const api = {
   bulkTickets: (boardId: string, input: BulkTicketsInput) =>
     request<{ tickets: Ticket[] }>('POST', `/boards/${boardId}/tickets/bulk`, input, true),
   listActivity: (ticketId: string) => request<Activity[]>('GET', `/tickets/${ticketId}/activity`),
+  approvePlan: (ticketId: string) => request<Ticket>('POST', `/tickets/${ticketId}/approve`),
   syncPullRequest: (ticketId: string) => request<Ticket>('POST', `/tickets/${ticketId}/pull-request/sync`),
   mergeTicket: (ticketId: string, method: MergeMethod) =>
     request<Ticket>('POST', `/tickets/${ticketId}/merge`, { method }),

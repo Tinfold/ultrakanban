@@ -61,7 +61,9 @@ export function TicketCard({ ticket, overlay, selecting, selected }: TicketCardP
     ticket.attachmentCount > 0 ||
     ticket.usage.runs > 0 ||
     ticket.pullRequest ||
-    ticket.waitingSince
+    ticket.waitingSince ||
+    ticket.estimate ||
+    ticket.approval === 'pending'
   const canMerge =
     !overlay &&
     !selecting &&
@@ -107,6 +109,14 @@ export function TicketCard({ ticket, overlay, selecting, selected }: TicketCardP
       {hasMeta && (
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground [&_svg]:size-3">
           <WaitingBadge ticket={ticket} />
+          {ticket.estimate && (
+            <span
+              className="rounded-sm border px-1 font-medium leading-4"
+              title={`Its agent estimated it at size ${ticket.estimate} (S, M or L)`}
+            >
+              {ticket.estimate}
+            </span>
+          )}
           {blockers.length > 0 && (
             <span
               className="flex items-center gap-1 text-amber-600 dark:text-amber-400"
