@@ -105,7 +105,8 @@ uses is already loaded, here.
 $(<"$skill")")
 }
 
-# Runs claude on a ticket with the given prompt and further arguments (the session to start or resume), prints its
+# Runs claude on a ticket with the given prompt and further arguments (the session to start or resume), telling the
+# board it is going on and what it does (run_step, see heartbeat) until it ends. Prints its
 # final message (and keeps it in claude_result, and what it printed to stderr in claude_errors) and reports the tokens
 # it used. Returns claude's exit status. If someone takes the ticket away from the agent meanwhile, the run is stopped
 # and claude_stopped says why (it is empty otherwise).
@@ -127,6 +128,7 @@ run_claude() {
   code=$?
   kill "$watcher" 2>/dev/null
   wait "$watcher" 2>/dev/null
+  end_run "$id"
   running= watcher=
   claude_stopped=$(<"$stopped")
   claude_errors=$(<"$errors")

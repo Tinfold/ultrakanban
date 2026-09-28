@@ -32,7 +32,9 @@
 # back to the queue like that, or to the done or cancelled column, unassigns or reassigns it, or deletes it. Moving a
 # ticket into the review column, or tickets the agent doesn't hold, changes nothing for the loop. Each of those checks
 # also sends the board a heartbeat for the ticket (POST /tickets/:id/heartbeat): the board counts tickets without one
-# (and without other activity) for 10 minutes as idle, and offers to move them back to the todo column.
+# (and without other activity) for 10 minutes as idle, and offers to move them back to the todo column. The heartbeats
+# say what the run is doing (working the ticket, or the feedback it answers), and the loop tells the board when the run
+# ends, so the ticket's card shows the run while it goes on.
 #
 # Before each run the loop takes a snapshot of what it hands over: the newest ticket activity id, the newest pull
 # request comment, review and inline comment ids, and the failing checks and conflict state of the pull request's
