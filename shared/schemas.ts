@@ -141,8 +141,13 @@ export const createTicketSchema = z.object({
   agentModel: agentModel.optional(),
   pullRequest: pullRequestUrl.nullable().optional(),
   position: position.optional(),
+  /** The ticket it is a sub-ticket of: its id or number (`12` or `#12`). */
+  parent: ref.nullable().optional(),
   force,
 })
+
+/** A sub-ticket of the ticket in the path (POST /tickets/:id/children). */
+export const createSubticketSchema = createTicketSchema.omit({ parent: true })
 
 export const updateTicketSchema = z.object({
   title: name.optional(),
@@ -154,6 +159,8 @@ export const updateTicketSchema = z.object({
   agentEffort: agentEffort.optional(),
   agentModel: agentModel.optional(),
   pullRequest: pullRequestUrl.nullable().optional(),
+  /** Makes it a sub-ticket of another ticket (its id or number), or with `null` a ticket of its own again. */
+  parent: ref.nullable().optional(),
   ifVersion: version.optional(),
 })
 
@@ -294,6 +301,8 @@ export const boardExportSchema = z.object({
         .nullable()
         .default(null),
       comments: z.array(z.object({ actor: name, body: z.string().min(1), createdAt: z.iso.datetime() })).default([]),
+      /** Index in `tickets` of the ticket it is a sub-ticket of. */
+      parent: z.number().int().min(0).nullable().default(null),
     }),
   ),
 })
@@ -306,6 +315,7 @@ export type UpdateColumnInput = z.input<typeof updateColumnSchema>
 export type CreateTagInput = z.input<typeof createTagSchema>
 export type UpdateTagInput = z.input<typeof updateTagSchema>
 export type CreateTicketInput = z.input<typeof createTicketSchema>
+export type CreateSubticketInput = z.input<typeof createSubticketSchema>
 export type UpdateTicketInput = z.input<typeof updateTicketSchema>
 export type CheckItemInput = z.input<typeof checkItemSchema>
 export type MoveTicketInput = z.input<typeof moveTicketSchema>

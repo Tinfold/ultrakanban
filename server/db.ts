@@ -211,6 +211,11 @@ const MIGRATIONS = [
   ALTER TABLE tickets ADD COLUMN pr_checks TEXT;
   `,
   `
+  -- The ticket this one is a sub-ticket of (POST /tickets/:id/children); the parent waits for its sub-tickets.
+  ALTER TABLE tickets ADD COLUMN parent_id TEXT REFERENCES tickets(id) ON DELETE SET NULL;
+  CREATE INDEX tickets_parent ON tickets(parent_id);
+  `,
+  `
   -- Where the board sends a message when a ticket needs a person (see server/notifications.ts). None when NULL.
   ALTER TABLE boards ADD COLUMN notify_url TEXT;
   -- Notifications sent, so none is sent twice: one per ticket and key (e.g. the comment or commit it is about).

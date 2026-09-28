@@ -3,6 +3,7 @@ import {
   addUsage,
   AGENT_DEFAULTS,
   AGENT_EFFORTS,
+  CANCELLED_COLUMN,
   agentWorkerName,
   noUsage,
   type Overview,
@@ -62,12 +63,9 @@ interface Workflow {
 
 const key = (name: string) => name.toLowerCase()
 
-/** Where agents release tickets whose pull request was closed without merging (see scripts/agent-loop.sh). */
-const CANCELLED = 'cancelled'
-
 /** Whether nobody works on a ticket anymore: it's done or cancelled, or its pull request was closed unmerged. */
 function isClosed(workflow: Workflow, column: string, pullRequestClosed: boolean) {
-  return pullRequestClosed || column === workflow.doneName || column === CANCELLED
+  return pullRequestClosed || column === workflow.doneName || column === CANCELLED_COLUMN
 }
 
 /** Where a ticket stands for its assignee, given the column it's in and whether its pull request was closed. */
