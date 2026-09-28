@@ -374,7 +374,8 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
       working: sum(overviewBoards.map((board) => board.working)),
       review: sum(overviewBoards.map((board) => board.review)),
       completed: sum(completedOn.values()),
-      activeAgents: agents.filter((agent) => agent.status === 'working').length,
+      // Parallel runs share their agent's name but each works its own ticket, so count the tickets, not the names.
+      activeAgents: sum(agents.map((agent) => agent.tickets.filter((held) => held.state === 'working').length)),
       workedMs: sum(workedMs.values()),
       usage: usage.reduce(addUsage, noUsage()),
     },

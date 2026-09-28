@@ -88,6 +88,18 @@ describe('overview', () => {
     assert.ok(overview.sessions.filter((session) => session.agent === agent).every((session) => session.end !== null))
   })
 
+  test('overview counts parallel runs under one agent name as separate working agents', async () => {
+    const agent = 'parallel-agent'
+    const before = (await call<Overview>('GET', '/overview')).body.totals.activeAgents
+    for (const title of ['A', 'B']) {
+      const ticket = await addTicket({ title })
+      await call('POST', `/tickets/${ticket.id}/claim`, { agent, moveTo: 'In progress' })
+    }
+    const { body } = await call<Overview>('GET', '/overview')
+    assert.equal(body.totals.activeAgents, before + 2)
+    assert.equal(body.agents.filter((entry) => entry.name === agent).length, 1)
+  })
+
   test('overview lists enabled board agents under their worker names', async () => {
     await call('PATCH', `/boards/${boardId}`, { githubRepo: 'acme/app', agentEnabled: true, agentName: 'idle-agent' })
     const { body: idle } = await call<Overview>('GET', '/overview')
