@@ -18,6 +18,7 @@ import { Kbd } from '@/components/ui/kbd'
 import { formatDueDate } from '@/lib/format'
 import { PRIORITY_LABELS } from '@/lib/priority'
 import { useBoardContext } from '../board/board-context'
+import { AgentSuggestionButton } from './AgentSuggestionButton'
 import { DescriptionEditor } from './DescriptionEditor'
 import {
   AssigneePicker,
@@ -194,6 +195,19 @@ function CreateTicketForm({ onDone, onCreated }: { onDone: () => void; onCreated
                 {agentModel ?? `Board default (${detail.board.agentModel ?? AGENT_DEFAULTS.model})`}
               </Button>
             </ModelPicker>
+          )}
+          {detail.board.agentEnabled && (
+            <AgentSuggestionButton
+              title={title}
+              description={description}
+              tagIds={tagIds}
+              agentModel={agentModel}
+              agentEffort={agentEffort}
+              onApply={(model, effort) => {
+                setAgentModel(model)
+                setAgentEffort(effort)
+              }}
+            />
           )}
         </div>
       </div>

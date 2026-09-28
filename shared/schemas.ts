@@ -275,6 +275,15 @@ export const listTicketsQuerySchema = z.object({
   q: z.string().trim().min(1).optional(),
 })
 
+/** What is known of a ticket about to be created, to suggest a model and effort for it. */
+export const agentSuggestionQuerySchema = z.object({
+  title: z.string().max(500).default(''),
+  /** Its tags, by id or name; ones the board doesn't have are ignored. */
+  tag: z.array(z.string().max(100)).max(50).default([]),
+  /** How many checklist steps its description has; leave it out when unknown. */
+  steps: z.coerce.number().int().min(0).max(1000).optional(),
+})
+
 export const boardDetailQuerySchema = z.object({
   archived: z.stringbool().default(false),
 })
@@ -349,5 +358,6 @@ export type ClaimNextInput = z.input<typeof claimNextSchema>
 export type MergeRunInput = z.input<typeof mergeRunSchema>
 export type MergeTicketInput = z.input<typeof mergeTicketSchema>
 export type ListTicketsQuery = z.output<typeof listTicketsQuerySchema>
+export type AgentSuggestionQuery = z.output<typeof agentSuggestionQuerySchema>
 export type RecordUsage = z.output<typeof recordUsageSchema>
 export type BoardExport = z.output<typeof boardExportSchema>

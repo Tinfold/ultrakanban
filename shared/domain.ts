@@ -119,6 +119,17 @@ export function workerModel(agent: string) {
   return parts.length === 3 && parts[1] ? parts[1] : null
 }
 
+/**
+ * The model and effort a run under an `<agent>/<model>/<effort>` name (see `agentWorkerName`) works at, e.g.
+ * `{ model: 'opus', effort: 'high' }` for `claude/opus/high`; null for other names.
+ */
+export function workerSetting(agent: string): { model: string; effort: AgentEffort } | null {
+  const parts = agent.split('/')
+  const [, model, effort] = parts
+  const isEffort = (AGENT_EFFORTS as readonly string[]).includes(effort)
+  return parts.length === 3 && model && isEffort ? { model, effort: effort as AgentEffort } : null
+}
+
 export const PULL_REQUEST_STATES = ['unknown', 'open', 'draft', 'merged', 'closed'] as const
 /** `unknown` until GitHub has been checked (or when it can't be reached). */
 export type PullRequestState = (typeof PULL_REQUEST_STATES)[number]
@@ -364,6 +375,47 @@ export interface TicketUsage {
   tokens: number
   /** Estimated cost in US dollars of the runs that reported one; `null` when none did. */
   costUsd: number | null
+}
+
+/** A finished or abandoned ticket like the one a suggestion is for (see `AgentSettingStats`). */
+export interface SimilarTicket {
+  id: string
+  number: number
+  title: string
+  /** How alike it is, from 0 to 1: shared tags and title words, and a similar number of checklist steps. */
+  similarity: number
+  /** Whether it was finished (done column or merged pull request) rather than cancelled or closed unmerged. */
+  finished: boolean
+  /** Its runs' cost in US dollars; null when none reported one. */
+  costUsd: number | null
+  tokens: number
+}
+
+/** How tickets like a new one went at one model and effort (`GET /boards/:id/agent-suggestion`). */
+export interface AgentSettingStats {
+  model: string
+  effort: AgentEffort
+  /** How many similar tickets were worked at it, and how many of them were finished. */
+  tickets: number
+  finished: number
+  /** The share of them that was finished, weighted by similarity: from 0 to 1. */
+  successRate: number
+  /** Cost per ticket in US dollars, averaged by similarity over those that reported one; null when none did. */
+  costUsd: number | null
+  /** Tokens per ticket, averaged by similarity. */
+  tokens: number
+  /** Those tickets, most similar first (at most 5). */
+  similar: SimilarTicket[]
+}
+
+/**
+ * The model and effort to work a new ticket at, from how similar tickets went (`GET /boards/:id/agent-suggestion`):
+ * the cheapest setting whose success rate is close to the best one. Null when no similar ticket was ever finished.
+ */
+export interface AgentSuggestion {
+  suggestion: AgentSettingStats | null
+  /** Every setting similar tickets were worked at, the suggestion first, then by success rate and cost. */
+  options: AgentSettingStats[]
 }
 
 /**

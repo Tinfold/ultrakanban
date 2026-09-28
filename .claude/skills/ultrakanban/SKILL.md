@@ -215,6 +215,9 @@ setting that can do the work well saves tokens. Omit both (the board's defaults)
 - `opus` at `medium`: changes across several files or areas that need judgment.
 - `opus` at `high` (`xhigh` rarely): hard bugs with unknown causes, design or architecture, concurrency, security.
 
+The board can suggest a setting from how similar tickets went: `GET $KANBAN/api/boards/$BOARD/agent-suggestion?title=...&tag=bug`
+returns the cheapest model and effort that finished tickets like it (`suggestion`, null when there is no history yet).
+
 ## Splitting a ticket into sub-tickets
 
 When a ticket is too big for one pull request, or you are asked to break it up, split it instead of working it:

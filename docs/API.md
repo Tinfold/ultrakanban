@@ -420,6 +420,40 @@ interface TokenUsage {
 }
 ```
 
+### Suggested model and effort
+
+`GET /boards/:boardId/agent-suggestion?title=text&tag=ref&steps=3` suggests a model and effort for a ticket about to be
+created, from how the board's similar tickets went (the new-ticket form shows it). `tag` is repeatable (ids or names;
+ones the board doesn't have are ignored) and `steps` is how many checklist steps its description has (leave it out
+when unknown).
+
+- **Past tickets** count once they are decided: finished (in the done column or with a merged pull request), or given
+  up on (in the cancelled column, or with their pull request closed unmerged). Each counts at the setting of the
+  `<agent>/<model>/<effort>` name whose runs used the most tokens on it, with the cost of all its runs.
+- **Similar** means sharing tags (45%) or title words (45%, stop words left out); a similar number of checklist steps
+  adds up to 10% but isn't enough alone. The 20 most similar count, each weighted by its similarity.
+- **The suggestion** is the cheapest setting (by cost, or by tokens when runs reported no cost) whose weighted success
+  rate is within 0.2 of the best one's, so a cheaper setting that finishes the same kind of work wins and one that
+  keeps failing doesn't. It is `null` when no similar ticket was finished.
+
+```ts
+interface AgentSuggestion {
+  suggestion: AgentSettingStats | null
+  options: AgentSettingStats[] // every setting similar tickets were worked at, the suggestion first
+}
+
+interface AgentSettingStats {
+  model: string // e.g. sonnet
+  effort: string // e.g. medium
+  tickets: number // similar decided tickets worked at it
+  finished: number // how many of them were finished
+  successRate: number // finished share, weighted by similarity (0 to 1)
+  costUsd: number | null // average cost per ticket; null when none reported one
+  tokens: number // average tokens per ticket
+  similar: { id; number; title; similarity; finished; costUsd: number | null; tokens }[] // most similar first, at most 5
+}
+```
+
 ## Attachments
 
 Screenshots and screen recordings on tickets. Upload one file per request as `multipart/form-data` in a field named
