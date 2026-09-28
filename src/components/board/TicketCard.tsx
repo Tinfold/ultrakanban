@@ -1,6 +1,14 @@
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { CalendarIcon, GitMergeConflictIcon, MessageSquareIcon, PaperclipIcon, SquareCheckIcon } from 'lucide-react'
+import {
+  BanIcon,
+  CalendarIcon,
+  GitMergeConflictIcon,
+  MessageSquareIcon,
+  PaperclipIcon,
+  SquareCheckIcon,
+} from 'lucide-react'
+import { openBlockers } from '@shared/blockers'
 import type { Ticket } from '@shared/domain'
 import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { PullRequestIcon } from '@/components/common/PullRequestIcon'
@@ -28,8 +36,15 @@ export function TicketCard({ ticket, overlay }: TicketCardProps) {
   const { detail, tagsById } = useBoardContext()
   const checklist = checklistProgress(ticket.description)
   const tags = ticket.tagIds.flatMap((tagId) => tagsById.get(tagId) ?? [])
+  // The agent doesn't claim a ticket that waits for an unfinished one, so say why it sits there.
+  const blockers = openBlockers(ticket, detail.tickets, detail.board.doneColumnId ?? detail.columns.at(-1)?.id)
   const hasMeta =
-    ticket.dueDate || checklist.total > 0 || ticket.commentCount > 0 || ticket.attachmentCount > 0 || ticket.pullRequest
+    blockers.length > 0 ||
+    ticket.dueDate ||
+    checklist.total > 0 ||
+    ticket.commentCount > 0 ||
+    ticket.attachmentCount > 0 ||
+    ticket.pullRequest
   const canMerge =
     !overlay &&
     ticket.columnId === detail.board.reviewColumnId &&
@@ -56,7 +71,16 @@ export function TicketCard({ ticket, overlay }: TicketCardProps) {
         </div>
       )}
       {hasMeta && (
-        <div className="mt-2 flex items-center gap-3 text-[11px] text-muted-foreground [&_svg]:size-3">
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground [&_svg]:size-3">
+          {blockers.length > 0 && (
+            <span
+              className="flex items-center gap-1 text-amber-600 dark:text-amber-400"
+              title="Waits for these tickets to be done; the agent won't take it until then"
+            >
+              <BanIcon />
+              Blocked by {blockers.map(ticketRef).join(', ')}
+            </span>
+          )}
           {ticket.dueDate && (
             <span className={cn('flex items-center gap-1', DUE_STYLES[dueState(ticket.dueDate)])}>
               <CalendarIcon />
