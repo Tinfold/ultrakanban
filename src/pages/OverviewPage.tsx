@@ -246,7 +246,7 @@ export function OverviewPage() {
           <Stat
             label="Agents working"
             value={totals.activeAgents}
-            detail={`${agents.length} ${agents.length === 1 ? 'agent' : 'agents'}${waiting ? `, ${waiting} waiting for review` : ''}`}
+            detail={`${agents.length} ${agents.length === 1 ? 'agent' : 'agents'} listed${waiting ? `, ${waiting} waiting for review` : ''}`}
             target={SECTIONS.agents}
           />
           <Stat

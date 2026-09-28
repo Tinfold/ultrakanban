@@ -485,7 +485,7 @@ export interface Overview {
     working: number
     review: number
     completed: number
-    /** Agents with a ticket being worked right now. */
+    /** Agents working a ticket right now: one per ticket, so parallel runs under one name each count. */
     activeAgents: number
     workedMs: number
     usage: UsageTotals
