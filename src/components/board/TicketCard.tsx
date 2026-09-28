@@ -201,10 +201,11 @@ export function TicketCard({ ticket, overlay, selecting, selected }: TicketCardP
 
 interface SortableTicketCardProps {
   ticket: Ticket
+  columnId: string
   onOpen: (ticketId: string) => void
 }
 
-export function SortableTicketCard({ ticket, onOpen }: SortableTicketCardProps) {
+export function SortableTicketCard({ ticket, columnId, onOpen }: SortableTicketCardProps) {
   const selection = useSelection()
   const selected = selection.isSelected(ticket.id)
   const { setNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({
@@ -222,6 +223,8 @@ export function SortableTicketCard({ ticket, onOpen }: SortableTicketCardProps) 
         isDragging && 'opacity-40',
       )}
       aria-label={`${ticketRef(ticket.number)} ${ticket.title}`}
+      data-ticket-id={ticket.id}
+      data-column-id={columnId}
       {...attributes}
       aria-pressed={selection.selecting ? selected : undefined}
       {...listeners}

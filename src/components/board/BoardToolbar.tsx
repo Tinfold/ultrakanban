@@ -1,12 +1,46 @@
-import { ListChecksIcon, PlusIcon, SearchIcon, XIcon } from 'lucide-react'
+import { KeyboardIcon, ListChecksIcon, PlusIcon, SearchIcon, XIcon } from 'lucide-react'
 import { useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/components/ui/input-group'
-import { Kbd } from '@/components/ui/kbd'
+import { Kbd, KbdGroup } from '@/components/ui/kbd'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useHotkey } from '@/hooks/use-hotkey'
 import type { ViewPrefs } from '@/lib/board-view'
 import { FilterMenu } from './FilterMenu'
 import { SortMenu } from './SortMenu'
+
+const SHORTCUTS: Array<{ keys: string[]; label: string }> = [
+  { keys: ['/'], label: 'Search' },
+  { keys: ['C'], label: 'New ticket' },
+  { keys: ['X'], label: 'Select tickets' },
+  { keys: ['↑', '↓', '←', '→'], label: 'Move focus between cards' },
+  { keys: ['↵'], label: 'Open the focused card' },
+  { keys: ['⇧', '←', '/', '→'], label: 'Move the focused card a column' },
+]
+
+function ShortcutsHelp() {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant="ghost" size="icon-sm" aria-label="Keyboard shortcuts">
+          <KeyboardIcon />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent className="flex-col items-start gap-1.5 py-2" side="bottom" align="end">
+        {SHORTCUTS.map(({ keys, label }) => (
+          <div key={label} className="flex items-center gap-2">
+            <KbdGroup>
+              {keys.map((key, index) => (
+                <Kbd key={index}>{key}</Kbd>
+              ))}
+            </KbdGroup>
+            <span>{label}</span>
+          </div>
+        ))}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
 
 interface BoardToolbarProps {
   query: string
@@ -75,6 +109,7 @@ export function BoardToolbar({
         onShowArchivedChange={(showArchived) => onPrefsChange({ ...prefs, showArchived })}
       />
       <SortMenu value={prefs.sort} onChange={(sort) => onPrefsChange({ ...prefs, sort })} />
+      <ShortcutsHelp />
       <Button
         variant={selecting ? 'secondary' : 'outline'}
         size="sm"

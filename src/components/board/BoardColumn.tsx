@@ -59,7 +59,9 @@ export function BoardColumn({ column, ticketIds, dropTarget, reorderable, onOpen
         <SortableContext items={ticketIds} strategy={reorderable ? verticalListSortingStrategy : staticStrategy}>
           {ticketIds.map((ticketId) => {
             const ticket = ticketsById.get(ticketId)
-            return ticket && <SortableTicketCard key={ticketId} ticket={ticket} onOpen={onOpenTicket} />
+            return (
+              ticket && <SortableTicketCard key={ticketId} ticket={ticket} columnId={column.id} onOpen={onOpenTicket} />
+            )
           })}
         </SortableContext>
         {adding ? (
