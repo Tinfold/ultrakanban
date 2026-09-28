@@ -89,6 +89,15 @@ export function useBoardActions(boardId: string) {
         if (released) toast.success(`Moved ${released.length} ticket${released.length === 1 ? '' : 's'}`)
         return released
       },
+      /** Asks the agents to fix the merge conflicts of the review column's pull requests, and wakes them up. */
+      fixConflicts: async () => {
+        const result = await run(() => api.fixConflicts(boardId))
+        if (result) {
+          const count = result.tickets.length
+          toast.success(`Asked the agent to fix the conflicts of ${count} ticket${count === 1 ? '' : 's'}`)
+        }
+        return result
+      },
 
       createTag: (input: CreateTagInput) => run(() => api.createTag(boardId, input), undefined, updates.addTag),
       updateTag: (tagId: string, patch: updates.TagPatch) =>

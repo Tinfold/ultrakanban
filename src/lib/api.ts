@@ -95,6 +95,7 @@ export const api = {
   syncPullRequest: (ticketId: string) => request<Ticket>('POST', `/tickets/${ticketId}/pull-request/sync`),
   mergeTicket: (ticketId: string, method: MergeMethod) =>
     request<Ticket>('POST', `/tickets/${ticketId}/merge`, { method }),
+  fixConflicts: (boardId: string) => request<{ tickets: Ticket[] }>('POST', `/boards/${boardId}/fix-conflicts`),
   githubStatus: () => request<{ auth: 'env' | 'gh' | null }>('GET', '/github'),
   listAttachments: (ticketId: string) => request<Attachment[]>('GET', `/tickets/${ticketId}/attachments`),
   uploadAttachment: (ticketId: string, file: File) => {

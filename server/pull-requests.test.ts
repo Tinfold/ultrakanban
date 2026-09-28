@@ -9,6 +9,8 @@ import {
   type BoardSummary,
   type Ticket,
 } from '../shared/domain.ts'
+import { subscribeWake } from './events.ts'
+import { FIX_CONFLICTS_COMMENT } from './store/tickets.ts'
 import { addTicket, boardId, call, github, pullRequestStatuses, ticketsIn, useBoard } from './test-app.ts'
 
 describe('pull request workflow', () => {
@@ -106,6 +108,40 @@ describe('pull request workflow', () => {
     assert.equal(await sync(), true)
     pullRequestStatuses.set(url, { state: 'closed', title: 'Some PR', conflicts: true })
     assert.equal(await sync(), false)
+    pullRequestStatuses.clear()
+  })
+
+  test('asks for the merge conflicts in the review column to be fixed', async () => {
+    const sync = async (ticket: Ticket) => call('POST', `/tickets/${ticket.id}/pull-request/sync`)
+    const conflicting = await addTicket({ title: 'A', column: 'Review', pullRequest: `${PR}1` })
+    const clean = await addTicket({ title: 'B', column: 'Review', pullRequest: `${PR}2` })
+    const working = await addTicket({ title: 'C', column: 'In progress', pullRequest: `${PR}3` })
+    for (const url of [`${PR}1`, `${PR}3`])
+      pullRequestStatuses.set(url, { state: 'open', title: 'PR', conflicts: true })
+    for (const ticket of [conflicting, clean, working]) await sync(ticket)
+
+    const events: { boardId: string }[] = []
+    const unsubscribe = subscribeWake((event) => events.push(event))
+    const { status, body } = await call<{ tickets: Ticket[] }>('POST', `/boards/${boardId}/fix-conflicts`)
+    unsubscribe()
+    assert.equal(status, 200)
+    assert.deepEqual(
+      body.tickets.map((ticket) => ticket.title),
+      ['A'],
+    )
+    assert.deepEqual(events, [{ boardId }])
+    const comments = async (ticket: Ticket) =>
+      (await call<Activity[]>('GET', `/tickets/${ticket.id}/activity`)).body.filter((a) => a.type === 'comment')
+    assert.deepEqual(
+      (await comments(conflicting)).map((a) => [a.actor, a.data.body]),
+      [['tester', FIX_CONFLICTS_COMMENT]],
+    )
+    assert.equal((await comments(clean)).length, 0)
+    assert.equal((await comments(working)).length, 0)
+
+    const { body: noReview } = await call<{ id: string }>('POST', '/boards', { name: 'Plain', columns: ['Todo'] })
+    assert.equal((await call('POST', `/boards/${noReview.id}/fix-conflicts`)).status, 400)
+    assert.equal((await call('POST', '/boards/nope/fix-conflicts')).status, 404)
     pullRequestStatuses.clear()
   })
 

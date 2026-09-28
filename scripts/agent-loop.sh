@@ -85,7 +85,7 @@
 #                       setting is on and the in-progress column holds fewer than CLAIM_LIMIT tickets (default: Backlog)
 #   IN_PROGRESS_COLUMN  column to move claimed tickets to (default: In progress)
 #   CANCELLED_COLUMN    column for tickets whose pull request was closed without merging (default: Cancelled)
-#   IDLE_SECONDS        wait between rounds when there is nothing to do (default: 300)
+#   IDLE_SECONDS        wait between rounds when there is nothing to do (default: 300); the board can cut it short
 #   TICKET_TIMEOUT      stop a run that takes longer than this, as accepted by timeout(1) (default: 4h)
 #   TICKET_CHECK_SECONDS  how often a run's ticket is checked for having been taken away from the agent, and a
 #                       heartbeat sent for it; keep it well under 10 minutes (default: 30)
@@ -186,7 +186,27 @@ pause() {
   sleeper=
 }
 
+# Waits the given number of seconds, or less when someone wakes the board's agent up (a `wake` event on the board's
+# event stream, sent by the review column's "fix conflicts" button). Waits them out anyway if the stream can't be read.
+idle() {
+  local line end=$((SECONDS + $1)) events
+  exec {events}< <(exec curl -sfN --max-time "$1" "$KANBAN/api/events?board=$BOARD" 2>/dev/null)
+  listener=$!
+  while IFS= read -r line <&"$events"; do
+    [[ $line == 'event: wake' ]] && break
+  done
+  exec {events}<&-
+  kill "$listener" 2>/dev/null
+  listener=
+  if [[ $line == 'event: wake' ]]; then
+    log "woken up from the board"
+  elif ((end > SECONDS)); then
+    pause "$((end - SECONDS))"
+  fi
+}
+
 sleeper=
+listener=
 # Set when Claude usage runs out: no run starts before this time (seconds since the epoch). Kept in PAUSE_FILE, so
 # the other loops working the board wait too.
 paused_until=0
@@ -195,7 +215,7 @@ claim_held=
 # The run in progress and the process watching its ticket (see run_claude), if any.
 running=
 watcher=
-trap 'log "stopped"; kill $sleeper $running $watcher 2>/dev/null; exit 0' INT TERM
+trap 'log "stopped"; kill $sleeper $listener $running $watcher 2>/dev/null; exit 0' INT TERM
 
 # `agent-loop.sh save-work` only keeps the work of an unfinished run in the current checkout (see save_work):
 # agent-board.sh does this before it removes a worktree.
@@ -223,5 +243,5 @@ while true; do
     log "the agent scripts were updated; stopping to start again with the new ones"
     exit 75
   fi
-  handle_feedback || claim_next || pause "$IDLE_SECONDS"
+  handle_feedback || claim_next || idle "$IDLE_SECONDS"
 done

@@ -14,13 +14,20 @@ import {
 } from '../../shared/schemas.ts'
 import { transaction } from '../db.ts'
 import { HttpError } from '../errors.ts'
+import { wake } from '../events.ts'
 import { GitHubError } from '../github.ts'
 import { actorOf, readJson } from '../http.ts'
 import type { AppServices } from '../app.ts'
 import { createBoard, deleteBoard, getBoard, getBoardDetail, listBoards, updateBoard } from '../store/boards.ts'
 import { createColumn } from '../store/columns.ts'
 import { createTag } from '../store/tags.ts'
-import { claimNextTicket, createTicket, getTicketByNumber, listTickets } from '../store/tickets.ts'
+import {
+  claimNextTicket,
+  createTicket,
+  getTicketByNumber,
+  listTickets,
+  requestConflictFixes,
+} from '../store/tickets.ts'
 import { exportBoard, importBoard } from '../store/transfer.ts'
 import { listBoardUsage, recordBoardUsage } from '../store/usage.ts'
 
@@ -114,6 +121,12 @@ export const boardRoutes = ({ pullRequests, mergeQueue }: AppServices) =>
     .post('/:boardId/tickets/claim-next', async (c) => {
       const input = await readJson(c, claimNextSchema)
       return c.json(transaction(() => claimNextTicket(c.req.param('boardId'), input)))
+    })
+    .post('/:boardId/fix-conflicts', (c) => {
+      const boardId = getBoard(c.req.param('boardId')).id
+      const tickets = transaction(() => requestConflictFixes(boardId, actorOf(c)))
+      wake({ boardId })
+      return c.json({ tickets })
     })
     .get('/:boardId/usage', (c) => c.json(listBoardUsage(c.req.param('boardId'))))
     .post('/:boardId/usage', async (c) => {

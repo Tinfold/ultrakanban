@@ -143,6 +143,13 @@ interface MergeRun {
 }
 ```
 
+### Fixing merge conflicts
+
+`POST /boards/:boardId/fix-conflicts` (the "fix conflicts" button on the review column in the app) comments on every
+ticket in the review column whose open pull request has merge conflicts, asking for them to be fixed, and sends a
+`wake` event (see [Live updates](#live-updates)) so the board's idle agent loops look for work now. It returns
+`{ tickets: Ticket[] }`, the tickets it commented on; `400` if the board has no review column.
+
 ## Types
 
 ```ts
@@ -424,7 +431,9 @@ include their work.
 ## Live updates
 
 `GET /events?board=:boardId` is a server-sent event stream. It emits `change` events with data `{ "boardId": "..." }`
-after every committed change (omit `board` to receive all boards), plus periodic `ping` events.
+after every committed change (omit `board` to receive all boards), `wake` events with the same data when someone
+asks the board's agent to look for work now (`scripts/agent-loop.sh` ends its idle wait on one), plus periodic `ping`
+events.
 
 ## Examples
 
