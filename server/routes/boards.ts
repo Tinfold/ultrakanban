@@ -15,9 +15,8 @@ import {
   updateBoardSchema,
 } from '../../shared/schemas.ts'
 import { transaction } from '../db.ts'
-import { HttpError } from '../errors.ts'
+import { gitHubFailure, HttpError } from '../errors.ts'
 import { wake } from '../events.ts'
-import { GitHubError } from '../github.ts'
 import { actorOf, readJson } from '../http.ts'
 import type { AppServices } from '../app.ts'
 import { createBoard, deleteBoard, getBoard, getBoardDetail, listBoards, updateBoard } from '../store/boards.ts'
@@ -33,12 +32,6 @@ import {
 } from '../store/tickets.ts'
 import { exportBoard, importBoard } from '../store/transfer.ts'
 import { listBoardUsage, recordBoardUsage } from '../store/usage.ts'
-
-/** GitHub turning a request down (name taken, no access, missing scope) is the caller's to fix; anything else isn't. */
-const gitHubFailure = (error: unknown) =>
-  error instanceof GitHubError && error.status < 500
-    ? new HttpError(400, 'github_error', error.message)
-    : new HttpError(502, 'github_error', `Could not reach GitHub: ${(error as Error).message}`)
 
 export const boardRoutes = ({ pullRequests, mergeQueue }: AppServices) =>
   new Hono()

@@ -227,8 +227,9 @@ export function useBoardActions(boardId: string) {
           onAutoClose: commit,
         })
       },
-      addComment: async (ticketId: string, body: string) => {
-        const comment = await run(() => api.addComment(ticketId, body))
+      /** With `pullRequest`, the comment is posted on the ticket's pull request too. */
+      addComment: async (ticketId: string, body: string, pullRequest = false) => {
+        const comment = await run(() => api.addComment(ticketId, body, pullRequest))
         await queryClient.invalidateQueries({ queryKey: queryKeys.activity(ticketId) })
         return comment
       },
