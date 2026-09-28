@@ -1,6 +1,6 @@
-import { CalendarIcon, TagIcon, UserRoundIcon } from 'lucide-react'
+import { CalendarIcon, CpuIcon, FileTextIcon, GaugeIcon, TagIcon, UserRoundIcon } from 'lucide-react'
 import { type FormEvent, useRef, useState } from 'react'
-import type { Priority } from '@shared/domain'
+import { AGENT_DEFAULTS, type AgentEffort, type Priority, TICKET_TEMPLATES } from '@shared/domain'
 import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { ColorDot, TagChip } from '@/components/common/TagChip'
 import { UserAvatar } from '@/components/common/UserAvatar'
@@ -19,7 +19,16 @@ import { formatDueDate } from '@/lib/format'
 import { PRIORITY_LABELS } from '@/lib/priority'
 import { useBoardContext } from '../board/board-context'
 import { DescriptionEditor } from './DescriptionEditor'
-import { AssigneePicker, ColumnPicker, DueDatePicker, PriorityPicker, TagPicker } from './pickers'
+import {
+  AssigneePicker,
+  ColumnPicker,
+  DueDatePicker,
+  EffortPicker,
+  ModelPicker,
+  PriorityPicker,
+  TagPicker,
+  TemplatePicker,
+} from './pickers'
 
 interface CreateTicketDialogProps {
   open: boolean
@@ -65,8 +74,23 @@ function CreateTicketForm({ onDone, onCreated }: { onDone: () => void; onCreated
   const [assignee, setAssignee] = useState<string | null>(null)
   const [dueDate, setDueDate] = useState<string | null>(null)
   const [tagIds, setTagIds] = useState<string[]>([])
+  const [agentEffort, setAgentEffort] = useState<AgentEffort | null>(null)
+  const [agentModel, setAgentModel] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const column = columnsById.get(columnId)
+
+  const applyTemplate = async (template: (typeof TICKET_TEMPLATES)[number]) => {
+    setDescription(template.description)
+    setAgentEffort(template.agentEffort)
+    setAgentModel(template.agentModel)
+    const added: string[] = []
+    for (const tagName of template.tags) {
+      const existing = detail.tags.find((tag) => tag.name.toLowerCase() === tagName.toLowerCase())
+      const tag = existing ?? (await actions.createTag({ name: tagName }))
+      if (tag) added.push(tag.id)
+    }
+    setTagIds((current) => [...new Set([...current, ...added])])
+  }
 
   const submit = async (event?: FormEvent) => {
     event?.preventDefault()
@@ -80,6 +104,8 @@ function CreateTicketForm({ onDone, onCreated }: { onDone: () => void; onCreated
       assignee,
       dueDate,
       tags: tagIds,
+      agentEffort,
+      agentModel,
     })
     setSaving(false)
     if (ticket) onCreated(ticket.id)
@@ -111,6 +137,12 @@ function CreateTicketForm({ onDone, onCreated }: { onDone: () => void; onCreated
           className="-mx-3 max-h-[45dvh] overflow-y-auto"
         />
         <div className="flex flex-wrap gap-1.5 pt-1">
+          <TemplatePicker onApply={applyTemplate}>
+            <Button type="button" variant="outline" size="sm">
+              <FileTextIcon />
+              Template
+            </Button>
+          </TemplatePicker>
           <ColumnPicker value={columnId} onChange={setColumnId}>
             <Button type="button" variant="outline" size="sm">
               {column && <ColorDot color={column.color} />}
@@ -147,6 +179,22 @@ function CreateTicketForm({ onDone, onCreated }: { onDone: () => void; onCreated
               )}
             </Button>
           </TagPicker>
+          {(detail.board.agentEnabled || agentEffort) && (
+            <EffortPicker value={agentEffort} onChange={setAgentEffort}>
+              <Button type="button" variant="outline" size="sm">
+                <GaugeIcon />
+                {agentEffort ?? `Board default (${detail.board.agentEffort ?? AGENT_DEFAULTS.effort})`}
+              </Button>
+            </EffortPicker>
+          )}
+          {(detail.board.agentEnabled || agentModel) && (
+            <ModelPicker value={agentModel} onChange={setAgentModel}>
+              <Button type="button" variant="outline" size="sm">
+                <CpuIcon />
+                {agentModel ?? `Board default (${detail.board.agentModel ?? AGENT_DEFAULTS.model})`}
+              </Button>
+            </ModelPicker>
+          )}
         </div>
       </div>
       <DialogFooter className="m-0 items-center rounded-b-xl px-5 py-3">
