@@ -3,7 +3,9 @@ import { CSS } from '@dnd-kit/utilities'
 import {
   BanIcon,
   CalendarIcon,
+  CornerLeftUpIcon,
   GitMergeConflictIcon,
+  ListTreeIcon,
   MessageSquareIcon,
   PaperclipIcon,
   SquareCheckIcon,
@@ -34,13 +36,16 @@ interface TicketCardProps {
 }
 
 export function TicketCard({ ticket, overlay }: TicketCardProps) {
-  const { detail, tagsById } = useBoardContext()
+  const { detail, tagsById, ticketsById } = useBoardContext()
   const checklist = checklistProgress(ticket.description)
   const tags = ticket.tagIds.flatMap((tagId) => tagsById.get(tagId) ?? [])
   // The agent doesn't claim a ticket that waits for an unfinished one, so say why it sits there.
   const blockers = openBlockers(ticket, detail.tickets, detail.board.doneColumnId ?? detail.columns.at(-1)?.id)
+  const parent = ticket.parentId ? ticketsById.get(ticket.parentId) : undefined
+  const subtickets = ticket.subtickets
   const hasMeta =
     blockers.length > 0 ||
+    subtickets ||
     ticket.dueDate ||
     checklist.total > 0 ||
     ticket.commentCount > 0 ||
@@ -62,6 +67,15 @@ export function TicketCard({ ticket, overlay }: TicketCardProps) {
       <div className="flex items-center gap-1.5">
         <PriorityIcon priority={ticket.priority} className="size-3.5" />
         <span className="font-mono text-[11px] text-muted-foreground">{ticketRef(ticket.number)}</span>
+        {parent && (
+          <span
+            className="flex items-center gap-0.5 font-mono text-[11px] text-muted-foreground/70"
+            title={`Sub-ticket of ${ticketRef(parent.number)}: ${parent.title}`}
+          >
+            <CornerLeftUpIcon className="size-3" />
+            {ticketRef(parent.number)}
+          </span>
+        )}
         {ticket.assignee && <UserAvatar name={ticket.assignee} size="xs" className="ml-auto" />}
       </div>
       <p className="mt-1.5 line-clamp-3 text-[13px] leading-snug font-medium text-pretty break-words">{ticket.title}</p>
@@ -82,6 +96,24 @@ export function TicketCard({ ticket, overlay }: TicketCardProps) {
             >
               <BanIcon />
               Blocked by {blockers.map(ticketRef).join(', ')}
+            </span>
+          )}
+          {subtickets && (
+            <span
+              className={cn(
+                'flex items-center gap-1 tabular-nums',
+                subtickets.done === subtickets.total
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : 'text-amber-600 dark:text-amber-400',
+              )}
+              title={
+                subtickets.done === subtickets.total
+                  ? 'All its sub-tickets are done'
+                  : "Sub-tickets done; the agent won't take it until they all are"
+              }
+            >
+              <ListTreeIcon />
+              {subtickets.done}/{subtickets.total}
             </span>
           )}
           {ticket.dueDate && (

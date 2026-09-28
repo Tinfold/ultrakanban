@@ -34,6 +34,12 @@ export const AGENT_IDLE_MINUTES = 10
 export const QUESTION_TAG = 'question'
 
 /**
+ * Name of the column (case-insensitive) where tickets nobody will work on go, e.g. when their pull request was closed
+ * without merging. Sub-tickets there don't count towards their parent's progress.
+ */
+export const CANCELLED_COLUMN = 'cancelled'
+
+/**
  * Name a board's agent claims tickets under: `<agent>/<model>/<effort>`, e.g. `claude/opus/high`. The agent name
  * itself belongs to the board's controller (scripts/agent-loop.sh), which starts one of these workers per run.
  */
@@ -254,6 +260,13 @@ export interface Ticket {
   movedAt: string
   /** Whether it has been in the board's done column for longer than the board's `archiveDoneDays`. */
   archived: boolean
+  /** The ticket this one is a sub-ticket of; null when it isn't one. */
+  parentId: string | null
+  /**
+   * Its sub-tickets that are finished (in the done column or with a merged pull request) out of all of them, leaving
+   * out cancelled ones. Null when it has none. It waits for them: claim-next skips it until they are all finished.
+   */
+  subtickets: { done: number; total: number } | null
   createdAt: string
   updatedAt: string
 }

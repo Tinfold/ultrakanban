@@ -1,6 +1,7 @@
 import {
   AGENT_IDLE_MINUTES,
   type AgentEffort,
+  CANCELLED_COLUMN,
   type Column,
   parsePullRequestUrl,
   PRIORITIES,
@@ -53,6 +54,9 @@ interface TicketRow {
   created_at: string
   updated_at: string
   archive_days: number | null
+  parent_id: string | null
+  subtickets_total: number
+  subtickets_done: number
   tag_ids: string | null
   comment_count: number
   attachment_count: number
@@ -71,12 +75,26 @@ export const WAITING_SINCE = `
      AND t.column_id IS NOT b.review_column_id AND t.column_id IS NOT b.done_column_id AND t.pr_state != 'closed'
    ORDER BY a.id DESC LIMIT 1)`
 
+/** Sub-tickets of the ticket `t` that count towards its progress: all but cancelled ones. Aliased `c`. */
+const SUBTICKETS = `
+  FROM tickets c
+  WHERE c.parent_id = t.id
+    AND c.column_id NOT IN (SELECT id FROM columns WHERE board_id = t.board_id AND lower(name) = '${CANCELLED_COLUMN}')`
+
+/** Whether the sub-ticket `c` is finished: merged, or in the board's done column (its last column if it has none). */
+const SUBTICKET_DONE = `
+  (c.pr_state = 'merged' OR c.column_id = coalesce(
+    (SELECT done_column_id FROM boards WHERE id = t.board_id),
+    (SELECT id FROM columns WHERE board_id = t.board_id ORDER BY position DESC LIMIT 1)))`
+
 const SELECT_TICKETS = `
   SELECT t.*,
     (SELECT group_concat(tag_id) FROM ticket_tags WHERE ticket_id = t.id) AS tag_ids,
     (SELECT count(*) FROM activity WHERE ticket_id = t.id AND type = 'comment') AS comment_count,
     (SELECT count(*) FROM attachments WHERE ticket_id = t.id) AS attachment_count,
     ${WAITING_SINCE} AS waiting_since,
+    (SELECT count(*) ${SUBTICKETS}) AS subtickets_total,
+    (SELECT count(*) ${SUBTICKETS} AND ${SUBTICKET_DONE}) AS subtickets_done,
     (SELECT archive_done_days FROM boards WHERE id = t.board_id AND done_column_id = t.column_id) AS archive_days
   FROM tickets t`
 
@@ -116,6 +134,8 @@ const toTicket = (row: TicketRow): Ticket => ({
   waitingSince: row.waiting_since,
   movedAt: row.moved_at,
   archived: row.archive_days !== null && Date.parse(row.moved_at) < Date.now() - row.archive_days * DAY_MS,
+  parentId: row.parent_id,
+  subtickets: row.subtickets_total ? { done: row.subtickets_done, total: row.subtickets_total } : null,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 })
@@ -140,6 +160,41 @@ export function getTicketByNumber(boardId: string, number: number): Ticket {
   if (!row) throw notFound('Ticket', `#${number}`)
   return toTicket(row)
 }
+
+/** A parent's sub-tickets, in board order. */
+export function listSubtickets(id: string): Ticket[] {
+  getTicket(id)
+  return sql.all<TicketRow>(`${SELECT_TICKETS} WHERE t.parent_id = ? ${BOARD_ORDER}`, id).map(toTicket)
+}
+
+/** Resolves a reference to a ticket of the board: its id, or its number (`12` or `#12`). */
+function resolveTicket(boardId: string, ref: string): Ticket {
+  const number = /^#?(\d+)$/.exec(ref)?.[1]
+  const row = sql.get<TicketRow>(`${SELECT_TICKETS} WHERE t.id = ?`, ref)
+  const ticket = row ? toTicket(row) : number ? getTicketByNumber(boardId, Number(number)) : getTicket(ref)
+  if (ticket.boardId !== boardId) throw badRequest(`Ticket ${ref} is on another board`)
+  return ticket
+}
+
+/**
+ * The id of the ticket `ref` names as the parent of ticket `id` (null for a new ticket), or null for no parent.
+ * Throws if that would make a ticket its own ancestor.
+ */
+function parentFor(boardId: string, id: string | null, ref: string | null): string | null {
+  if (ref === null) return null
+  const parent = resolveTicket(boardId, ref)
+  if (parent.id === id) throw badRequest('A ticket cannot be its own parent')
+  for (let ancestor = parent; ancestor.parentId; ancestor = getTicket(ancestor.parentId)) {
+    if (ancestor.parentId === id) {
+      throw badRequest(`Ticket #${parent.number} is a sub-ticket of this one, so it cannot be its parent`)
+    }
+  }
+  return parent.id
+}
+
+/** Whether a ticket has sub-tickets and they are all finished. */
+const subticketsFinished = ({ subtickets }: Pick<Ticket, 'subtickets'>) =>
+  subtickets !== null && subtickets.done === subtickets.total
 
 export function listTickets(boardId: string, query: ListTicketsQuery = {}): Ticket[] {
   const where = ['t.board_id = ?']
@@ -219,22 +274,22 @@ function isQuestion(ticketId: string) {
 }
 
 /**
- * The board's done column only accepts tickets whose pull request is merged, and questions without a pull request,
- * unless forced.
+ * The board's done column only accepts tickets whose pull request is merged, and without a pull request questions
+ * and tickets whose sub-tickets are all finished, unless forced.
  */
 function assertCanEnter(
-  ticket: Pick<Ticket, 'boardId' | 'pullRequest'> & { id: string | null; columnId: string | null },
+  ticket: Pick<Ticket, 'boardId' | 'pullRequest' | 'subtickets'> & { id: string | null; columnId: string | null },
   target: Column,
   force = false,
 ) {
   if (force || target.id === ticket.columnId || ticket.pullRequest?.state === 'merged') return
   if (target.id !== workflowColumns(ticket.boardId).done?.id) return
-  if (!ticket.pullRequest && ticket.id && isQuestion(ticket.id)) return
+  if (!ticket.pullRequest && (subticketsFinished(ticket) || (ticket.id && isQuestion(ticket.id)))) return
   throw conflict(
     'pull_request_not_merged',
     ticket.pullRequest
       ? `Tickets enter "${target.name}" when their pull request is merged; ${ticket.pullRequest.url} is ${ticket.pullRequest.state}. It will move automatically once merged.`
-      : `Tickets enter "${target.name}" only with a merged pull request, or as questions (tagged "${QUESTION_TAG}") without one. Link one with POST /api/tickets/:id/review.`,
+      : `Tickets enter "${target.name}" only with a merged pull request, or without one as questions (tagged "${QUESTION_TAG}") or once all their sub-tickets are finished. Link one with POST /api/tickets/:id/review.`,
     { ticket },
   )
 }
@@ -274,7 +329,8 @@ export function createTicket(boardId: string, input: CreateTicketInput, actor: s
   touchBoard(boardId)
   const column = input.column ? resolveColumn(boardId, input.column) : listColumns(boardId)[0]
   if (!column) throw badRequest('Board has no columns; create a column first')
-  assertCanEnter({ id: null, boardId, columnId: null, pullRequest: null }, column, input.force)
+  assertCanEnter({ id: null, boardId, columnId: null, pullRequest: null, subtickets: null }, column, input.force)
+  const parentId = parentFor(boardId, null, input.parent ?? null)
 
   const { number } = sql.get<{ number: number }>(
     'UPDATE boards SET next_number = next_number + 1 WHERE id = ? RETURNING next_number - 1 AS number',
@@ -285,8 +341,8 @@ export function createTicket(boardId: string, input: CreateTicketInput, actor: s
   const timestamp = now()
   sql.run(
     `INSERT INTO tickets (id, board_id, column_id, number, title, description, priority, assignee, due_date,
-       agent_effort, agent_model, position, moved_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       agent_effort, agent_model, parent_id, position, moved_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     boardId,
     column.id,
@@ -298,6 +354,7 @@ export function createTicket(boardId: string, input: CreateTicketInput, actor: s
     input.dueDate ?? null,
     input.agentEffort ?? null,
     input.agentModel ?? null,
+    parentId,
     count,
     timestamp,
     timestamp,
@@ -333,6 +390,13 @@ export function updateTicket(id: string, input: UpdateTicketInput, actor: string
     if (tagIds.length !== ticket.tagIds.length || tagIds.some((tagId) => !ticket.tagIds.includes(tagId))) {
       setTags(id, tagIds)
       changed.push('tags')
+    }
+  }
+  if (input.parent !== undefined) {
+    const parentId = parentFor(ticket.boardId, id, input.parent)
+    if (parentId !== ticket.parentId) {
+      updateRow('tickets', id, { parent_id: parentId })
+      changed.push('parent')
     }
   }
   if (changed.length) logActivity(id, actor, 'updated', { fields: changed })
@@ -452,7 +516,8 @@ export function releaseIdleTickets(columnId: string, input: ReleaseIdleInput, ac
 /**
  * Atomically claims the most important unassigned ticket of a column:
  * highest priority first, then earliest due date, then board order.
- * Blocked tickets are skipped: tagged `blocked`, or waiting for an unfinished ticket (`blocked by #12`).
+ * Blocked tickets are skipped: tagged `blocked`, waiting for an unfinished ticket (`blocked by #12`), or with
+ * unfinished sub-tickets.
  */
 export function claimNextTicket(boardId: string, input: ClaimNextInput): Ticket {
   touchBoard(boardId)
@@ -464,6 +529,7 @@ export function claimNextTicket(boardId: string, input: ClaimNextInput): Ticket 
      WHERE t.column_id = ? AND t.assignee IS NULL ${tagFilter.join(' ')}
        AND NOT EXISTS (SELECT 1 FROM ticket_tags tt JOIN tags g ON g.id = tt.tag_id
                        WHERE tt.ticket_id = t.id AND lower(g.name) = ?)
+       AND NOT EXISTS (SELECT 1 ${SUBTICKETS} AND NOT ${SUBTICKET_DONE})
      ORDER BY t.priority DESC, t.due_date IS NULL, t.due_date, t.position`,
     column.id,
     ...tagIds,
@@ -502,7 +568,8 @@ export function submitForReview(id: string, input: SubmitForReviewInput): Ticket
   }
   const { review } = workflowColumns(ticket.boardId)
   if (!review) throw badRequest('This board has no review column; choose one in the board settings')
-  if (!input.pullRequest && !ticket.pullRequest) {
+  // Tickets whose sub-tickets are all finished may have nothing left to change.
+  if (!input.pullRequest && !ticket.pullRequest && !subticketsFinished(ticket)) {
     if (!isQuestion(id)) {
       throw badRequest(
         `Submit a pull request for review, or tag the ticket "${QUESTION_TAG}" to answer it with a comment instead`,

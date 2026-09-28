@@ -199,6 +199,11 @@ const MIGRATIONS = [
     created_at
   );
   `,
+  `
+  -- The ticket this one is a sub-ticket of (POST /tickets/:id/children); the parent waits for its sub-tickets.
+  ALTER TABLE tickets ADD COLUMN parent_id TEXT REFERENCES tickets(id) ON DELETE SET NULL;
+  CREATE INDEX tickets_parent ON tickets(parent_id);
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

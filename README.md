@@ -16,6 +16,8 @@ priorities, due dates, checklists, comments and an activity log, backed by SQLit
 - **Pull request workflow**: agents submit tickets for review with their GitHub pull request; tickets only enter
   Done once the pull request is merged and move there automatically when it is. Questions (tickets tagged
   `question`) are answered in a comment instead, and you close them yourself by moving them to Done
+- **Sub-tickets**: agents split a big ticket into sub-tickets that link back to it; its card shows how many are done,
+  and the agent comes back to it only once they all are
 - **Merge all**: merge every pull request in review with one click, one at a time and in an order that avoids
   conflicts (stacked pull requests after the ones they build on); any that conflict after earlier merges are skipped
   for their agent to resolve
@@ -186,7 +188,7 @@ ticket, so it takes effect without a restart. It never picks at random: from eit
 the highest **priority** first, then the earliest **due date**, then the one nearest the top of the column, so set
 priorities or drag tickets into the order of your roadmap to decide what it works on next. It skips blocked tickets: those tagged `blocked`, and
 those whose description says they wait for another ticket (`blocked by #12`, `depends on #3 and #4`) until that ticket
-is done or its pull request is merged. An agent that finds a ticket blocked marks it this way before handing it back,
+is done or its pull request is merged, and tickets whose sub-tickets aren't all done yet. An agent that finds a ticket blocked marks it this way before handing it back,
 so the loop doesn't keep claiming it only to find out again that it can't be done yet.
 
 **Names.** The board's **Agent name** (default `claude`) names the loop, which controls the work; its notes on
