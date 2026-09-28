@@ -185,6 +185,10 @@ const MIGRATIONS = [
   -- Whether the ticket's pull request has merge conflicts with its base branch, as GitHub last reported.
   ALTER TABLE tickets ADD COLUMN pr_conflicts INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  -- Whether the server merges the review column's pull requests once they are ready (see server/merge-queue.ts).
+  ALTER TABLE boards ADD COLUMN auto_merge INTEGER NOT NULL DEFAULT 0;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

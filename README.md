@@ -19,6 +19,8 @@ priorities, due dates, checklists, comments and an activity log, backed by SQLit
   conflicts (stacked pull requests after the ones they build on); any that conflict after earlier merges are skipped
   for their agent to resolve
 - **Quick merge**: merge a single ticket's pull request from its card in the review column
+- **Auto-merge**: optionally, per board, merge pull requests in review by themselves once they have no conflicts,
+  every check has passed and every checklist item of their ticket is checked
 - **Overview**: a dashboard across all boards (`/overview`): which agents are working on what right now, time
   worked, tokens used and tickets completed per agent, activity, work time and token usage per day (by type and by model, e.g. Opus or Haiku), per-board counts
   and a cross-board feed; stale or duplicate agents can be cleared from it

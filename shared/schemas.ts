@@ -61,6 +61,7 @@ export const createBoardSchema = z.object({
   agentConcurrency: agentConcurrency.optional(),
   agentBacklog: z.boolean().optional(),
   agentAllSkills: z.boolean().optional(),
+  autoMerge: z.boolean().optional(),
 })
 
 export const updateBoardSchema = z.object({
@@ -76,6 +77,7 @@ export const updateBoardSchema = z.object({
   agentConcurrency: agentConcurrency.optional(),
   agentBacklog: z.boolean().optional(),
   agentAllSkills: z.boolean().optional(),
+  autoMerge: z.boolean().optional(),
 })
 
 /** Creates a repository on GitHub and links it to the board. */

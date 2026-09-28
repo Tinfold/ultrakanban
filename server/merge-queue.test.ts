@@ -8,6 +8,7 @@ import {
   call,
   containing,
   merges,
+  mergeQueue,
   pull,
   pullRequestStatuses,
   pulls,
@@ -194,5 +195,45 @@ describe('merging all reviewed pull requests', () => {
       ],
     )
     assert.deepEqual(merges, [])
+  })
+
+  test('auto-merge merges only pull requests that are ready, and only on boards that have it on', async () => {
+    const ready = await inReview(1)
+    const stackedOnReady = await inReview(2, { base: 'branch-1' })
+    await inReview(3, { mergeableState: 'unstable' })
+    await inReview(4, { mergeableState: 'blocked' })
+    await inReview(5, { mergeable: false, mergeableState: 'dirty' })
+    await inReview(6, { draft: true })
+    await inReview(7, { base: 'branch-3' })
+    const unchecked = await inReview(8)
+    await call('PATCH', `/tickets/${unchecked}`, { description: '- [x] one\n- [ ] two' })
+    const checked = await inReview(9)
+    await call('PATCH', `/tickets/${checked}`, { description: '- [x] one\n- [x] two' })
+
+    await mergeQueue.autoMergeAll()
+    assert.deepEqual(merges, [])
+
+    await call('PATCH', `/boards/${boardId}`, { autoMerge: true })
+    await mergeQueue.autoMergeAll()
+
+    assert.deepEqual(merges, ['acme/app#1:merge', 'acme/app#2:merge', 'acme/app#9:merge'])
+    const { body: run } = await call<MergeRun>('GET', `/boards/${boardId}/merge-run`)
+    assert.equal(run.actor, 'auto-merge')
+    assert.deepEqual(
+      run.steps.map((step) => [step.number, step.status]),
+      [
+        [1, 'merged'],
+        [2, 'merged'],
+        [9, 'merged'],
+      ],
+    )
+    assert.deepEqual(
+      (await ticketsIn('Done')).map((ticket) => ticket.id).sort(),
+      [ready, stackedOnReady, checked].sort(),
+    )
+
+    // Nothing ready is left, so it starts no run.
+    assert.equal(await mergeQueue.autoMerge(boardId), null)
+    assert.equal((await call<MergeRun>('GET', `/boards/${boardId}/merge-run`)).body.id, run.id)
   })
 })

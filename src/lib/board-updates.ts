@@ -23,6 +23,7 @@ export type BoardPatch = Partial<
     | 'agentConcurrency'
     | 'agentBacklog'
     | 'agentAllSkills'
+    | 'autoMerge'
   >
 >
 export type TicketPatch = Partial<

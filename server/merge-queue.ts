@@ -7,11 +7,12 @@ import {
   type MergeRunStep,
   type Ticket,
 } from '../shared/domain.ts'
+import { parseChecklist } from '../shared/checklist.ts'
 import { newId, now } from './db.ts'
 import { badRequest, conflict, HttpError } from './errors.ts'
 import type { GitHubPullRequest } from './github.ts'
 import type { PullRequestSync } from './pull-request-sync.ts'
-import { getBoard } from './store/boards.ts'
+import { getBoard, listBoards } from './store/boards.ts'
 import { getTicket, listTickets } from './store/tickets.ts'
 
 export interface MergeQueueOptions {
@@ -58,6 +59,19 @@ function warning(pullRequest: GitHubPullRequest) {
       return null
   }
 }
+
+/** Actor of the runs that merge boards' pull requests by themselves (the board's `autoMerge` setting). */
+export const AUTO_MERGE_ACTOR = 'auto-merge'
+
+/** Whether every step of the ticket's checklist is checked (true when it has none). */
+const checklistDone = (ticket: Ticket) => parseChecklist(ticket.description).every((item) => item.checked)
+
+/** Whether a pull request is ready to merge without anyone looking: no conflicts and every check passed. */
+const readyToMerge = (pullRequest: GitHubPullRequest | null) =>
+  pullRequest?.state === 'open' &&
+  !pullRequest.draft &&
+  pullRequest.mergeable === true &&
+  ['clean', 'has_hooks'].includes(pullRequest.mergeableState)
 
 /**
  * Orders pull requests so each merges after the ones it builds on, keeping the review column's order otherwise.
@@ -153,6 +167,12 @@ export function createMergeQueue(
    * needs to know.
    */
   async function plan(boardId: string, focus?: string): Promise<MergePlan> {
+    const { items, methods } = await planEntries(boardId, focus)
+    return { items, methods }
+  }
+
+  /** `plan`, along with each pull request as GitHub reported it (`null` if it couldn't be read). */
+  async function planEntries(boardId: string, focus?: string) {
     const reviewColumnId = getBoard(boardId).reviewColumnId
     if (!reviewColumnId) throw badRequest('This board has no review column; choose one in the board settings')
     if (!(await github.auth())) {
@@ -178,6 +198,7 @@ export function createMergeQueue(
       }),
     )
 
+    const pullRequestOf = new Map(entries.map((entry) => [entry.item.ticketId, entry.pullRequest]))
     const ordered = mergeOrder(entries).map((entry) => entry.item)
     const byTicket = new Map(ordered.map((item) => [item.ticketId, item]))
     for (const item of ordered) {
@@ -188,7 +209,7 @@ export function createMergeQueue(
     const repos = [...new Set(ordered.filter((item) => !item.skip).map((item) => item.repo))]
     const allowed = await Promise.all(repos.map((repo) => github.mergeMethods(repo).catch(() => [...MERGE_METHODS])))
     const methods = MERGE_METHODS.filter((method) => allowed.every((repoMethods) => repoMethods.includes(method)))
-    return { items: ordered, methods }
+    return { items: ordered, methods, pullRequestOf }
   }
 
   async function mergeStep(run: MergeRun, step: MergeRunStep, merged: Map<string, GitHubPullRequest>) {
@@ -277,8 +298,67 @@ export function createMergeQueue(
     }
   }
 
+  /**
+   * Merges the board's pull requests that are ready: in the review column, open, not a draft, without conflicts,
+   * with every check passed and every checklist item of their ticket checked, and building only on others that are
+   * ready too. Returns the run, or null when none were ready (or another run is going), without starting one.
+   */
+  async function autoMerge(boardId: string) {
+    const reviewColumnId = getBoard(boardId).reviewColumnId
+    if (!reviewColumnId) return null
+    // Asks GitHub only when a ticket could be ready: most of the time none is.
+    const candidates = listTickets(boardId, { column: reviewColumnId }).filter(
+      (ticket) =>
+        ticket.pullRequest &&
+        !['merged', 'closed'].includes(ticket.pullRequest.state) &&
+        !ticket.pullRequest.conflicts &&
+        checklistDone(ticket),
+    )
+    if (!candidates.length) return null
+    const current = runs.get(boardId)
+    if (starting.has(boardId) || current?.status === 'running') return null
+
+    return exclusive(boardId, async () => {
+      const { items, methods, pullRequestOf } = await planEntries(boardId)
+      const ready = new Set<string>()
+      for (const item of items) {
+        if (item.skip || !readyToMerge(pullRequestOf.get(item.ticketId) ?? null)) continue
+        if (!checklistDone(getTicket(item.ticketId))) continue
+        if (item.after.every((id) => ready.has(id))) ready.add(item.ticketId)
+      }
+      if (!ready.size) return null
+      const run = newRun(
+        boardId,
+        methods[0] ?? 'merge',
+        AUTO_MERGE_ACTOR,
+        items.filter((item) => ready.has(item.ticketId)),
+      )
+      await execute(run)
+      return run
+    })
+  }
+
+  /** Runs `autoMerge` on every board that has it switched on, one board at a time. */
+  async function autoMergeAll() {
+    for (const board of listBoards().filter((board) => board.autoMerge)) {
+      await autoMerge(board.id).catch((error) =>
+        console.warn(`Auto-merge failed for board ${board.id}: ${errorMessage(error)}`),
+      )
+    }
+  }
+
   return {
     plan,
+    autoMerge,
+    autoMergeAll,
+
+    /** Runs `autoMergeAll` now and then every `intervalMs`, never two at once. */
+    startAutoMerge(intervalMs: number) {
+      let running: Promise<void> | null = null
+      const tick = () => void (running ??= autoMergeAll().finally(() => (running = null)))
+      tick()
+      setInterval(tick, intervalMs).unref()
+    },
 
     /** The board's latest run, if there was one since the server started. */
     latest: (boardId: string) => runs.get(boardId) ?? null,
