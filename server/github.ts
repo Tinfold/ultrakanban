@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { MERGE_METHODS, type MergeMethod, parsePullRequestUrl } from '../shared/domain.ts'
+import { type CheckStatus, MERGE_METHODS, type MergeMethod, parsePullRequestUrl } from '../shared/domain.ts'
 import type { PullRequestStatus } from './store/tickets.ts'
 
 export type GitHubAuth = 'env' | 'gh' | null
@@ -127,6 +127,17 @@ export function createGitHubClient(): GitHubClient {
       },
     ))
 
+  async function getCombinedStatus(repo: string, sha: string): Promise<CheckStatus | null> {
+    const data = await request<{ state: 'success' | 'pending' | 'failure'; total_count: number }>(
+      'GET',
+      `/repos/${repo}/commits/${sha}/status`,
+    )
+    if (data.total_count === 0) return null
+    if (data.state === 'success') return 'passing'
+    if (data.state === 'pending') return 'pending'
+    return 'failing'
+  }
+
   async function getPullRequest(repo: string, number: number): Promise<GitHubPullRequest> {
     const data = await request<PullRequestResponse>('GET', `/repos/${repo}/pulls/${number}`)
     return {
@@ -150,7 +161,9 @@ export function createGitHubClient(): GitHubClient {
       if (!pullRequest) throw new Error(`Not a pull request URL: ${url}`)
       const data = await getPullRequest(pullRequest.repo, pullRequest.number)
       const state = data.merged ? 'merged' : data.state === 'closed' ? 'closed' : data.draft ? 'draft' : 'open'
-      return { state, title: data.title, conflicts: data.mergeable === null ? null : !data.mergeable }
+      const open = state === 'open' || state === 'draft'
+      const checks = open ? await getCombinedStatus(pullRequest.repo, data.headSha) : null
+      return { state, title: data.title, conflicts: data.mergeable === null ? null : !data.mergeable, checks }
     },
 
     async createRepository({ owner, name, description, private: isPrivate }) {

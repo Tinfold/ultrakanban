@@ -206,6 +206,11 @@ const MIGRATIONS = [
   ALTER TABLE tickets ADD COLUMN run_step TEXT;
   `,
   `
+  -- Combined status of the pull request's checks ('pending', 'passing', 'failing'), as GitHub last reported;
+  -- NULL when it has none, or isn't open or draft.
+  ALTER TABLE tickets ADD COLUMN pr_checks TEXT;
+  `,
+  `
   -- The ticket this one is a sub-ticket of (POST /tickets/:id/children); the parent waits for its sub-tickets.
   ALTER TABLE tickets ADD COLUMN parent_id TEXT REFERENCES tickets(id) ON DELETE SET NULL;
   CREATE INDEX tickets_parent ON tickets(parent_id);

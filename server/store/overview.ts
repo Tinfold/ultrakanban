@@ -14,6 +14,7 @@ import {
   type OverviewEventKind,
   type OverviewRange,
   type OverviewTicket,
+  type OverviewTicketUsage,
   type OverviewUsage,
   type PullRequestState,
   totalTokens,
@@ -26,6 +27,7 @@ import {
 import { sql } from '../db.ts'
 import { type ActivityRow, toActivity } from './activity.ts'
 import { listBoards } from './boards.ts'
+import { type TagRow, toTag } from './tags.ts'
 import { WAITING_SINCE } from './tickets.ts'
 import { queryUsage } from './usage.ts'
 
@@ -219,6 +221,38 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
     tokensOn.set(run.boardId, (tokensOn.get(run.boardId) ?? 0) + totalTokens(run))
   }
 
+  // Tickets worked within the range, with everything their runs used.
+  const workedTickets = 'SELECT ticket_id FROM token_usage WHERE created_at >= ? AND ticket_id IS NOT NULL'
+  const ticketTags = new Map<string, TagRow[]>()
+  for (const row of sql.all<TagRow & { ticket_id: string }>(
+    `SELECT tt.ticket_id, g.* FROM ticket_tags tt JOIN tags g ON g.id = tt.tag_id
+     WHERE tt.ticket_id IN (${workedTickets}) ORDER BY g.name`,
+    since,
+  )) {
+    ticketTags.set(row.ticket_id, [...(ticketTags.get(row.ticket_id) ?? []), row])
+  }
+  const ticketUsage = sql
+    .all<{ ticket_id: string; runs: number; tokens: number; cost: number | null }>(
+      `SELECT ticket_id, count(*) AS runs,
+         sum(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) AS tokens, sum(cost_usd) AS cost
+       FROM token_usage WHERE ticket_id IN (${workedTickets}) GROUP BY ticket_id`,
+      since,
+    )
+    .map((row): OverviewTicketUsage => {
+      const ticket = ticketsById.get(row.ticket_id)!
+      return {
+        id: ticket.id,
+        boardId: ticket.board_id,
+        boardName: boardNames.get(ticket.board_id)!,
+        number: ticket.number,
+        title: ticket.title,
+        column: columnNames.get(ticket.column_id)!,
+        tags: (ticketTags.get(ticket.id) ?? []).map(toTag),
+        usage: { runs: row.runs, tokens: row.tokens, costUsd: row.cost },
+      }
+    })
+    .sort((a, b) => b.usage.tokens - a.usage.tokens || a.number - b.number)
+
   // What everyone holds right now.
   const holdings = new Map<string, OverviewTicket[]>()
   const boardCounts = new Map<string, { open: number; working: number; review: number }>()
@@ -389,6 +423,7 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
     sessions: clipped,
     completions: completions.sort((a, b) => a.at.localeCompare(b.at)),
     usage,
+    tickets: ticketUsage,
     recent,
   }
 }

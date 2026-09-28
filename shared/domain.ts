@@ -67,6 +67,10 @@ export const PULL_REQUEST_STATES = ['unknown', 'open', 'draft', 'merged', 'close
 /** `unknown` until GitHub has been checked (or when it can't be reached). */
 export type PullRequestState = (typeof PULL_REQUEST_STATES)[number]
 
+export const CHECK_STATUSES = ['pending', 'passing', 'failing'] as const
+/** GitHub's combined status for the pull request's head commit. */
+export type CheckStatus = (typeof CHECK_STATUSES)[number]
+
 export interface PullRequest {
   url: string
   /** `owner/name` */
@@ -76,6 +80,8 @@ export interface PullRequest {
   title: string | null
   /** Whether GitHub last found that it can't merge cleanly into its base branch (only open and draft ones). */
   conflicts: boolean
+  /** Combined status of its checks; `null` when it has none, or isn't open or draft. */
+  checks: CheckStatus | null
   checkedAt: string | null
 }
 
@@ -257,6 +263,8 @@ export interface Ticket {
   version: number
   commentCount: number
   attachmentCount: number
+  /** Tokens agents' runs used on it, added up over all of them. */
+  usage: TicketUsage
   /** The agent run working the ticket right now, if any (see `AgentRun`). */
   run: AgentRun | null
   /**
@@ -277,6 +285,15 @@ export interface Ticket {
   subtickets: { done: number; total: number } | null
   createdAt: string
   updatedAt: string
+}
+
+/** A ticket's token usage added up over all the agent runs on it. */
+export interface TicketUsage {
+  runs: number
+  /** Input, output and cache tokens together (see `totalTokens`). */
+  tokens: number
+  /** Estimated cost in US dollars of the runs that reported one; `null` when none did. */
+  costUsd: number | null
 }
 
 /**
@@ -528,6 +545,18 @@ export interface OverviewUsage extends TokenCounts {
   models: ModelUsage[]
 }
 
+/** A ticket agents' runs used tokens on within the range, with its usage over all its runs. */
+export interface OverviewTicketUsage {
+  id: string
+  boardId: string
+  boardName: string
+  number: number
+  title: string
+  column: string
+  tags: Tag[]
+  usage: TicketUsage
+}
+
 export type OverviewActivity = Activity & {
   ticket: { number: number; title: string; boardId: string; boardName: string }
 }
@@ -559,6 +588,8 @@ export interface Overview {
   completions: OverviewCompletion[]
   /** Agent runs' token usage within the range, oldest first. */
   usage: OverviewUsage[]
+  /** Tickets with runs within the range, most tokens first. */
+  tickets: OverviewTicketUsage[]
   /** The latest activity entries across all boards, newest first. */
   recent: OverviewActivity[]
 }
