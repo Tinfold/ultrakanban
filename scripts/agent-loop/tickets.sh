@@ -137,13 +137,13 @@ handle_feedback() {
       ci_note=$(jq -r '.infraNote | "CI on \(.sha[:7]) didn'"'"'t run properly, so no agent run was started for it: "
         + (.infra | map("\(.name) (\(.why))") | join("; "))' <<<"$triage")
       log "ticket #$number ($id): $ci_note"
-      note "$id" "$ci_note. Someone needs to check CI (billing and spending limits, runners, approvals)."
+      note "$id" "$ci_note. Someone needs to check CI (billing and spending limits, runners, approvals)." notify
       update_state "$id" '.infraNoted = $v' "$(jq -r .infraNote.sha <<<"$triage")"
     fi
     if [[ $(jq -r .capNote <<<"$triage") == true ]]; then
       log "ticket #$number ($id): $MAX_CI_RUNS runs in a row for failing CI; not starting more until a human comments"
       note "$id" "The agent made $MAX_CI_RUNS runs in a row for failing CI with no human feedback in between, so the \
-loop stopped starting runs for CI on this ticket. Comment on the ticket to let it try again."
+loop stopped starting runs for CI on this ticket. Comment on the ticket to let it try again." notify
       update_state "$id" '.capNoted = true'
     fi
     [[ $(jq -r .run <<<"$triage") == true ]] || continue

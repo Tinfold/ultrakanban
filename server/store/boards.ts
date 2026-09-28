@@ -22,6 +22,7 @@ interface BoardRow {
   agent_all_skills: number
   auto_merge: number
   archive_done_days: number | null
+  notify_url: string | null
   ticket_count: number
   created_at: string
   updated_at: string
@@ -47,6 +48,7 @@ const toBoard = (row: BoardRow): BoardSummary => ({
   agentAllSkills: row.agent_all_skills === 1,
   autoMerge: row.auto_merge === 1,
   archiveDoneDays: row.archive_done_days,
+  notifyUrl: row.notify_url,
   ticketCount: row.ticket_count,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -100,6 +102,7 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     agentAllSkills,
     autoMerge,
     archiveDoneDays,
+    notifyUrl,
   } = input
   return updateBoard(id, {
     reviewColumn,
@@ -114,6 +117,7 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     agentAllSkills,
     autoMerge,
     archiveDoneDays,
+    notifyUrl,
   })
 }
 
@@ -135,6 +139,7 @@ export function updateBoard(id: string, input: UpdateBoardInput): BoardSummary {
     agent_all_skills: input.agentAllSkills === undefined ? undefined : Number(input.agentAllSkills),
     auto_merge: input.autoMerge === undefined ? undefined : Number(input.autoMerge),
     archive_done_days: input.archiveDoneDays,
+    notify_url: input.notifyUrl,
   })
   const board = getBoard(id)
   if (board.agentEnabled && !board.githubRepo) {
