@@ -5,7 +5,8 @@
 # The board's agentConcurrency (1 when not set) is how many tickets it works at once: that many loops, the first in the
 # clone and each other one in its own git worktree of it (worktrees/<n>), sharing one state directory. If one loop
 # stops, the others are stopped too and the script exits, so systemd restarts them all. When the installed scripts or
-# skill change, each loop stops before its next run, and once they all have, the script starts again with the new ones.
+# skill change, each loop stops before its next run and is started again with the new ones on its own. Only a change
+# to this script waits for them all to stop, and then starts it again.
 #
 #   agent-board.sh <board id>
 #
@@ -76,24 +77,44 @@ echo "working board $BOARD on $repo as $agent/$model/$effort, $concurrency ticke
 export KANBAN BOARD AGENT=$agent MODEL=$model EFFORT=$effort STATE_DIR=$dir/state AGENT_LOOP_CLEAN=1 \
   CLAIM_LIMIT=$concurrency \
   WATCH_FILES="$here/agent-loop.sh:$(printf '%s:' "$here"/agent-loop/*.sh)$here/agent-board.sh:$here/../skill/SKILL.md"
+# agent-board.sh as it is now, to tell when it is updated.
+board_script=$(stat -c '%i %Y %s' "$here/agent-board.sh" 2>/dev/null)
 pids=()
 trap 'kill "${pids[@]}" 2>/dev/null; wait; exit 0' INT TERM
-for n in "${!checkouts[@]}"; do
+# Starts loop n in its checkout, after the given number of seconds.
+start_loop() {
   (
-    cd "${checkouts[n]}" || exit 1
-    if ((concurrency > 1)); then export LOOP_ID=$((n + 1)); fi
+    sleep "${2:-0}"
+    cd "${checkouts[$1]}" || exit 1
+    if ((concurrency > 1)); then export LOOP_ID=$(($1 + 1)); fi
     exec "$here/agent-loop.sh"
   ) &
-  pids+=("$!")
+  pids[$1]=$!
+}
+for n in "${!checkouts[@]}"; do
+  start_loop "$n"
 done
 
-# A loop exits with status 75 when the agent scripts are updated (agent-supervisor.sh keeps them up to date). The
-# others do the same once their runs are over, and then this script starts again with the new versions.
-for ((left = ${#pids[@]}; left > 0; left--)); do
-  wait -n
+# A loop exits with status 75 when the agent scripts are updated (agent-supervisor.sh keeps them up to date). It is
+# started again with the new versions on its own, so the others' runs, which can take hours, don't keep it idle (a
+# short wait lets the supervisor finish copying them). When this script itself is updated, the loops can't take it on
+# one by one: they stop once their runs are over, and when they all have, this script starts again with the new version.
+draining=
+while ((${#pids[@]})); do
+  wait -n -p pid "${pids[@]}"
   code=$?
+  for n in "${!pids[@]}"; do
+    [[ ${pids[n]} == "$pid" ]] && break
+  done
+  unset 'pids[n]'
   if ((code == 75)); then
-    ((left == ${#pids[@]})) && echo "the agent scripts were updated; restarting once every loop finishes its run"
+    if [[ $(stat -c '%i %Y %s' "$here/agent-board.sh" 2>/dev/null) != "$board_script" ]]; then
+      [[ -n $draining ]] || echo "agent-board.sh was updated; restarting once every loop finishes its run"
+      draining=1
+    else
+      echo "loop $((n + 1)): the agent scripts were updated; starting it again with the new ones"
+      start_loop "$n" 5
+    fi
     continue
   fi
   echo "an agent loop stopped (status $code); stopping the others"
