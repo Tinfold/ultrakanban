@@ -90,6 +90,39 @@ describe('pull request workflow', () => {
     pullRequestStatuses.clear()
   })
 
+  test('question tickets are answered with a comment and closed without a pull request', async () => {
+    const task = await addTicket({ title: 'A task' })
+    const question = await addTicket({ title: 'Why?', tags: ['Question'] })
+
+    const noPullRequest = await call<ApiErrorBody>('POST', `/tickets/${task.id}/review`, { agent: 'a', comment: 'Hi' })
+    const noAnswer = await call<ApiErrorBody>('POST', `/tickets/${question.id}/review`, { agent: 'a' })
+    const answered = await call<Ticket>('POST', `/tickets/${question.id}/review`, {
+      agent: 'a',
+      comment: 'Because of the cache.',
+    })
+    assert.equal(noPullRequest.status, 400)
+    assert.equal(noAnswer.status, 400)
+    assert.equal(answered.status, 200)
+    assert.equal(answered.body.pullRequest, null)
+    assert.deepEqual(
+      (await ticketsIn('Review')).map((ticket) => ticket.id),
+      [question.id],
+    )
+    const { body: activity } = await call<Activity[]>('GET', `/tickets/${question.id}/activity`)
+    assert.equal(activity.at(-1)?.type, 'comment')
+
+    const closed = await call<Ticket>('POST', `/tickets/${question.id}/move`, { column: 'Done' })
+    const taskBlocked = await call<ApiErrorBody>('POST', `/tickets/${task.id}/move`, { column: 'Done' })
+    assert.equal(closed.status, 200)
+    assert.equal((await ticketsIn('Done'))[0].id, question.id)
+    assert.equal(taskBlocked.status, 409)
+
+    // A question answered with a pull request after all waits for its merge like any other ticket.
+    const withPullRequest = await addTicket({ title: 'How?', tags: ['question'], pullRequest: PR })
+    const blocked = await call<ApiErrorBody>('POST', `/tickets/${withPullRequest.id}/move`, { column: 'Done' })
+    assert.equal(blocked.status, 409)
+  })
+
   test('tracks whether the pull request has merge conflicts', async () => {
     const url = 'https://github.com/acme/app/pull/77'
     const ticket = await addTicket({ title: 'A', pullRequest: url })

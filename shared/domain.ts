@@ -28,6 +28,12 @@ export const AGENT_MAX_CONCURRENCY = 8
 export const AGENT_IDLE_MINUTES = 10
 
 /**
+ * Name of the tag that marks a ticket as a question (case-insensitive): it is answered in a comment rather than with a
+ * pull request, so it can go to review and then to the done column without one.
+ */
+export const QUESTION_TAG = 'question'
+
+/**
  * Name a board's agent claims tickets under: `<agent>/<model>/<effort>`, e.g. `claude/opus/high`. The agent name
  * itself belongs to the board's controller (scripts/agent-loop.sh), which starts one of these workers per run.
  */
