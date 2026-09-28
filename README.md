@@ -14,7 +14,8 @@ priorities, due dates, checklists, comments and an activity log, backed by SQLit
 - **Attachments**: screenshots and screen recordings on tickets (upload, drag and drop or paste), shown in the
   ticket and its activity
 - **Pull request workflow**: agents submit tickets for review with their GitHub pull request; tickets only enter
-  Done once the pull request is merged and move there automatically when it is
+  Done once the pull request is merged and move there automatically when it is. Questions (tickets tagged
+  `question`) are answered in a comment instead, and you close them yourself by moving them to Done
 - **Merge all**: merge every pull request in review with one click, one at a time and in an order that avoids
   conflicts (stacked pull requests after the ones they build on); any that conflict after earlier merges are skipped
   for their agent to resolve

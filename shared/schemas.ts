@@ -161,8 +161,9 @@ export const moveTicketSchema = z.object({
 
 export const submitForReviewSchema = z.object({
   agent: name,
-  pullRequest: pullRequestUrl,
-  /** Markdown summary posted as a comment, e.g. what changed and how it was verified. */
+  /** Left out for a question ticket (tagged `question`), which is answered in `comment` instead. */
+  pullRequest: pullRequestUrl.optional(),
+  /** Markdown summary posted as a comment, e.g. what changed and how it was verified, or a question's answer. */
   comment: z.string().trim().min(1).max(20_000).optional(),
   ifVersion: version.optional(),
 })
