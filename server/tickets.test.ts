@@ -153,6 +153,22 @@ describe('agent claiming', () => {
     assert.equal(claims[4].status, 404)
   })
 
+  test('claim-next takes equally important tickets in board order', async () => {
+    await addTicket({ title: 'first', priority: 'high' })
+    await addTicket({ title: 'second', priority: 'high' })
+    const third = await addTicket({ title: 'third', priority: 'high' })
+    await call('POST', `/tickets/${third.id}/move`, { column: 'Todo', position: 0 })
+
+    const titles = []
+    for (const agent of ['a', 'b', 'c']) {
+      titles.push(
+        (await call<Ticket>('POST', `/boards/${boardId}/tickets/claim-next`, { agent, column: 'Todo' })).body.title,
+      )
+    }
+
+    assert.deepEqual(titles, ['third', 'first', 'second'])
+  })
+
   test('claim-next filters by tag', async () => {
     await addTicket({ title: 'frontend', priority: 'urgent', tags: ['frontend'] })
     await addTicket({ title: 'backend', tags: ['backend'] })

@@ -177,7 +177,9 @@ agents working at once, all on your `claude` login and its usage limits.
 empty** (`agentBacklog`) to let it go on to the **Backlog** column once Todo has none left, as long as the **In
 progress** column holds fewer tickets than **Parallel runs**: tickets already in progress take up the slots, so the
 backlog isn't pulled into progress while they're being worked. The loop reads the setting each time it looks for a
-ticket, so it takes effect without a restart. From either column it skips blocked tickets: those tagged `blocked`, and
+ticket, so it takes effect without a restart. It never picks at random: from either column it takes the ticket with
+the highest **priority** first, then the earliest **due date**, then the one nearest the top of the column, so set
+priorities or drag tickets into the order of your roadmap to decide what it works on next. It skips blocked tickets: those tagged `blocked`, and
 those whose description says they wait for another ticket (`blocked by #12`, `depends on #3 and #4`) until that ticket
 is done or its pull request is merged. An agent that finds a ticket blocked marks it this way before handing it back,
 so the loop doesn't keep claiming it only to find out again that it can't be done yet.

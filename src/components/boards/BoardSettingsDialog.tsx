@@ -299,7 +299,11 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
             />
             Take tickets from Backlog when Todo is empty
           </label>
-          {!hasBacklog && <p className="pl-6 text-xs text-muted-foreground">This board has no column named Backlog.</p>}
+          <p className="pl-6 text-xs text-muted-foreground">
+            {hasBacklog
+              ? 'From either column it takes the highest priority first, then the earliest due date, then the ticket nearest the top.'
+              : 'This board has no column named Backlog.'}
+          </p>
         </div>
         <div className="grid gap-1">
           <label className="flex items-center gap-2 text-sm">
