@@ -1,4 +1,5 @@
 import { differenceInCalendarDays, format, formatDistanceToNowStrict, isThisYear, parseISO } from 'date-fns'
+import type { TicketUsage } from '@shared/domain'
 
 export const toISODate = (date: Date) => format(date, 'yyyy-MM-dd')
 
@@ -44,6 +45,17 @@ const dollars = new Intl.NumberFormat(undefined, { style: 'currency', currency: 
 
 /** US dollars to the cent, e.g. `$12.34`; amounts below a cent read `<$0.01`. */
 export const formatCost = (usd: number) => (usd > 0 && usd < 0.01 ? '<$0.01' : dollars.format(usd))
+
+/** A ticket's usage in a few characters: its cost when its runs reported one, else its tokens. */
+export const formatUsageShort = (usage: TicketUsage) =>
+  usage.costUsd !== null ? formatCost(usage.costUsd) : formatTokens(usage.tokens)
+
+/** A ticket's usage in full, e.g. `1.2M tokens over 3 runs, $4.56`. */
+export function formatUsage(usage: TicketUsage) {
+  const runs = `${usage.runs} ${usage.runs === 1 ? 'run' : 'runs'}`
+  const cost = usage.costUsd !== null ? `, ${formatCost(usage.costUsd)}` : ''
+  return `${formatTokens(usage.tokens)} tokens over ${runs}${cost}`
+}
 
 /**
  * Readable model name, e.g. `Opus 5.5` for `claude-opus-5-5`, `Haiku 4.5` for `claude-haiku-4-5-20251001` and `Opus`

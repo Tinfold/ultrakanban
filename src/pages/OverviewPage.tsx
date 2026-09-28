@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { format } from 'date-fns'
-import { type ReactNode, useEffect, useMemo } from 'react'
+import { type ReactNode, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { mergeUsage, noUsage, OVERVIEW_RANGES, type OverviewRange, totalTokens, type UsageTotals } from '@shared/domain'
 import { AppHeader } from '@/components/app/AppHeader'
@@ -9,6 +9,7 @@ import { BoardTable } from '@/components/overview/BoardTable'
 import { type ChartSeries, ColumnChart } from '@/components/overview/ColumnChart'
 import { NeedsAttention } from '@/components/overview/NeedsAttention'
 import { RecentActivity } from '@/components/overview/RecentActivity'
+import { TicketUsageTable, type UsageGrouping } from '@/components/overview/TicketUsageTable'
 import { Button } from '@/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { queryKeys, useOverview } from '@/hooks/queries'
@@ -51,6 +52,7 @@ const SECTIONS = {
   attention: 'needs-attention',
   agents: 'agents',
   boards: 'boards',
+  ticketUsage: 'ticket-usage',
   activity: 'activity',
   timeWorked: 'time-worked',
   tokens: 'tokens',
@@ -122,6 +124,7 @@ function JumpBar({ attention }: { attention: number }) {
     [SECTIONS.attention, 'Needs attention', attention],
     [SECTIONS.agents, 'Agents'],
     [SECTIONS.boards, 'Boards'],
+    [SECTIONS.ticketUsage, 'Ticket usage'],
     [SECTIONS.recent, 'Recent activity'],
   ]
   return (
@@ -172,6 +175,7 @@ function Section({ id, title, actions, children, className }: SectionProps) {
 
 export function OverviewPage() {
   const [days, setDays] = useStoredState<OverviewRange>(storageKeys.overviewRange, 14)
+  const [usageGrouping, setUsageGrouping] = useState<UsageGrouping>('tickets')
   const { data: overview, error, isPlaceholderData } = useOverview(days)
   const now = useNow()
   const queryClient = useQueryClient()
@@ -393,6 +397,32 @@ export function OverviewPage() {
             </Section>
             <Section id={SECTIONS.boards} title="Boards">
               <BoardTable boards={overview.boards} />
+            </Section>
+            <Section
+              id={SECTIONS.ticketUsage}
+              title="Ticket usage"
+              actions={
+                <ToggleGroup
+                  type="single"
+                  variant="outline"
+                  size="sm"
+                  value={usageGrouping}
+                  onValueChange={(value) => value && setUsageGrouping(value as UsageGrouping)}
+                  aria-label="Group by"
+                >
+                  <ToggleGroupItem value="tickets" className="px-3">
+                    Tickets
+                  </ToggleGroupItem>
+                  <ToggleGroupItem value="tags" className="px-3">
+                    By tag
+                  </ToggleGroupItem>
+                </ToggleGroup>
+              }
+            >
+              <p className="-mt-1 text-xs text-muted-foreground">
+                Tickets agents ran on in the last {days} days, with all their runs
+              </p>
+              <TicketUsageTable tickets={overview.tickets} grouping={usageGrouping} />
             </Section>
           </div>
           {/* On wide screens Recent activity takes what's left of the height of the Agents and Boards column

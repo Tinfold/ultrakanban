@@ -3,6 +3,7 @@ import { CSS } from '@dnd-kit/utilities'
 import {
   BanIcon,
   CalendarIcon,
+  CoinsIcon,
   GitMergeConflictIcon,
   MessageSquareIcon,
   PaperclipIcon,
@@ -15,7 +16,7 @@ import { PullRequestIcon } from '@/components/common/PullRequestIcon'
 import { TagChip } from '@/components/common/TagChip'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { WaitingBadge } from '@/components/common/WaitingBadge'
-import { dueState, formatDueDate, ticketRef } from '@/lib/format'
+import { dueState, formatDueDate, formatUsage, formatUsageShort, ticketRef } from '@/lib/format'
 import { checklistProgress } from '@/lib/markdown'
 import { CONFLICTS_HINT } from '@/lib/pull-request'
 import { cn } from '@/lib/utils'
@@ -46,6 +47,7 @@ export function TicketCard({ ticket, overlay }: TicketCardProps) {
     checklist.total > 0 ||
     ticket.commentCount > 0 ||
     ticket.attachmentCount > 0 ||
+    ticket.usage.runs > 0 ||
     ticket.pullRequest ||
     ticket.waitingSince
   const canMerge =
@@ -123,6 +125,12 @@ export function TicketCard({ ticket, overlay }: TicketCardProps) {
             <span className="flex items-center gap-1 tabular-nums">
               <MessageSquareIcon />
               {ticket.commentCount}
+            </span>
+          )}
+          {ticket.usage.runs > 0 && (
+            <span className="flex items-center gap-1 tabular-nums" title={formatUsage(ticket.usage)}>
+              <CoinsIcon />
+              {formatUsageShort(ticket.usage)}
             </span>
           )}
           {canMerge && <QuickMergeButton ticket={ticket} />}

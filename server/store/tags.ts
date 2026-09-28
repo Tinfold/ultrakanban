@@ -3,14 +3,19 @@ import type { CreateTagInput, UpdateTagInput } from '../../shared/schemas.ts'
 import { newId, sql, touchBoard, updateRow } from '../db.ts'
 import { conflict, notFound } from '../errors.ts'
 
-interface TagRow {
+export interface TagRow {
   id: string
   board_id: string
   name: string
   color: string
 }
 
-const toTag = (row: TagRow): Tag => ({ id: row.id, boardId: row.board_id, name: row.name, color: row.color as Color })
+export const toTag = (row: TagRow): Tag => ({
+  id: row.id,
+  boardId: row.board_id,
+  name: row.name,
+  color: row.color as Color,
+})
 
 export function listTags(boardId: string): Tag[] {
   return sql.all<TagRow>('SELECT * FROM tags WHERE board_id = ? ORDER BY name', boardId).map(toTag)
