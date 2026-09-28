@@ -26,3 +26,20 @@ export function parseBlockers(markdown: string): number[] {
   }
   return [...numbers]
 }
+
+/**
+ * Numbers of the tickets a ticket waits for (`blocked by #12`) that aren't finished yet: still on the board, not in
+ * its done column and without a merged pull request. Tickets that don't exist on the board aren't counted.
+ */
+export function openBlockers(
+  ticket: { number: number; description: string },
+  tickets: { number: number; columnId: string; pullRequest: { state: string } | null }[],
+  doneColumnId: string | undefined,
+): number[] {
+  const numbers = parseBlockers(ticket.description).filter((number) => number !== ticket.number)
+  if (!numbers.length) return []
+  return numbers.filter((number) => {
+    const blocker = tickets.find((other) => other.number === number)
+    return blocker && blocker.columnId !== doneColumnId && blocker.pullRequest?.state !== 'merged'
+  })
+}
