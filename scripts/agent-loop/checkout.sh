@@ -68,10 +68,24 @@ checkout() {
   git rebase --abort >/dev/null 2>&1
   git merge --abort >/dev/null 2>&1
   git reset --quiet --hard && git clean -fdq || return 1
+  clear_build_output
   if [[ $branch == "$default" ]]; then
     git checkout --quiet --detach "origin/$branch" || return 1
   else
     git checkout --quiet --ignore-other-worktrees -B "$branch" "origin/$branch" || return 1
   fi
   printf '%s\n' "$branch"
+}
+
+# Build output (ignored files such as target/ or node_modules/) is kept between runs so builds stay incremental, but it
+# grows with every ticket: a Rust target/ reaches hundreds of GB. Once the checkout's ignored files take more than
+# MAX_BUILD_GB, they are all removed, except the ultrakanban skill agent-board.sh puts there. Cargo hardlinks its
+# output, so du counts each file once.
+clear_build_output() {
+  local kb
+  [[ $MAX_BUILD_GB =~ ^[1-9][0-9]*$ ]] || return 0
+  kb=$(git ls-files -z --others --ignored --exclude-standard --directory | xargs -0 -r du -sck | tail -1 | cut -f1)
+  ((${kb:-0} > MAX_BUILD_GB * 1024 * 1024)) || return 0
+  log "build output takes $((kb / 1024 / 1024)) GB, over MAX_BUILD_GB=$MAX_BUILD_GB: clearing it" >&2
+  git clean -fdXq -e '!/.claude/skills/ultrakanban/SKILL.md'
 }
