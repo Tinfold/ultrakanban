@@ -179,6 +179,8 @@ interface Ticket {
   version: number // increments on every change
   commentCount: number
   attachmentCount: number
+  movedAt: string // when it entered its current column
+  archived: boolean // in the done column for longer than the board's archiveDoneDays (see Boards)
   createdAt: string
   updatedAt: string
 }
@@ -214,6 +216,7 @@ interface BoardSummary {
   agentBacklog: boolean // it also takes tickets from the Backlog column once Todo has none
   agentAllSkills: boolean // its runs load every skill, not only the ultrakanban skill
   autoMerge: boolean // the server merges pull requests in review once they are ready (see Pull request workflow)
+  archiveDoneDays: number | null // days in the done column after which tickets are archived, 1-3650 (never when null)
   ticketCount: number
   createdAt: string
   updatedAt: string
@@ -222,16 +225,16 @@ interface BoardSummary {
 
 ## Boards
 
-| Method | Path                           | Body / query                                                                                                                                                                                                                                                                                                                          | Returns                                        |
-| ------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| GET    | `/boards`                      |                                                                                                                                                                                                                                                                                                                                       | `BoardSummary[]` (most recently updated first) |
-| POST   | `/boards`                      | `{ name, description?, columns?: string[], reviewColumn?: ref, doneColumn?: ref, githubRepo?, agentEnabled?, agentName?, agentModel?, agentEffort?, agentConcurrency?, agentBacklog?, agentAllSkills?, autoMerge? }`                                                                                                                  | `BoardSummary`                                 |
-| GET    | `/boards/:boardId`             |                                                                                                                                                                                                                                                                                                                                       | `{ board, columns, tags, tickets }`            |
-| PATCH  | `/boards/:boardId`             | `{ name?, description?, reviewColumn?: ref \| null, doneColumn?: ref \| null, githubRepo?: string \| null, agentEnabled?: boolean, agentName?: string \| null, agentModel?: string \| null, agentEffort?: string \| null, agentConcurrency?: number \| null, agentBacklog?: boolean, agentAllSkills?: boolean, autoMerge?: boolean }` | `BoardSummary`                                 |
-| POST   | `/boards/:boardId/github-repo` | `{ name, owner?, description?, private?: boolean }`                                                                                                                                                                                                                                                                                   | `BoardSummary` (201)                           |
-| DELETE | `/boards/:boardId`             |                                                                                                                                                                                                                                                                                                                                       | `204`                                          |
-| GET    | `/boards/:boardId/export`      |                                                                                                                                                                                                                                                                                                                                       | portable board JSON                            |
-| POST   | `/boards/import`               | portable board JSON                                                                                                                                                                                                                                                                                                                   | `BoardSummary`                                 |
+| Method | Path                           | Body / query                                                                                                                                                                                                                                                                                                                                                            | Returns                                            |
+| ------ | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| GET    | `/boards`                      |                                                                                                                                                                                                                                                                                                                                                                         | `BoardSummary[]` (most recently updated first)     |
+| POST   | `/boards`                      | `{ name, description?, columns?: string[], reviewColumn?: ref, doneColumn?: ref, githubRepo?, agentEnabled?, agentName?, agentModel?, agentEffort?, agentConcurrency?, agentBacklog?, agentAllSkills?, autoMerge?, archiveDoneDays? }`                                                                                                                                  | `BoardSummary`                                     |
+| GET    | `/boards/:boardId`             | `?archived=true`                                                                                                                                                                                                                                                                                                                                                        | `{ board, columns, tags, tickets, archivedCount }` |
+| PATCH  | `/boards/:boardId`             | `{ name?, description?, reviewColumn?: ref \| null, doneColumn?: ref \| null, githubRepo?: string \| null, agentEnabled?: boolean, agentName?: string \| null, agentModel?: string \| null, agentEffort?: string \| null, agentConcurrency?: number \| null, agentBacklog?: boolean, agentAllSkills?: boolean, autoMerge?: boolean, archiveDoneDays?: number \| null }` | `BoardSummary`                                     |
+| POST   | `/boards/:boardId/github-repo` | `{ name, owner?, description?, private?: boolean }`                                                                                                                                                                                                                                                                                                                     | `BoardSummary` (201)                               |
+| DELETE | `/boards/:boardId`             |                                                                                                                                                                                                                                                                                                                                                                         | `204`                                              |
+| GET    | `/boards/:boardId/export`      |                                                                                                                                                                                                                                                                                                                                                                         | portable board JSON                                |
+| POST   | `/boards/import`               | portable board JSON                                                                                                                                                                                                                                                                                                                                                     | `BoardSummary`                                     |
 
 `POST /boards/:boardId/github-repo` creates a repository on GitHub with the server's login and sets it as the board's
 `githubRepo`. It is created under `owner` (a user or organization; the signed-in user when omitted), private unless
@@ -250,6 +253,12 @@ and `agentEffort` override the board's for that ticket: the loop runs it with th
 worktree of the board's clone, and never two on the same ticket. With `agentBacklog` on, the agent takes new tickets
 from the `Backlog` column once the `Todo` column has none left and the `In progress` column holds fewer than
 `agentConcurrency` tickets (the loop's `TODO_COLUMN`, `BACKLOG_COLUMN` and `IN_PROGRESS_COLUMN` name them). With `agentAllSkills` off, runs only get the ultrakanban skill, unless the repository has skills of its own.
+
+With `archiveDoneDays` set, tickets that have been in the board's done column for longer than that many days are
+archived (`archived: true`): `GET /boards/:boardId` leaves them out, so the board agents read stays small, and says
+how many it left out in `archivedCount`. `?archived=true` includes them (and `archivedCount` is then 0). They are still
+returned by `GET /boards/:boardId/tickets` (search with `q` included), `GET /tickets/:ticketId` and the board export.
+Moving a ticket out of the done column unarchives it; moving it back in starts the count again.
 
 ## Columns and tags
 

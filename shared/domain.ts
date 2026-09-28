@@ -195,6 +195,11 @@ export interface BoardSummary {
    * no conflicts, every check passed and every checklist item of the ticket checked.
    */
   autoMerge: boolean
+  /**
+   * Days a ticket stays in the done column before it is archived: left out of the board (`GET /boards/:id`) unless
+   * asked for, but still found by the ticket list and search. Never archived when not set.
+   */
+  archiveDoneDays: number | null
   ticketCount: number
   createdAt: string
   updatedAt: string
@@ -240,6 +245,10 @@ export interface Ticket {
   version: number
   commentCount: number
   attachmentCount: number
+  /** When the ticket entered its current column. */
+  movedAt: string
+  /** Whether it has been in the board's done column for longer than the board's `archiveDoneDays`. */
+  archived: boolean
   createdAt: string
   updatedAt: string
 }
@@ -249,6 +258,8 @@ export interface BoardDetail {
   columns: Column[]
   tags: Tag[]
   tickets: Ticket[]
+  /** Archived tickets left out of `tickets`; 0 when they were asked for. */
+  archivedCount: number
 }
 
 export type Activity =

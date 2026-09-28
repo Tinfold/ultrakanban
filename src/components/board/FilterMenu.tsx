@@ -1,4 +1,4 @@
-import { ListFilterIcon, UserRoundXIcon, XIcon } from 'lucide-react'
+import { ArchiveIcon, ListFilterIcon, UserRoundXIcon, XIcon } from 'lucide-react'
 import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { ColorDot } from '@/components/common/TagChip'
 import { UserAvatar } from '@/components/common/UserAvatar'
@@ -27,9 +27,13 @@ const keepOpen = (event: Event) => event.preventDefault()
 interface FilterMenuProps {
   filter: TicketFilter
   onChange: (filter: TicketFilter) => void
+  /** Tickets archived for having been done a while; the menu only offers to show them when there are some. */
+  archivedCount: number
+  showArchived: boolean
+  onShowArchivedChange: (showArchived: boolean) => void
 }
 
-export function FilterMenu({ filter, onChange }: FilterMenuProps) {
+export function FilterMenu({ filter, onChange, archivedCount, showArchived, onShowArchivedChange }: FilterMenuProps) {
   const { detail, assignees } = useBoardContext()
   const count = activeFilterCount(filter)
 
@@ -105,6 +109,20 @@ export function FilterMenu({ filter, onChange }: FilterMenuProps) {
               ))}
             </DropdownMenuSubContent>
           </DropdownMenuSub>
+          {archivedCount > 0 && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuCheckboxItem
+                checked={showArchived}
+                onSelect={keepOpen}
+                onCheckedChange={(checked) => onShowArchivedChange(checked === true)}
+              >
+                <ArchiveIcon className="text-muted-foreground" />
+                Show archived
+                <span className="ml-auto text-xs text-muted-foreground tabular-nums">{archivedCount}</span>
+              </DropdownMenuCheckboxItem>
+            </>
+          )}
           {count > 0 && (
             <>
               <DropdownMenuSeparator />
