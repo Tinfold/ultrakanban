@@ -20,6 +20,7 @@ import { BLOCKED_TAG, parseBlockers } from '../../shared/blockers.ts'
 import { parseChecklist, setChecklistItem } from '../../shared/checklist.ts'
 import type {
   ApprovePlanInput,
+  BulkTicketsInput,
   CheckItemInput,
   ClaimNextInput,
   ClaimTicketInput,
@@ -484,6 +485,30 @@ export function moveAllTickets(fromColumnId: string, toColumnRef: string, actor:
   for (const ticket of listTickets(from.boardId, { column: from.id })) {
     moveTicket(ticket.id, { column: target.id, force: true }, actor)
   }
+}
+
+/**
+ * Applies the same change to several tickets of a board, in one go (the caller's transaction): all of them change, or
+ * none if one can't (e.g. a ticket without a merged pull request moving into the done column, unless `force`).
+ * Returns the changed tickets in the order given, or none when they were deleted.
+ */
+export function bulkUpdateTickets(boardId: string, input: BulkTicketsInput, actor: string): Ticket[] {
+  const tickets = [...new Map(input.tickets.map((ref) => resolveTicket(boardId, ref)).map((t) => [t.id, t])).values()]
+  if (input.delete) {
+    for (const ticket of tickets) deleteTicket(ticket.id)
+    return []
+  }
+  const added = input.addTags?.length ? resolveTags(boardId, input.addTags, { create: true }) : []
+  const removed = input.removeTags?.length ? resolveTags(boardId, input.removeTags, { create: false }) : []
+  const target = input.moveTo === undefined ? undefined : resolveColumn(boardId, input.moveTo)
+  return tickets.map((ticket) => {
+    const tagIds = [...new Set([...ticket.tagIds, ...added])].filter((tagId) => !removed.includes(tagId))
+    updateTicket(ticket.id, { priority: input.priority, tags: tagIds }, actor)
+    if (target && target.id !== ticket.columnId) {
+      moveTicket(ticket.id, { column: target.id, force: input.force }, actor)
+    }
+    return getTicket(ticket.id)
+  })
 }
 
 export function claimTicket(id: string, input: ClaimTicketInput): Ticket {

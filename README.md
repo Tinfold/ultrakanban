@@ -36,6 +36,8 @@ priorities, due dates, checklists, comments and an activity log, backed by SQLit
 - **Overview**: a dashboard across all boards (`/overview`): which agents are working on what right now, time
   worked, tokens used and tickets completed per agent, activity, work time and token usage per day (by type and by model, e.g. Opus or Haiku), per-board counts
   and a cross-board feed; stale or duplicate agents can be cleared from it
+- **Bulk changes**: select several tickets (ctrl/⌘-click, shift-click for a range, or the Select button, which makes
+  a tap select on phones) to move, tag, set the priority of or delete them together
 - **Live**: changes made by agents or other tabs show up right away (server-sent events)
 - **Responsive**: works with a mouse, keyboard or touch (long-press to drag); light, dark and system themes
 
@@ -46,6 +48,7 @@ priorities, due dates, checklists, comments and an activity log, backed by SQLit
 | `C`            | New ticket                                        |
 | `/`            | Search                                            |
 | `Enter`        | Open focused ticket                               |
+| `X`            | Select tickets, `Esc` to stop                     |
 | `Space`        | Pick up / drop focused ticket, arrow keys to move |
 | `⌘/Ctrl+Enter` | Create ticket / post comment                      |
 
