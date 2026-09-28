@@ -260,6 +260,8 @@ export const recordUsageSchema = z.object({
 
 export const commentSchema = z.object({
   body: z.string().trim().min(1).max(20_000),
+  /** Also post it on the ticket's pull request. */
+  pullRequest: z.boolean().optional(),
   /** Also sends the board's notification (its `notifyUrl`): the comment needs a person, e.g. CI didn't run. */
   notify: z.boolean().optional(),
 })

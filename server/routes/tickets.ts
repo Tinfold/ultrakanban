@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
-import { ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES } from '../../shared/domain.ts'
+import { ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES, parsePullRequestUrl } from '../../shared/domain.ts'
 import { parseChecklist } from '../../shared/checklist.ts'
 import {
   approvePlanSchema,
@@ -20,7 +20,8 @@ import {
 import type { AppServices } from '../app.ts'
 import { attachmentFilename, detectAttachmentType } from '../attachment-files.ts'
 import { newId, transaction } from '../db.ts'
-import { badRequest, HttpError } from '../errors.ts'
+import { badRequest, gitHubFailure, HttpError } from '../errors.ts'
+import type { GitHubClient } from '../github.ts'
 import { actorOf, errorBody, readJson } from '../http.ts'
 import { listActivity } from '../store/activity.ts'
 import { createAttachment, listAttachments } from '../store/attachments.ts'
@@ -42,6 +43,25 @@ import {
   updateTicket,
 } from '../store/tickets.ts'
 import { listUsage, recordUsage } from '../store/usage.ts'
+
+/** Posts the comment on the ticket's pull request; returns its URL. */
+async function commentOnPullRequest(github: GitHubClient, ticketId: string, body: string) {
+  const url = getTicket(ticketId).pullRequest?.url
+  const pullRequest = url && parsePullRequestUrl(url)
+  if (!pullRequest) throw badRequest('The ticket has no GitHub pull request to comment on')
+  if (!(await github.auth())) {
+    throw new HttpError(
+      400,
+      'github_unauthenticated',
+      'Not signed in to GitHub. Set GITHUB_TOKEN or run gh auth login, then restart the server',
+    )
+  }
+  try {
+    return await github.commentOnPullRequest(pullRequest.repo, pullRequest.number, body)
+  } catch (error) {
+    throw gitHubFailure(error)
+  }
+}
 
 const tooLargeMessage = `Attachments can be at most ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB`
 
@@ -180,9 +200,13 @@ export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles, notifi
       )
     })
     .post('/:ticketId/comments', async (c) => {
-      const { body, notify } = await readJson(c, commentSchema)
+      const { body, pullRequest, notify } = await readJson(c, commentSchema)
       const ticketId = c.req.param('ticketId')
-      const comment = transaction(() => addComment(ticketId, body, actorOf(c)))
+      // Posted on the pull request first, so a comment GitHub turns down isn't left on the ticket alone.
+      const pullRequestComment = pullRequest
+        ? await commentOnPullRequest(pullRequests.github, ticketId, body)
+        : undefined
+      const comment = transaction(() => addComment(ticketId, body, actorOf(c), pullRequestComment))
       const ticket = getTicket(ticketId)
       // The newest comment is the assignee's while the ticket is worked: its agent waits for an answer.
       if (notify) notifier.notify(ticket, 'attention', `comment:${comment.id}`, body)

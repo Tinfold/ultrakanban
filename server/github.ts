@@ -45,6 +45,8 @@ export interface GitHubClient {
   mergePullRequest: (repo: string, number: number, options: { method: MergeMethod; sha: string }) => Promise<void>
   /** Changes the branch the pull request merges into. */
   setPullRequestBase: (repo: string, number: number, base: string) => Promise<void>
+  /** Posts a comment on the pull request's conversation; returns the comment's URL. */
+  commentOnPullRequest: (repo: string, number: number, body: string) => Promise<string>
 }
 
 /** A request GitHub answered with an error status; `message` includes GitHub's reasons. */
@@ -208,6 +210,11 @@ export function createGitHubClient(): GitHubClient {
 
     async setPullRequestBase(repo, number, base) {
       await request('PATCH', `/repos/${repo}/pulls/${number}`, { base })
+    },
+
+    async commentOnPullRequest(repo, number, body) {
+      const comment = await request<{ html_url: string }>('POST', `/repos/${repo}/issues/${number}/comments`, { body })
+      return comment.html_url
     },
   }
 }

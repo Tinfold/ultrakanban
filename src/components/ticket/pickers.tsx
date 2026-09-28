@@ -1,6 +1,13 @@
-import { CalendarIcon, CheckIcon, PlusIcon, UserRoundXIcon } from 'lucide-react'
+import { CalendarIcon, CheckIcon, FileTextIcon, PlusIcon, UserRoundXIcon } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
-import { AGENT_DEFAULTS, AGENT_EFFORTS, AGENT_MODELS, type AgentEffort, type Priority } from '@shared/domain'
+import {
+  AGENT_DEFAULTS,
+  AGENT_EFFORTS,
+  AGENT_MODELS,
+  type AgentEffort,
+  type Priority,
+  TICKET_TEMPLATES,
+} from '@shared/domain'
 import { ColorDot } from '@/components/common/TagChip'
 import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { UserAvatar } from '@/components/common/UserAvatar'
@@ -10,6 +17,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
@@ -115,6 +123,29 @@ export function ModelPicker({ value, onChange, children }: PickerProps<string | 
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+/** Applies a template's description, tags, effort and model; only offered on the new-ticket form. */
+export function TemplatePicker({
+  onApply,
+  children,
+}: {
+  onApply: (template: (typeof TICKET_TEMPLATES)[number]) => void
+  children: ReactNode
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-48">
+        {TICKET_TEMPLATES.map((template) => (
+          <DropdownMenuItem key={template.id} onSelect={() => onApply(template)}>
+            <FileTextIcon />
+            {template.name}
+          </DropdownMenuItem>
+        ))}
       </DropdownMenuContent>
     </DropdownMenu>
   )

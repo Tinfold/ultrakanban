@@ -39,6 +39,45 @@ export const QUESTION_TAG = 'question'
  */
 export const CANCELLED_COLUMN = 'cancelled'
 
+export interface TicketTemplate {
+  id: string
+  name: string
+  /** Starting description, including a `- [ ]` checklist where useful. */
+  description: string
+  tags: string[]
+  agentEffort: AgentEffort | null
+  agentModel: string | null
+}
+
+/** Starting points offered in the new-ticket form: a description, tags, and a model/effort already picked. */
+export const TICKET_TEMPLATES: readonly TicketTemplate[] = [
+  {
+    id: 'bug',
+    name: 'Bug',
+    description:
+      '## Steps to reproduce\n\n## Expected\n\n## Actual\n\n- [ ] Find the cause\n- [ ] Fix it\n- [ ] Add a test that would have caught it',
+    tags: ['bug'],
+    agentEffort: 'medium',
+    agentModel: 'opus',
+  },
+  {
+    id: 'feature',
+    name: 'Feature',
+    description: '## What\n\n## Why\n\n- [ ] Implement it\n- [ ] Tests',
+    tags: ['feature'],
+    agentEffort: 'medium',
+    agentModel: 'opus',
+  },
+  {
+    id: 'question',
+    name: 'Question',
+    description: '',
+    tags: [QUESTION_TAG],
+    agentEffort: 'low',
+    agentModel: 'sonnet',
+  },
+] as const
+
 /**
  * A run on a ticket looks stalled when its agent hasn't sent a heartbeat for this long. scripts/agent-loop.sh sends
  * one every 30 seconds by default (TICKET_CHECK_SECONDS).
@@ -356,7 +395,8 @@ export type Activity =
   | ActivityBase<'moved', { from: string; to: string }>
   | ActivityBase<'claimed', { assignee: string }>
   | ActivityBase<'released', { assignee: string }>
-  | ActivityBase<'comment', { body: string }>
+  /** `pullRequestComment`: the URL of the same comment posted on the pull request. */
+  | ActivityBase<'comment', { body: string; pullRequestComment?: string }>
   | ActivityBase<'plan', { body: string; estimate: TicketSize; held: boolean }>
   | ActivityBase<'approved', { estimate: TicketSize | null }>
   | ActivityBase<'attachment', { attachmentId: string; filename: string; contentType: AttachmentType }>

@@ -11,7 +11,7 @@ import {
 } from '../shared/domain.ts'
 import { subscribeWake } from './events.ts'
 import { FIX_CONFLICTS_COMMENT } from './store/tickets.ts'
-import { addTicket, boardId, call, github, pullRequestStatuses, ticketsIn, useBoard } from './test-app.ts'
+import { addTicket, boardId, call, github, prComments, pullRequestStatuses, ticketsIn, useBoard } from './test-app.ts'
 
 describe('pull request workflow', () => {
   const PR = 'https://github.com/acme/app/pull/42'
@@ -271,6 +271,51 @@ describe('pull request workflow', () => {
         cleared.agentAllSkills,
       ],
       [null, false, null, null, null, null, false, false],
+    )
+  })
+
+  test('comments can be posted on the pull request too', async () => {
+    const ticket = await addTicket({ title: 'A' })
+    const comment = (body: unknown) =>
+      call<Activity & ApiErrorBody>('POST', `/tickets/${ticket.id}/comments`, body, 'alice')
+    const comments = async () =>
+      (await call<Activity[]>('GET', `/tickets/${ticket.id}/activity`)).body.filter((entry) => entry.type === 'comment')
+
+    const noPullRequest = await comment({ body: 'Hi', pullRequest: true })
+    assert.equal(noPullRequest.status, 400)
+    assert.equal((await comments()).length, 0)
+
+    await call('POST', `/tickets/${ticket.id}/claim`, { agent: 'a' })
+    await call('POST', `/tickets/${ticket.id}/review`, { agent: 'a', pullRequest: PR })
+
+    const both = await comment({ body: 'Please rename it', pullRequest: true })
+    assert.equal(both.status, 201)
+    assert.deepEqual(both.body.data, {
+      body: 'Please rename it',
+      pullRequestComment: `${PR}#issuecomment-${prComments.length}`,
+    })
+    assert.equal(prComments.at(-1), 'acme/app#42: Please rename it')
+
+    const ticketOnly = await comment({ body: 'Just here' })
+    assert.deepEqual(ticketOnly.body.data, { body: 'Just here' })
+    const posted = prComments.length
+
+    const refused = await comment({ body: 'fail', pullRequest: true })
+    assert.equal(refused.status, 400)
+    assert.equal(refused.body.error.code, 'github_error')
+
+    github.auth = null
+    try {
+      const signedOut = await comment({ body: 'Hello', pullRequest: true })
+      assert.equal(signedOut.status, 400)
+      assert.equal(signedOut.body.error.code, 'github_unauthenticated')
+    } finally {
+      github.auth = 'env'
+    }
+    assert.equal(prComments.length, posted)
+    assert.deepEqual(
+      (await comments()).map((entry) => entry.data.body),
+      ['Please rename it', 'Just here'],
     )
   })
 
