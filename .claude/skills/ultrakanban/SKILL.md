@@ -64,7 +64,8 @@ curl -s -X POST $KANBAN/api/boards/$BOARD/tickets/claim-next \
 ```
 
 Only one agent can win a ticket. `404 no_ticket_available` means there is nothing to do: stop and report that.
-It skips blocked tickets: tagged `blocked`, or waiting for an unfinished ticket (`blocked by #12`, `depends on #12`).
+It skips blocked tickets: tagged `blocked`, waiting for an unfinished ticket (`blocked by #12`, `depends on #12`), or
+with unfinished sub-tickets.
 To work a specific ticket instead, use `POST /api/tickets/$TICKET/claim` with the same body minus `column`.
 
 ## 2. Read the ticket and its comments
@@ -120,6 +121,9 @@ This links the pull request, keeps the ticket yours and moves it to the review c
 **Questions need no pull request.** A ticket tagged `question` asks for an answer, not a change: investigate, then
 submit it with the answer as the comment and no `pullRequest` (`{"agent":"<you>","comment":"<the answer>"}`). A
 person reads it and closes the ticket. Open a pull request only if the ticket also asks for a change.
+
+**A parent whose sub-tickets are all finished needs no pull request either** when nothing is left to do: check the
+sub-tickets did what it asked, then submit it with a summary as the comment and no `pullRequest`.
 
 ## 6. Answer review feedback
 
@@ -191,3 +195,20 @@ setting that can do the work well saves tokens. Omit both (the board's defaults)
 - `sonnet` at `medium`: routine, well-scoped work: copy and docs, small UI changes, a clear bug with a known cause.
 - `opus` at `medium`: changes across several files or areas that need judgment.
 - `opus` at `high` (`xhigh` rarely): hard bugs with unknown causes, design or architecture, concurrency, security.
+
+## Splitting a ticket into sub-tickets
+
+When a ticket is too big for one pull request, or you are asked to break it up, split it instead of working it:
+create one sub-ticket per piece, each small enough for one pull request and with its own description and checklist.
+
+```sh
+curl -s -X POST $KANBAN/api/tickets/$TICKET/children \
+  -H 'Content-Type: application/json' -H "X-Actor: $ME" \
+  -d '{"title":"...","description":"...","column":"Todo","agentModel":"sonnet","agentEffort":"medium"}'
+```
+
+Each links back to the parent, whose card shows how many are finished. The parent waits for them: `claim-next` skips
+it until they are all finished, then hands it out again for whatever is left. So once they exist, comment on the parent
+with what you split it into and release it back to its column (`POST /api/tickets/$TICKET/release` with
+`{"agent":"<you>","moveTo":"Todo"}`). `GET /api/tickets/$TICKET/children` lists them. Sub-tickets waiting on one
+another say so in their descriptions (`Blocked by #12`).

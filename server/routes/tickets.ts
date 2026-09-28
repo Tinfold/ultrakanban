@@ -6,6 +6,7 @@ import {
   checkItemSchema,
   claimTicketSchema,
   commentSchema,
+  createSubticketSchema,
   heartbeatSchema,
   mergeTicketSchema,
   moveTicketSchema,
@@ -25,8 +26,10 @@ import {
   addComment,
   checkItem,
   claimTicket,
+  createTicket,
   deleteTicket,
   getTicket,
+  listSubtickets,
   moveTicket,
   recordHeartbeat,
   endRun,
@@ -46,6 +49,16 @@ export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles }: AppS
       const ticket = transaction(() => updateTicket(c.req.param('ticketId'), input, actorOf(c)))
       pullRequests.checkSoon(ticket)
       return c.json(ticket)
+    })
+    .get('/:ticketId/children', (c) => c.json(listSubtickets(c.req.param('ticketId'))))
+    .post('/:ticketId/children', async (c) => {
+      const input = await readJson(c, createSubticketSchema)
+      const ticket = transaction(() => {
+        const parent = getTicket(c.req.param('ticketId'))
+        return createTicket(parent.boardId, { ...input, parent: parent.id }, actorOf(c))
+      })
+      pullRequests.checkSoon(ticket)
+      return c.json(ticket, 201)
     })
     .get('/:ticketId/checklist', (c) => c.json(parseChecklist(getTicket(c.req.param('ticketId')).description)))
     .post('/:ticketId/checklist/:index', async (c) => {
