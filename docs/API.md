@@ -174,6 +174,7 @@ interface Ticket {
   version: number // increments on every change
   commentCount: number
   attachmentCount: number
+  waitingSince: string | null // when its agent started waiting for an answer: the newest comment is its assignee's and it isn't in review or done
   createdAt: string
   updatedAt: string
 }
@@ -372,6 +373,7 @@ interface Overview {
       column
       state: 'working' | 'review'
       since: string
+      waitingSince: string | null // as on the ticket
       pullRequest: { url; state } | null
     }[]
     workedMs: number // within the range; ongoing work counts up to generatedAt

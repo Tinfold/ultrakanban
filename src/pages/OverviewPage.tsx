@@ -240,7 +240,7 @@ export function OverviewPage() {
 
     content = (
       <div className={cn('grid grid-cols-1 gap-6 transition-opacity', isPlaceholderData && 'opacity-60')}>
-        <JumpBar attention={attention.review.length + attention.stalled.length} />
+        <JumpBar attention={attention.waiting.length + attention.review.length + attention.stalled.length} />
 
         <div className="grid grid-cols-2 gap-3 *:last:col-span-2 md:grid-cols-3 md:*:last:col-span-1 xl:grid-cols-5">
           <Stat
@@ -399,7 +399,12 @@ export function OverviewPage() {
               beside it, and its list scrolls within that. */}
           <div className="grid grid-cols-1 content-start gap-6 xl:grid-rows-[auto_minmax(0,1fr)] xl:content-stretch">
             <Section id={SECTIONS.attention} title="Needs attention">
-              <NeedsAttention review={attention.review} stalled={attention.stalled} now={now} />
+              <NeedsAttention
+                waiting={attention.waiting}
+                review={attention.review}
+                stalled={attention.stalled}
+                now={now}
+              />
             </Section>
             <Section
               id={SECTIONS.recent}
