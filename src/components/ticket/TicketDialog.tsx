@@ -1,6 +1,7 @@
 import { CheckIcon, ChevronRightIcon, LinkIcon, MoreHorizontalIcon, Trash2Icon, XIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
+import { Link } from 'wouter'
 import type { Ticket } from '@shared/domain'
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { ColorDot } from '@/components/common/TagChip'
@@ -16,10 +17,12 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useDebouncedCallback } from '@/hooks/use-debounced-callback'
 import { formatDateTime, formatRelative, ticketRef } from '@/lib/format'
+import { ticketHref } from '@/lib/overview'
 import { useBoardContext } from '../board/board-context'
 import { ActivityFeed } from './ActivityFeed'
 import { AttachmentsSection } from './attachments'
 import { DescriptionEditor } from './DescriptionEditor'
+import { SubticketsSection } from './SubticketsSection'
 import { TicketProperties } from './TicketProperties'
 import { TitleInput } from './TitleInput'
 import { useAttachmentUploads } from './use-attachment-uploads'
@@ -51,7 +54,8 @@ export function TicketDialog({ ticketId, onClose }: TicketDialogProps) {
 }
 
 function TicketDetail({ ticket, onClose }: { ticket: Ticket; onClose: () => void }) {
-  const { actions, columnsById } = useBoardContext()
+  const { actions, columnsById, ticketsById } = useBoardContext()
+  const parent = ticket.parentId ? ticketsById.get(ticket.parentId) : undefined
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [copied, setCopied] = useState(false)
   const column = columnsById.get(ticket.columnId)
@@ -75,6 +79,18 @@ function TicketDetail({ ticket, onClose }: { ticket: Ticket; onClose: () => void
   return (
     <>
       <header className="flex h-12 shrink-0 items-center gap-1.5 border-b pr-2 pl-4 text-sm">
+        {parent && (
+          <>
+            <Link
+              href={ticketHref(parent)}
+              className="font-mono text-xs text-muted-foreground hover:text-foreground hover:underline"
+              title={`Sub-ticket of ${ticketRef(parent.number)}: ${parent.title}`}
+            >
+              {ticketRef(parent.number)}
+            </Link>
+            <ChevronRightIcon className="size-3.5 text-muted-foreground/60" />
+          </>
+        )}
         <span className="font-mono text-xs text-muted-foreground">{ticketRef(ticket.number)}</span>
         <ChevronRightIcon className="size-3.5 text-muted-foreground/60" />
         {column && (
@@ -146,6 +162,7 @@ function TicketDetail({ ticket, onClose }: { ticket: Ticket; onClose: () => void
               onBlur={saveDescription.flush}
               className="-mx-3"
             />
+            <SubticketsSection ticket={ticket} />
             <AttachmentsSection ticketId={ticket.id} uploads={uploads} />
             <ActivityFeed ticketId={ticket.id} pullRequest={ticket.pullRequest} />
           </div>
