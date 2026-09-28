@@ -107,7 +107,8 @@ export const api = {
     return request<Attachment>('POST', `/tickets/${ticketId}/attachments`, form)
   },
   deleteAttachment: (attachmentId: string) => request<void>('DELETE', `/attachments/${attachmentId}`),
-  addComment: (ticketId: string, body: string) => request<Activity>('POST', `/tickets/${ticketId}/comments`, { body }),
+  addComment: (ticketId: string, body: string, pullRequest = false) =>
+    request<Activity>('POST', `/tickets/${ticketId}/comments`, { body, pullRequest }),
   mergePlan: (boardId: string) => request<MergePlan>('GET', `/boards/${boardId}/merge-plan`),
   mergeRun: (boardId: string) => request<MergeRun | null>('GET', `/boards/${boardId}/merge-run`),
   startMergeRun: (boardId: string, method: MergeMethod) =>

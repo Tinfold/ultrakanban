@@ -330,7 +330,8 @@ export type Activity =
   | ActivityBase<'moved', { from: string; to: string }>
   | ActivityBase<'claimed', { assignee: string }>
   | ActivityBase<'released', { assignee: string }>
-  | ActivityBase<'comment', { body: string }>
+  /** `pullRequestComment`: the URL of the same comment posted on the pull request. */
+  | ActivityBase<'comment', { body: string; pullRequestComment?: string }>
   | ActivityBase<'attachment', { attachmentId: string; filename: string; contentType: AttachmentType }>
   | ActivityBase<'pull_request', { url: string; event: 'linked' | 'unlinked' | Exclude<PullRequestState, 'unknown'> }>
 
