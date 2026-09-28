@@ -61,8 +61,15 @@ post() {
     -H 'Content-Type: application/json' -H "X-Actor: ${3:-$worker}" -d "$2"
 }
 
-# Tells the board the agent is working on a ticket right now.
-heartbeat() { curl -s -o /dev/null -X POST "$KANBAN/api/tickets/$1/heartbeat" -H "X-Actor: $worker"; }
+# Tells the board the agent is working on a ticket right now, and what the run is doing (run_step), so the ticket's
+# card shows the run.
+heartbeat() {
+  curl -s -o /dev/null -X POST "$KANBAN/api/tickets/$1/heartbeat" -H 'Content-Type: application/json' \
+    -H "X-Actor: $worker" -d "$(jq -nc --arg step "${run_step:-}" 'if $step == "" then {} else {step: $step} end')"
+}
+
+# Tells the board the run on a ticket has ended.
+end_run() { curl -s -o /dev/null -X DELETE "$KANBAN/api/tickets/$1/heartbeat" -H "X-Actor: $worker"; }
 
 # Comments on a ticket as the loop rather than the agent.
 note() {
