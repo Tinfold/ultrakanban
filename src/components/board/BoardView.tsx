@@ -24,9 +24,10 @@ export function BoardView() {
   const openTicketId = searchParams.get(TICKET_PARAM)
 
   const visible = useMemo(
-    () => filterTickets(detail.tickets, prefs.filter, deferredQuery, tagsById),
-    [detail.tickets, prefs.filter, deferredQuery, tagsById],
+    () => filterTickets(detail.tickets, prefs.filter, deferredQuery, tagsById, prefs.showArchived),
+    [detail.tickets, prefs.filter, deferredQuery, tagsById, prefs.showArchived],
   )
+  const archivedCount = useMemo(() => detail.tickets.filter((ticket) => ticket.archived).length, [detail.tickets])
   const grouping = useMemo(() => groupTickets(detail, visible, prefs.sort), [detail, visible, prefs.sort])
 
   const openTicket = useCallback((ticketId: string) => setSearchParams({ [TICKET_PARAM]: ticketId }), [setSearchParams])
@@ -42,7 +43,8 @@ export function BoardView() {
         prefs={prefs}
         onPrefsChange={setPrefs}
         visibleCount={visible.length}
-        totalCount={detail.tickets.length}
+        totalCount={detail.tickets.length - (prefs.showArchived ? 0 : archivedCount)}
+        archivedCount={archivedCount}
         onNewTicket={() => setCreating(true)}
       />
       <main className="min-h-0 flex-1">

@@ -7,7 +7,7 @@ import { createTag } from './tags.ts'
 import { createTicket, setPullRequestStatus } from './tickets.ts'
 
 export function exportBoard(id: string): BoardExport {
-  const { board, columns, tags, tickets } = getBoardDetail(id)
+  const { board, columns, tags, tickets } = getBoardDetail(id, { archived: true })
   const columnName = new Map(columns.map((column) => [column.id, column.name]))
   const tagName = new Map(tags.map((tag) => [tag.id, tag.name]))
   return {

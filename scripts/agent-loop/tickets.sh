@@ -255,7 +255,8 @@ their first run yet (CLAIM_LIMIT $CLAIM_LIMIT)"
   run_on_ticket "$id" "$(intro)
 
 Ticket $id is already claimed for you and in progress. Work only this ticket; do not claim another.
-Take it through to review and exit after submitting it." "$snapshot" "claim"
+Take it through to review and exit after submitting it. If it is tagged question, submit it for review with the answer \
+as the comment and no pull request." "$snapshot" "claim"
   unlock_ticket
   return 0
 }

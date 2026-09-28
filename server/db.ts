@@ -189,6 +189,16 @@ const MIGRATIONS = [
   -- Whether the server merges the review column's pull requests once they are ready (see server/merge-queue.ts).
   ALTER TABLE boards ADD COLUMN auto_merge INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  -- Days after which tickets in the done column are archived: left out of GET /boards/:id. Never when NULL.
+  ALTER TABLE boards ADD COLUMN archive_done_days INTEGER;
+  -- When the ticket entered its current column.
+  ALTER TABLE tickets ADD COLUMN moved_at TEXT;
+  UPDATE tickets SET moved_at = coalesce(
+    (SELECT max(created_at) FROM activity WHERE ticket_id = tickets.id AND type IN ('created', 'moved')),
+    created_at
+  );
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'
