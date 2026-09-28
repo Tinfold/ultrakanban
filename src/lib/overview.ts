@@ -75,14 +75,22 @@ export function median(values: number[]) {
 /** How long a ticket can be worked without moving before it's worth a look. */
 export const STALLED_MS = 24 * 60 * 60 * 1000
 
-/** Held tickets someone should look at: those waiting in review, then those worked for long without moving. */
+/**
+ * Held tickets someone should look at: those whose agent waits for an answer, those waiting in review, then those
+ * worked for long without moving (and not waiting for an answer).
+ */
 export function needsAttention(agents: OverviewAgent[], now: number) {
   const tickets = agents.flatMap((agent) => agent.tickets.map((ticket) => ({ ...ticket, agent: agent.name })))
   const oldest = (a: { since: string }, b: { since: string }) => a.since.localeCompare(b.since)
   return {
+    waiting: tickets
+      .filter((ticket) => ticket.state === 'working' && ticket.waitingSince)
+      .sort((a, b) => a.waitingSince!.localeCompare(b.waitingSince!)),
     review: tickets.filter((ticket) => ticket.state === 'review').sort(oldest),
     stalled: tickets
-      .filter((ticket) => ticket.state === 'working' && now - Date.parse(ticket.since) >= STALLED_MS)
+      .filter(
+        (ticket) => ticket.state === 'working' && !ticket.waitingSince && now - Date.parse(ticket.since) >= STALLED_MS,
+      )
       .sort(oldest),
   }
 }

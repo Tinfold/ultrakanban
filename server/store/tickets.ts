@@ -59,7 +59,20 @@ interface TicketRow {
   usage_runs: number
   usage_tokens: number | null
   usage_cost: number | null
+  waiting_since: string | null
 }
+
+/**
+ * When the ticket's agent started waiting for an answer: the newest comment on it is from its assignee, while it's
+ * worked (not in the review or done column, and its pull request wasn't closed). Null when it isn't waiting.
+ * Needs the ticket as `t`.
+ */
+export const WAITING_SINCE = `
+  (SELECT CASE WHEN a.actor = t.assignee THEN a.created_at END
+   FROM activity a JOIN boards b ON b.id = t.board_id
+   WHERE a.ticket_id = t.id AND a.type = 'comment'
+     AND t.column_id IS NOT b.review_column_id AND t.column_id IS NOT b.done_column_id AND t.pr_state != 'closed'
+   ORDER BY a.id DESC LIMIT 1)`
 
 const SELECT_TICKETS = `
   SELECT t.*,
@@ -70,6 +83,7 @@ const SELECT_TICKETS = `
     (SELECT sum(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) FROM token_usage
       WHERE ticket_id = t.id) AS usage_tokens,
     (SELECT sum(cost_usd) FROM token_usage WHERE ticket_id = t.id) AS usage_cost,
+    ${WAITING_SINCE} AS waiting_since,
     (SELECT archive_done_days FROM boards WHERE id = t.board_id AND done_column_id = t.column_id) AS archive_days
   FROM tickets t`
 
@@ -107,6 +121,7 @@ const toTicket = (row: TicketRow): Ticket => ({
   commentCount: row.comment_count,
   attachmentCount: row.attachment_count,
   usage: { runs: row.usage_runs, tokens: row.usage_tokens ?? 0, costUsd: row.usage_cost },
+  waitingSince: row.waiting_since,
   movedAt: row.moved_at,
   archived: row.archive_days !== null && Date.parse(row.moved_at) < Date.now() - row.archive_days * DAY_MS,
   createdAt: row.created_at,
