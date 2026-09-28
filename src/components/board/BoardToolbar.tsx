@@ -1,4 +1,4 @@
-import { KeyboardIcon, PlusIcon, SearchIcon, XIcon } from 'lucide-react'
+import { KeyboardIcon, ListChecksIcon, PlusIcon, SearchIcon, XIcon } from 'lucide-react'
 import { useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/components/ui/input-group'
@@ -12,6 +12,7 @@ import { SortMenu } from './SortMenu'
 const SHORTCUTS: Array<{ keys: string[]; label: string }> = [
   { keys: ['/'], label: 'Search' },
   { keys: ['C'], label: 'New ticket' },
+  { keys: ['X'], label: 'Select tickets' },
   { keys: ['↑', '↓', '←', '→'], label: 'Move focus between cards' },
   { keys: ['↵'], label: 'Open the focused card' },
   { keys: ['⇧', '←', '/', '→'], label: 'Move the focused card a column' },
@@ -50,6 +51,9 @@ interface BoardToolbarProps {
   totalCount: number
   archivedCount: number
   onNewTicket: () => void
+  /** Whether clicks select tickets, for bulk actions. */
+  selecting: boolean
+  onSelectingChange: (selecting: boolean) => void
 }
 
 export function BoardToolbar({
@@ -61,10 +65,13 @@ export function BoardToolbar({
   totalCount,
   archivedCount,
   onNewTicket,
+  selecting,
+  onSelectingChange,
 }: BoardToolbarProps) {
   const searchRef = useRef<HTMLInputElement>(null)
   useHotkey('/', () => searchRef.current?.focus())
   useHotkey('c', onNewTicket)
+  useHotkey('x', () => onSelectingChange(!selecting))
 
   return (
     <div className="flex items-center gap-2 border-b px-4 py-2">
@@ -103,6 +110,17 @@ export function BoardToolbar({
       />
       <SortMenu value={prefs.sort} onChange={(sort) => onPrefsChange({ ...prefs, sort })} />
       <ShortcutsHelp />
+      <Button
+        variant={selecting ? 'secondary' : 'outline'}
+        size="sm"
+        aria-pressed={selecting}
+        aria-label="Select tickets"
+        title="Select several tickets to change them together (X). Ctrl/⌘-click or shift-click also selects."
+        onClick={() => onSelectingChange(!selecting)}
+      >
+        <ListChecksIcon />
+        <span className="hidden sm:inline">Select</span>
+      </Button>
       <span className="ml-auto hidden text-xs text-muted-foreground tabular-nums md:inline">
         {visibleCount === totalCount ? `${totalCount} tickets` : `${visibleCount} of ${totalCount} tickets`}
       </span>

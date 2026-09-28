@@ -9,6 +9,8 @@ import { ticketRef } from '@/lib/format'
 import { pendingDeletes, UNDO_DELAY } from '@/lib/pending-deletes'
 import { queryKeys } from './queries'
 
+const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`
+
 // Deletes still waiting for their undo toast to close are sent before the page goes away.
 window.addEventListener('pagehide', () => pendingDeletes.flush())
 
@@ -153,6 +155,13 @@ export function useBoardActions(boardId: string) {
           (d) => updates.linkPullRequest(d, ticketId, url),
           updates.addTicket,
         ),
+      /** Approves the plan the ticket's agent waits on, so it goes on to work the ticket. */
+      approvePlan: async (ticketId: string) => {
+        const ticket = await run(() => api.approvePlan(ticketId), undefined, updates.addTicket)
+        await queryClient.invalidateQueries({ queryKey: queryKeys.activity(ticketId) })
+        if (ticket) toast.success('Plan approved; the agent will carry on')
+        return ticket
+      },
       syncPullRequest: (ticketId: string) => run(() => api.syncPullRequest(ticketId), undefined, updates.addTicket),
       /** Merges the ticket's pull request, which moves the ticket to the done column. */
       mergeTicket: async (ticketId: string, method: MergeMethod) => {
@@ -176,6 +185,53 @@ export function useBoardActions(boardId: string) {
           action: { label: 'Undo', onClick: undo },
           onDismiss: () => pendingDeletes.commit(ticketId),
           onAutoClose: () => pendingDeletes.commit(ticketId),
+        })
+      },
+      /** Changes several tickets at once, all or nothing. `force` skips the done column's pull request requirement. */
+      bulkUpdateTickets: async (ticketIds: string[], change: updates.BulkChange, force?: boolean) => {
+        const result = await run(
+          () =>
+            api.bulkTickets(boardId, {
+              tickets: ticketIds,
+              moveTo: change.moveTo,
+              force,
+              priority: change.priority,
+              addTags: change.addTagIds,
+              removeTags: change.removeTagIds,
+            }),
+          (d) => updates.bulkChangeTickets(d, ticketIds, change),
+        )
+        if (result) toast.success(`Updated ${plural(result.tickets.length, 'ticket')}`)
+        return result
+      },
+      /**
+       * Hides the tickets at once but only deletes them, in one request, when the undo toast closes. Each ticket waits
+       * in `pendingDeletes`; whichever is sent first sends the others with it.
+       */
+      bulkDeleteTickets: (ticketIds: string[]) => {
+        const deleted = queryClient
+          .getQueryData<BoardDetail>(boardKey)
+          ?.tickets.filter(({ id }) => ticketIds.includes(id))
+        const send = (first: string) => {
+          const ids = [first, ...ticketIds.filter((id) => id !== first && pendingDeletes.cancel(id))]
+          void run(() => api.bulkTickets(boardId, { tickets: ids, delete: true }))
+        }
+        for (const ticketId of ticketIds) pendingDeletes.schedule(ticketId, () => send(ticketId))
+        void queryClient.cancelQueries({ queryKey: boardKey })
+        update((d) => ticketIds.reduce(updates.removeTicket, d))
+        const undo = () => {
+          if (!ticketIds.every((ticketId) => pendingDeletes.cancel(ticketId))) {
+            return void toast.error('The tickets were already deleted')
+          }
+          if (deleted) update((d) => deleted.reduce(updates.addTicket, d))
+          void queryClient.invalidateQueries({ queryKey: boardKey })
+        }
+        const commit = () => ticketIds.some((ticketId) => pendingDeletes.commit(ticketId))
+        toast(`Deleted ${plural(ticketIds.length, 'ticket')}`, {
+          duration: UNDO_DELAY,
+          action: { label: 'Undo', onClick: undo },
+          onDismiss: commit,
+          onAutoClose: commit,
         })
       },
       /** With `pullRequest`, the comment is posted on the ticket's pull request too. */

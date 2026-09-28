@@ -9,6 +9,7 @@ import {
   parsePullRequestUrl,
   PRIORITIES,
   PULL_REQUEST_STATES,
+  TICKET_SIZES,
 } from './domain.ts'
 
 const name = z.string().trim().min(1).max(200)
@@ -45,6 +46,7 @@ const agentModel = z
 const agentEffort = z.enum(AGENT_EFFORTS).nullable()
 const agentConcurrency = z.int().min(1).max(AGENT_MAX_CONCURRENCY).nullable()
 const archiveDoneDays = z.int().min(1).max(3650).nullable()
+const ticketSize = z.enum(TICKET_SIZES)
 const notifyUrl = z
   .string()
   .trim()
@@ -70,6 +72,7 @@ export const createBoardSchema = z.object({
   agentAllSkills: z.boolean().optional(),
   autoMerge: z.boolean().optional(),
   archiveDoneDays: archiveDoneDays.optional(),
+  approvalSize: ticketSize.nullable().optional(),
   notifyUrl: notifyUrl.optional(),
 })
 
@@ -88,6 +91,7 @@ export const updateBoardSchema = z.object({
   agentAllSkills: z.boolean().optional(),
   autoMerge: z.boolean().optional(),
   archiveDoneDays: archiveDoneDays.optional(),
+  approvalSize: ticketSize.nullable().optional(),
   notifyUrl: notifyUrl.optional(),
 })
 
@@ -177,12 +181,49 @@ export const moveTicketSchema = z.object({
   force,
 })
 
+/**
+ * Changes several tickets of a board at once, all or nothing: moves them (appended, in the order given), sets their
+ * priority, adds and removes tags, or deletes them.
+ */
+export const bulkTicketsSchema = z
+  .object({
+    tickets: z.array(ref).min(1).max(500),
+    moveTo: ref.optional(),
+    force,
+    priority: priority.optional(),
+    addTags: z.array(ref).max(50).optional(),
+    removeTags: z.array(ref).max(50).optional(),
+    delete: z.literal(true).optional(),
+  })
+  .refine(
+    (input) => input.moveTo || input.priority || input.addTags?.length || input.removeTags?.length || input.delete,
+    {
+      message: 'Say what to do: moveTo, priority, addTags, removeTags or delete',
+    },
+  )
+  .refine((input) => !input.delete || !(input.moveTo || input.priority || input.addTags || input.removeTags), {
+    message: 'delete cannot be combined with other changes',
+  })
+
 export const submitForReviewSchema = z.object({
   agent: name,
   /** Left out for a question ticket (tagged `question`), which is answered in `comment` instead. */
   pullRequest: pullRequestUrl.optional(),
   /** Markdown summary posted as a comment, e.g. what changed and how it was verified, or a question's answer. */
   comment: z.string().trim().min(1).max(20_000).optional(),
+  ifVersion: version.optional(),
+})
+
+/** The plan an agent posts when it starts a ticket, with its size estimate (POST /tickets/:id/plan). */
+export const postPlanSchema = z.object({
+  agent: name,
+  estimate: ticketSize,
+  /** Markdown: what it will change and how, in a few lines. */
+  plan: z.string().trim().min(1).max(20_000),
+})
+
+/** Approves the plan of a ticket that waits for approval (POST /tickets/:id/approve). */
+export const approvePlanSchema = z.object({
   ifVersion: version.optional(),
 })
 
@@ -321,11 +362,14 @@ export type CreateSubticketInput = z.input<typeof createSubticketSchema>
 export type UpdateTicketInput = z.input<typeof updateTicketSchema>
 export type CheckItemInput = z.input<typeof checkItemSchema>
 export type MoveTicketInput = z.input<typeof moveTicketSchema>
+export type BulkTicketsInput = z.input<typeof bulkTicketsSchema>
 export type ClaimTicketInput = z.input<typeof claimTicketSchema>
 export type ReleaseTicketInput = z.input<typeof releaseTicketSchema>
 export type HeartbeatInput = z.input<typeof heartbeatSchema>
 export type ReleaseIdleInput = z.input<typeof releaseIdleSchema>
 export type SubmitForReviewInput = z.input<typeof submitForReviewSchema>
+export type PostPlanInput = z.input<typeof postPlanSchema>
+export type ApprovePlanInput = z.input<typeof approvePlanSchema>
 export type ClaimNextInput = z.input<typeof claimNextSchema>
 export type MergeRunInput = z.input<typeof mergeRunSchema>
 export type MergeTicketInput = z.input<typeof mergeTicketSchema>

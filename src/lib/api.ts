@@ -15,6 +15,7 @@ import type {
 } from '@shared/domain'
 import type {
   BoardExport,
+  BulkTicketsInput,
   CreateBoardInput,
   CreateColumnInput,
   CreateGitHubRepoInput,
@@ -94,7 +95,11 @@ export const api = {
   moveTicket: (ticketId: string, input: MoveTicketInput) => request<Ticket>('POST', `/tickets/${ticketId}/move`, input),
   /** Kept alive so a delete sent as the page closes still arrives. */
   deleteTicket: (ticketId: string) => request<void>('DELETE', `/tickets/${ticketId}`, undefined, true),
+  /** Kept alive, like `deleteTicket`, for bulk deletes sent as the page closes. */
+  bulkTickets: (boardId: string, input: BulkTicketsInput) =>
+    request<{ tickets: Ticket[] }>('POST', `/boards/${boardId}/tickets/bulk`, input, true),
   listActivity: (ticketId: string) => request<Activity[]>('GET', `/tickets/${ticketId}/activity`),
+  approvePlan: (ticketId: string) => request<Ticket>('POST', `/tickets/${ticketId}/approve`),
   syncPullRequest: (ticketId: string) => request<Ticket>('POST', `/tickets/${ticketId}/pull-request/sync`),
   mergeTicket: (ticketId: string, method: MergeMethod) =>
     request<Ticket>('POST', `/tickets/${ticketId}/merge`, { method }),

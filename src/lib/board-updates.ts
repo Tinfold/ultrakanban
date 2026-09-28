@@ -26,6 +26,7 @@ export type BoardPatch = Partial<
     | 'agentAllSkills'
     | 'autoMerge'
     | 'archiveDoneDays'
+    | 'approvalSize'
     | 'notifyUrl'
   >
 >
@@ -118,6 +119,35 @@ export function moveTicket(detail: BoardDetail, ticketId: string, columnId: stri
       return { ...ticket, columnId, position: positions.get(ticket.id)!, ...(moved && { archived: false }) }
     }),
   }
+}
+
+export interface BulkChange {
+  moveTo?: string
+  priority?: Ticket['priority']
+  addTagIds?: string[]
+  removeTagIds?: string[]
+}
+
+/** Applies the same change to several tickets; moved tickets are appended in the order given, like the API does. */
+export function bulkChangeTickets(detail: BoardDetail, ticketIds: string[], change: BulkChange): BoardDetail {
+  const ids = new Set(ticketIds)
+  let next: BoardDetail = {
+    ...detail,
+    tickets: detail.tickets.map((ticket) => {
+      if (!ids.has(ticket.id)) return ticket
+      const tagIds = [...new Set([...ticket.tagIds, ...(change.addTagIds ?? [])])].filter(
+        (tagId) => !change.removeTagIds?.includes(tagId),
+      )
+      return { ...ticket, tagIds, priority: change.priority ?? ticket.priority }
+    }),
+  }
+  if (change.moveTo) {
+    for (const ticketId of ticketIds) {
+      const ticket = next.tickets.find(({ id }) => id === ticketId)
+      if (ticket && ticket.columnId !== change.moveTo) next = moveTicket(next, ticketId, change.moveTo)
+    }
+  }
+  return next
 }
 
 export const addColumn = (detail: BoardDetail, column: Column): BoardDetail => ({

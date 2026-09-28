@@ -58,7 +58,7 @@ adopt() {
 # Checks the tickets the agent holds and handles the first one that needs work. Returns 1 if none did.
 handle_feedback() {
   local board review cancelled idle tickets file id number column holder version ticket_model ticket_effort pr_url repo pr_number \
-    queued pr branch ci issue reviews inline activity state triage items ci_note
+    queued approval pr branch ci issue reviews inline activity state triage items ci_note next
   claim_lock -s
   board=$(get "/boards/$BOARD") || { claim_unlock; log "can't read board $BOARD"; return 1; }
   review=$(jq -r '.board.reviewColumnId // ""' <<<"$board")
@@ -71,7 +71,7 @@ handle_feedback() {
     | select(.columnId != $done and .columnId != $cancelled)
     | [.id, .number, .columnId, .assignee, .version, .agentModel // "-", .agentEffort // "-", .pullRequest.url // "-",
        .pullRequest.repo // "-", .pullRequest.number // "-",
-       ($idle[.columnId] | if .queued then .name else "-" end)] | @tsv' \
+       ($idle[.columnId] | if .queued then .name else "-" end), .approval // "-"] | @tsv' \
     <<<"$board")
   board=
 
@@ -89,7 +89,8 @@ handle_feedback() {
   fi
   claim_unlock
 
-  while IFS=$'\t' read -r -u 3 id number column holder version ticket_model ticket_effort pr_url repo pr_number queued; do
+  while IFS=$'\t' read -r -u 3 id number column holder version ticket_model ticket_effort pr_url repo pr_number queued \
+    approval; do
     [[ -n $id ]] || continue
     # Another loop is working this one.
     unlock_ticket
@@ -154,6 +155,13 @@ loop stopped starting runs for CI on this ticket. Comment on the ticket to let i
     run_step=$(jq -r '.items | map(.text | split("\n")[0] | rtrimstr(":")) | join("; ")' <<<"$triage")
     log "ticket #$number ($id): $run_step"
     run_step=${run_step:0:200}
+    if [[ $approval == pending ]]; then
+      next="The ticket's plan waits for a person to approve it, so don't start the work yet: answer the feedback above,
+post a revised plan (POST $KANBAN/api/tickets/$id/plan) if it asks for changes to the plan, and exit."
+    else
+      next="If the ticket isn't in review yet, keep working it and submit it for review, unless the feedback above says
+otherwise."
+    fi
     run_on_ticket "$id" "$(intro)
 
 Ticket $id is already yours. The loop started this run for this new feedback:
@@ -164,8 +172,7 @@ Read the ticket's activity and, if it has a pull request, its comments, reviews,
 then address everything above: answer questions, make the requested changes, fix failing checks, and resolve merge
 conflicts by merging the base branch into the pull request's branch. Commit and push to that branch.
 Reply where each piece of feedback was given: on the pull request for pull request feedback (with the marker line).
-If the ticket isn't in review yet, keep working it and submit it for review, unless the feedback above says
-otherwise.$(
+$next$(
       [[ $(jq -r .ci <<<"$triage") == true ]] && printf '%s' "
 Failing CI started this run. First find out from the failing job's log whether the failure comes from the code. If it
 doesn't (billing or spending limits, runners or infrastructure, a flaky test unrelated to the change, missing
@@ -258,7 +265,10 @@ their first run yet (CLAIM_LIMIT $CLAIM_LIMIT)"
 
 Ticket $id is already claimed for you and in progress. Work only this ticket; do not claim another.
 Take it through to review and exit after submitting it. If it is tagged question, submit it for review with the answer \
-as the comment and no pull request." "$snapshot" "claim"
+as the comment and no pull request.
+Before you start the work, post your plan with its size estimate (POST $KANBAN/api/tickets/$id/plan, see the skill). If \
+the ticket then waits for approval (its \"approval\" is \"pending\"), stop there and exit: the loop starts a new run once \
+someone approves the plan." "$snapshot" "claim"
   unlock_ticket
   return 0
 }
