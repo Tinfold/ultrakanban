@@ -206,6 +206,11 @@ const MIGRATIONS = [
   ALTER TABLE tickets ADD COLUMN run_step TEXT;
   `,
   `
+  -- Combined status of the pull request's checks ('pending', 'passing', 'failing'), as GitHub last reported;
+  -- NULL when it has none, or isn't open or draft.
+  ALTER TABLE tickets ADD COLUMN pr_checks TEXT;
+  `,
+  `
   -- Where the board sends a message when a ticket needs a person (see server/notifications.ts). None when NULL.
   ALTER TABLE boards ADD COLUMN notify_url TEXT;
   -- Notifications sent, so none is sent twice: one per ticket and key (e.g. the comment or commit it is about).
