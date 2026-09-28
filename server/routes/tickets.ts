@@ -7,6 +7,7 @@ import {
   claimTicketSchema,
   commentSchema,
   createSubticketSchema,
+  heartbeatSchema,
   mergeTicketSchema,
   moveTicketSchema,
   recordUsageSchema,
@@ -31,6 +32,7 @@ import {
   listSubtickets,
   moveTicket,
   recordHeartbeat,
+  endRun,
   releaseTicket,
   submitForReview,
   updateTicket,
@@ -135,8 +137,14 @@ export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles }: AppS
       const input = await readJson(c, releaseTicketSchema)
       return c.json(transaction(() => releaseTicket(c.req.param('ticketId'), input)))
     })
-    .post('/:ticketId/heartbeat', (c) => {
-      recordHeartbeat(c.req.param('ticketId'))
+    .post('/:ticketId/heartbeat', async (c) => {
+      // The body is optional: a heartbeat without one keeps the run's step.
+      const input = (await c.req.text()) ? await readJson(c, heartbeatSchema) : {}
+      recordHeartbeat(c.req.param('ticketId'), input)
+      return c.body(null, 204)
+    })
+    .delete('/:ticketId/heartbeat', (c) => {
+      endRun(c.req.param('ticketId'))
       return c.body(null, 204)
     })
     .get('/:ticketId/activity', (c) => {

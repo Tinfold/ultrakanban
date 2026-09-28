@@ -23,6 +23,7 @@ import { CONFLICTS_HINT } from '@/lib/pull-request'
 import { cn } from '@/lib/utils'
 import { useBoardContext } from './board-context'
 import { QuickMergeButton } from './QuickMergeButton'
+import { RunStatus } from './RunStatus'
 
 const DUE_STYLES = {
   overdue: 'text-red-600 dark:text-red-400',
@@ -159,6 +160,7 @@ export function TicketCard({ ticket, overlay }: TicketCardProps) {
           {canMerge && <QuickMergeButton ticket={ticket} />}
         </div>
       )}
+      {ticket.run && <RunStatus run={ticket.run} />}
     </div>
   )
 }

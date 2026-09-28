@@ -200,6 +200,12 @@ const MIGRATIONS = [
   );
   `,
   `
+  -- The agent run working the ticket (see POST /tickets/:id/heartbeat): when its first heartbeat came, and what it
+  -- last said it is doing. Cleared when the run ends; a run without a heartbeat for AGENT_IDLE_MINUTES is over too.
+  ALTER TABLE tickets ADD COLUMN run_started_at TEXT;
+  ALTER TABLE tickets ADD COLUMN run_step TEXT;
+  `,
+  `
   -- The ticket this one is a sub-ticket of (POST /tickets/:id/children); the parent waits for its sub-tickets.
   ALTER TABLE tickets ADD COLUMN parent_id TEXT REFERENCES tickets(id) ON DELETE SET NULL;
   CREATE INDEX tickets_parent ON tickets(parent_id);

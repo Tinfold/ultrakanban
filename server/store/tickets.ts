@@ -2,6 +2,7 @@ import {
   AGENT_IDLE_MINUTES,
   type AgentEffort,
   CANCELLED_COLUMN,
+  type AgentRun,
   type Column,
   parsePullRequestUrl,
   PRIORITIES,
@@ -18,6 +19,7 @@ import type {
   ClaimNextInput,
   ClaimTicketInput,
   CreateTicketInput,
+  HeartbeatInput,
   ListTicketsQuery,
   MoveTicketInput,
   ReleaseIdleInput,
@@ -27,6 +29,7 @@ import type {
 } from '../../shared/schemas.ts'
 import { newId, now, reorder, sql, touchBoard, updateRow } from '../db.ts'
 import { badRequest, conflict, HttpError, notFound } from '../errors.ts'
+import { publish } from '../events.ts'
 import { logActivity } from './activity.ts'
 import { getColumn, listColumns, resolveColumn, workflowColumns } from './columns.ts'
 import { resolveTags } from './tags.ts'
@@ -48,6 +51,9 @@ interface TicketRow {
   pr_title: string | null
   pr_conflicts: number
   pr_checked_at: string | null
+  agent_seen_at: string | null
+  run_started_at: string | null
+  run_step: string | null
   position: number
   version: number
   moved_at: string
@@ -113,6 +119,15 @@ function toPullRequest(url: string, row: TicketRow): PullRequest {
   }
 }
 
+type RunRow = Pick<TicketRow, 'agent_seen_at' | 'run_started_at' | 'run_step'>
+
+/** The run working a ticket: one has started, hasn't ended, and sent a heartbeat within `AGENT_IDLE_MINUTES`. */
+function runOf(row: RunRow): AgentRun | null {
+  const { agent_seen_at: seenAt, run_started_at: startedAt, run_step: step } = row
+  if (!startedAt || !seenAt || Date.parse(seenAt) < Date.now() - AGENT_IDLE_MINUTES * 60_000) return null
+  return { startedAt, seenAt, step }
+}
+
 const toTicket = (row: TicketRow): Ticket => ({
   id: row.id,
   boardId: row.board_id,
@@ -131,6 +146,7 @@ const toTicket = (row: TicketRow): Ticket => ({
   version: row.version,
   commentCount: row.comment_count,
   attachmentCount: row.attachment_count,
+  run: runOf(row),
   waitingSince: row.waiting_since,
   movedAt: row.moved_at,
   archived: row.archive_days !== null && Date.parse(row.moved_at) < Date.now() - row.archive_days * DAY_MS,
@@ -473,10 +489,41 @@ export function releaseTicket(id: string, input: ReleaseTicketInput): Ticket {
   return getTicket(id)
 }
 
-/** Notes that an agent is working on the ticket right now. Not a change to the ticket: nothing is logged or bumped. */
-export function recordHeartbeat(id: string) {
-  const { changes } = sql.run('UPDATE tickets SET agent_seen_at = ? WHERE id = ?', now(), id)
-  if (!changes) throw notFound('Ticket', id)
+const getRunRow = (id: string) => {
+  const row = sql.get<RunRow & { board_id: string }>(
+    'SELECT board_id, agent_seen_at, run_started_at, run_step FROM tickets WHERE id = ?',
+    id,
+  )
+  if (!row) throw notFound('Ticket', id)
+  return row
+}
+
+/**
+ * Notes that an agent is working on the ticket right now, starting a run unless one is going on (see `AgentRun`), and
+ * what the run is doing if the agent says (it keeps its step otherwise). Not a change to the ticket: nothing is logged
+ * or bumped, but boards are told when a run starts or its step changes, so they show it.
+ */
+export function recordHeartbeat(id: string, input: HeartbeatInput) {
+  const row = getRunRow(id)
+  const run = runOf(row)
+  const at = now()
+  const step = input.step === undefined ? (run?.step ?? null) : input.step || null
+  sql.run(
+    'UPDATE tickets SET agent_seen_at = ?, run_started_at = ?, run_step = ? WHERE id = ?',
+    at,
+    run?.startedAt ?? at,
+    step,
+    id,
+  )
+  if (!run || step !== run.step) publish({ boardId: row.board_id })
+}
+
+/** Ends the run working the ticket, if any: the agent says it has stopped. */
+export function endRun(id: string) {
+  const row = getRunRow(id)
+  if (!row.run_started_at) return
+  sql.run('UPDATE tickets SET run_started_at = NULL, run_step = NULL WHERE id = ?', id)
+  publish({ boardId: row.board_id })
 }
 
 /**

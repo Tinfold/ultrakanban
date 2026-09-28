@@ -40,6 +40,12 @@ export const QUESTION_TAG = 'question'
 export const CANCELLED_COLUMN = 'cancelled'
 
 /**
+ * A run on a ticket looks stalled when its agent hasn't sent a heartbeat for this long. scripts/agent-loop.sh sends
+ * one every 30 seconds by default (TICKET_CHECK_SECONDS).
+ */
+export const AGENT_RUN_STALLED_MINUTES = 3
+
+/**
  * Name a board's agent claims tickets under: `<agent>/<model>/<effort>`, e.g. `claude/opus/high`. The agent name
  * itself belongs to the board's controller (scripts/agent-loop.sh), which starts one of these workers per run.
  */
@@ -251,6 +257,8 @@ export interface Ticket {
   version: number
   commentCount: number
   attachmentCount: number
+  /** The agent run working the ticket right now, if any (see `AgentRun`). */
+  run: AgentRun | null
   /**
    * When its agent started waiting on an answer: set while the newest comment is from its assignee and it's worked
    * (not in review or done).
@@ -269,6 +277,19 @@ export interface Ticket {
   subtickets: { done: number; total: number } | null
   createdAt: string
   updatedAt: string
+}
+
+/**
+ * An agent run working a ticket, as its heartbeats (`POST /tickets/:id/heartbeat`) tell. It ends when the agent says
+ * so (`DELETE /tickets/:id/heartbeat`) or after `AGENT_IDLE_MINUTES` without a heartbeat.
+ */
+export interface AgentRun {
+  /** When the run's first heartbeat came. */
+  startedAt: string
+  /** Its latest heartbeat. */
+  seenAt: string
+  /** What the run is doing, as its agent last said, e.g. "Answering review feedback". */
+  step: string | null
 }
 
 export interface BoardDetail {
