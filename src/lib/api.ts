@@ -95,6 +95,7 @@ export const api = {
   /** Kept alive so a delete sent as the page closes still arrives. */
   deleteTicket: (ticketId: string) => request<void>('DELETE', `/tickets/${ticketId}`, undefined, true),
   listActivity: (ticketId: string) => request<Activity[]>('GET', `/tickets/${ticketId}/activity`),
+  approvePlan: (ticketId: string) => request<Ticket>('POST', `/tickets/${ticketId}/approve`),
   syncPullRequest: (ticketId: string) => request<Ticket>('POST', `/tickets/${ticketId}/pull-request/sync`),
   mergeTicket: (ticketId: string, method: MergeMethod) =>
     request<Ticket>('POST', `/tickets/${ticketId}/merge`, { method }),

@@ -1,6 +1,7 @@
 import {
   AGENT_IDLE_MINUTES,
   type AgentEffort,
+  type Approval,
   CANCELLED_COLUMN,
   type AgentRun,
   type CheckStatus,
@@ -10,12 +11,15 @@ import {
   type Priority,
   type PullRequest,
   type PullRequestState,
+  needsApproval,
   QUESTION_TAG,
   type Ticket,
+  type TicketSize,
 } from '../../shared/domain.ts'
 import { BLOCKED_TAG, parseBlockers } from '../../shared/blockers.ts'
 import { parseChecklist, setChecklistItem } from '../../shared/checklist.ts'
 import type {
+  ApprovePlanInput,
   CheckItemInput,
   ClaimNextInput,
   ClaimTicketInput,
@@ -23,6 +27,7 @@ import type {
   HeartbeatInput,
   ListTicketsQuery,
   MoveTicketInput,
+  PostPlanInput,
   ReleaseIdleInput,
   ReleaseTicketInput,
   SubmitForReviewInput,
@@ -56,6 +61,8 @@ interface TicketRow {
   agent_seen_at: string | null
   run_started_at: string | null
   run_step: string | null
+  estimate: TicketSize | null
+  approval: Approval | null
   position: number
   version: number
   moved_at: string
@@ -75,14 +82,14 @@ interface TicketRow {
 }
 
 /**
- * When the ticket's agent started waiting for an answer: the newest comment on it is from its assignee, while it's
- * worked (not in the review or done column, and its pull request wasn't closed). Null when it isn't waiting.
- * Needs the ticket as `t`.
+ * When the ticket's agent started waiting for a person: the newest comment on it is from its assignee, or the newest
+ * of its comments is its assignee's plan and that waits for approval, while it's worked (not in the review or done
+ * column, and its pull request wasn't closed). Null when it isn't waiting. Needs the ticket as `t`.
  */
 export const WAITING_SINCE = `
-  (SELECT CASE WHEN a.actor = t.assignee THEN a.created_at END
+  (SELECT CASE WHEN a.actor = t.assignee AND (a.type = 'comment' OR t.approval = 'pending') THEN a.created_at END
    FROM activity a JOIN boards b ON b.id = t.board_id
-   WHERE a.ticket_id = t.id AND a.type = 'comment'
+   WHERE a.ticket_id = t.id AND a.type IN ('comment', 'plan')
      AND t.column_id IS NOT b.review_column_id AND t.column_id IS NOT b.done_column_id AND t.pr_state != 'closed'
    ORDER BY a.id DESC LIMIT 1)`
 
@@ -159,6 +166,8 @@ const toTicket = (row: TicketRow): Ticket => ({
   usage: { runs: row.usage_runs, tokens: row.usage_tokens ?? 0, costUsd: row.usage_cost },
   run: runOf(row),
   waitingSince: row.waiting_since,
+  estimate: row.estimate,
+  approval: row.approval,
   movedAt: row.moved_at,
   archived: row.archive_days !== null && Date.parse(row.moved_at) < Date.now() - row.archive_days * DAY_MS,
   parentId: row.parent_id,
@@ -330,9 +339,11 @@ function relocate(ticket: Ticket, columnRef: string, position: number | undefine
   }
 }
 
+/** Assigns the ticket, or with `null` unassigns it: then its plan no longer waits for approval, as no agent waits. */
 function assign(ticket: Ticket, assignee: string | null, actor: string) {
   if (ticket.assignee === assignee) return
   sql.run('UPDATE tickets SET assignee = ? WHERE id = ?', assignee, ticket.id)
+  if (!assignee && ticket.approval === 'pending') sql.run('UPDATE tickets SET approval = NULL WHERE id = ?', ticket.id)
   if (ticket.assignee) logActivity(ticket.id, actor, 'released', { assignee: ticket.assignee })
   if (assignee) logActivity(ticket.id, actor, 'claimed', { assignee })
 }
@@ -539,7 +550,8 @@ export function endRun(id: string) {
 
 /**
  * Tickets of a column no agent is working on: none has sent a heartbeat for them, and nothing has happened on them,
- * for `AGENT_IDLE_MINUTES`. In board order.
+ * for `AGENT_IDLE_MINUTES`. Tickets whose plan waits for approval aren't idle: their agent waits on purpose. In board
+ * order.
  */
 export function listIdleTickets(columnId: string): Ticket[] {
   getColumn(columnId)
@@ -547,7 +559,7 @@ export function listIdleTickets(columnId: string): Ticket[] {
   return sql
     .all<TicketRow>(
       `${SELECT_TICKETS}
-       WHERE t.column_id = ? AND (t.agent_seen_at IS NULL OR t.agent_seen_at < ?)
+       WHERE t.column_id = ? AND (t.agent_seen_at IS NULL OR t.agent_seen_at < ?) AND t.approval IS NOT 'pending'
          AND NOT EXISTS (SELECT 1 FROM activity WHERE ticket_id = t.id AND created_at >= ?)
        ORDER BY t.position`,
       columnId,
@@ -624,6 +636,7 @@ export function submitForReview(id: string, input: SubmitForReviewInput): Ticket
   if (ticket.assignee && ticket.assignee !== input.agent) {
     throw conflict('claimed_by_other', `Ticket is claimed by "${ticket.assignee}", not "${input.agent}"`, { ticket })
   }
+  assertNotHeld(ticket)
   const { review } = workflowColumns(ticket.boardId)
   if (!review) throw badRequest('This board has no review column; choose one in the board settings')
   // Tickets whose sub-tickets are all finished may have nothing left to change.
@@ -641,6 +654,57 @@ export function submitForReview(id: string, input: SubmitForReviewInput): Ticket
   assign(ticket, input.agent, input.agent)
   if (ticket.columnId !== review.id) relocate(ticket, review.id, undefined, input.agent)
   if (input.comment) logActivity(id, input.agent, 'comment', { body: input.comment })
+  bumpVersion(id)
+  return getTicket(id)
+}
+
+function assertNotHeld(ticket: Ticket) {
+  if (ticket.approval === 'pending') {
+    throw conflict(
+      'awaiting_approval',
+      "The ticket's plan waits for approval; don't work it until someone approves it (POST /tickets/:id/approve)",
+      { ticket },
+    )
+  }
+}
+
+/**
+ * Records the plan and size estimate the ticket's agent posts before it works the ticket. When the board holds tickets
+ * of that size for approval (`approvalSize`), the ticket waits for it, unless its plan was approved before: an
+ * approved ticket stays approved when its agent posts a revised plan.
+ */
+export function postPlan(id: string, input: PostPlanInput): Ticket {
+  const ticket = getTicket(id)
+  if (ticket.assignee && ticket.assignee !== input.agent) {
+    throw conflict('claimed_by_other', `Ticket is claimed by "${ticket.assignee}", not "${input.agent}"`, { ticket })
+  }
+  const { approval_size: approvalSize } = sql.get<{ approval_size: TicketSize | null }>(
+    'SELECT approval_size FROM boards WHERE id = ?',
+    ticket.boardId,
+  )!
+  const approved = ticket.approval === 'approved'
+  const held = !approved && needsApproval(input.estimate, approvalSize)
+
+  touchBoard(ticket.boardId)
+  updateRow('tickets', id, { estimate: input.estimate, approval: approved ? 'approved' : held ? 'pending' : null })
+  logActivity(id, input.agent, 'plan', { body: input.plan, estimate: input.estimate, held })
+  bumpVersion(id)
+  return getTicket(id)
+}
+
+/** Approves the plan of a ticket that waits for approval, so its agent goes on to work it. */
+export function approvePlan(id: string, input: ApprovePlanInput, actor: string): Ticket {
+  const ticket = getTicket(id)
+  assertVersion(ticket, input.ifVersion)
+  if (ticket.approval !== 'pending') {
+    throw conflict('not_awaiting_approval', "The ticket's plan doesn't wait for approval", { ticket })
+  }
+  if (ticket.assignee && actor === ticket.assignee) {
+    throw conflict('own_plan', "The ticket's agent can't approve its own plan; a person has to", { ticket })
+  }
+  touchBoard(ticket.boardId)
+  updateRow('tickets', id, { approval: 'approved' })
+  logActivity(id, actor, 'approved', { estimate: ticket.estimate })
   bumpVersion(id)
   return getTicket(id)
 }

@@ -4,10 +4,10 @@ import { getBoard } from './store/boards.ts'
 
 /**
  * Why a ticket needs a person: its agent asked something (`question`), someone has to look at it, e.g. CI that
- * didn't run properly (`attention`), a question ticket was answered (`answer`), or its pull request is ready to
- * merge (`ready`).
+ * didn't run properly (`attention`), its agent's plan waits for approval (`approval`), a question ticket was answered
+ * (`answer`), or its pull request is ready to merge (`ready`).
  */
-export type NotificationKind = 'question' | 'attention' | 'answer' | 'ready'
+export type NotificationKind = 'question' | 'attention' | 'approval' | 'answer' | 'ready'
 
 export interface Notification {
   kind: NotificationKind
@@ -29,6 +29,7 @@ export type SendNotification = (target: string, notification: Notification) => P
 const HEADLINES: Record<NotificationKind, string> = {
   question: 'needs an answer',
   attention: 'needs someone',
+  approval: 'waits for approval of its plan',
   answer: 'was answered',
   ready: 'is ready to merge',
 }

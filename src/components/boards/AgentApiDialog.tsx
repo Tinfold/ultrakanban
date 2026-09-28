@@ -71,7 +71,7 @@ Board id: ${detail.board.id}. Send the header "X-Actor: <your name>" on every re
 Your name is <agent>/<model>/<effort>: the tool you run in, then your exact model and effort level, e.g. claude/claude-opus-5-5/high. Use the same name every time.
 
 1. Claim a ticket: POST ${boardPath}/tickets/claim-next {"agent":"<your name>","column":"${todo}","moveTo":"${inProgress}"}.
-2. Read the ticket and its comments: GET /tickets/<id> and GET /tickets/<id>/activity. Comments may be newer than the description; follow the newest instruction and ask in a comment if they conflict.
+2. Read the ticket and its comments: GET /tickets/<id> and GET /tickets/<id>/activity. Comments may be newer than the description; follow the newest instruction and ask in a comment if they conflict. Before you start the work, post a short plan with a size estimate (S, M or L): POST /tickets/<id>/plan {"agent":"<your name>","estimate":"M","plan":"<markdown>"}. If the returned ticket's "approval" is "pending", stop until a person approves the plan.
 3. Post progress and decisions with POST /tickets/<id>/comments {"body":"<markdown>"}. If the description has a checklist (- [ ] step), check off each step as you finish it with POST /tickets/<id>/checklist/<index> {"checked":true} (0-based, see GET /tickets/<id>/checklist) instead of editing the description.
 4. If the change is visible (UI, styling, charts, CLI output), attach screenshots or a short screen recording to the ticket so reviewers can see the result without running it: POST /tickets/<id>/attachments as multipart/form-data with the file in a field named "file" (curl -F file=@screenshot.png). PNG, JPEG, GIF, WebP, MP4 or WebM, up to 25 MB each.
 ${finish}`,

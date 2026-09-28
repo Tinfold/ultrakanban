@@ -24,6 +24,9 @@ def clip: if length > 2000 then .[:2000] + " [...]" else . end;
       | {key: "t\(.id)", text: ("\(.actor) moved the ticket from \(.data.from) to \(.data.to):\n"
          + "They want more work on it. Look for what in their comments on the ticket and the pull request. If they "
          + "don't say, ask them in a ticket comment and leave the ticket in \(.data.to).")}),
+    ($activity[] | select(.type == "approved" and .id > ($s.activity // 0) and (.actor | ours | not))
+      | {key: "t\(.id)", text: ("\(.actor) approved your plan:\n"
+         + "Go on with the work you planned, and take the ticket through to review.")}),
     ($issue[] | select(.id > ($s.issue // 0) and feedback)
       | {key: "i\(.id)", text: "Pull request comment from \(.user.login) (\(.html_url)):\n\(.body // "" | clip)"}),
     ($reviews[] | select(.id > ($s.review // 0) and feedback and .state != "PENDING")

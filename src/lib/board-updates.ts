@@ -26,6 +26,7 @@ export type BoardPatch = Partial<
     | 'agentAllSkills'
     | 'autoMerge'
     | 'archiveDoneDays'
+    | 'approvalSize'
     | 'notifyUrl'
   >
 >

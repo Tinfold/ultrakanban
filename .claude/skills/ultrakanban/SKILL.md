@@ -1,6 +1,6 @@
 ---
 name: ultrakanban
-description: Work tickets from an ultrakanban board - claim a ticket, read its comments, report progress, attach screenshots, open a pull request, submit it for review, and act on review feedback. Use when asked to work from the kanban board, pick up or take tickets, check the board, or when a board or ticket link is mentioned.
+description: Work tickets from an ultrakanban board - claim a ticket, read its comments, post a plan, report progress, attach screenshots, open a pull request, submit it for review, and act on review feedback. Use when asked to work from the kanban board, pick up or take tickets, check the board, or when a board or ticket link is mentioned.
 ---
 
 # Working from an ultrakanban board
@@ -79,7 +79,25 @@ Follow any checklist (`- [ ] step`) in the description, and check its steps off 
 description — treat the newest instruction as the one that counts. If they conflict with the description or
 are unclear, ask in a comment and stop rather than guessing.
 
-## 3. Work, and report as you go
+## 3. Post your plan and size estimate
+
+Once you have read the ticket and looked at the code it touches, and before you start the work, post a short plan
+(what you will change and how, in a few lines of markdown) with your estimate of the ticket's size: `S` for a small,
+contained change, `M` for a change across a few files, `L` for a large one across several areas or with open questions.
+
+```sh
+curl -s -X POST $KANBAN/api/tickets/$TICKET/plan \
+  -H 'Content-Type: application/json' -H "X-Actor: $ME" \
+  -d "{\"agent\":\"$ME\",\"estimate\":\"M\",\"plan\":\"<markdown>\"}"
+```
+
+The board may hold tickets of that size for approval: then the response has `"approval": "pending"`. Stop there, don't
+work the ticket, and exit: the plan is on the ticket for a person to read, and approving it (`"approval": "approved"`)
+is your go-ahead. A comment on it meanwhile may ask for a different plan: answer it, post the revised plan, and wait
+again. Never approve your own plan. Post one plan when you start a ticket, not with every run on it; post it again only
+when the plan changes a lot.
+
+## 4. Work, and report as you go
 
 If the description has a checklist, check off each step as you finish it (0-based, in the order they appear)
 instead of editing the description:
@@ -97,7 +115,7 @@ curl -s -X POST $KANBAN/api/tickets/$TICKET/comments \
   -H 'Content-Type: application/json' -H "X-Actor: $ME" -d '{"body":"<markdown>"}'
 ```
 
-## 4. Attach screenshots of visible changes
+## 5. Attach screenshots of visible changes
 
 If the change is visible (UI, styling, charts, CLI output), attach screenshots or a short screen recording so
 reviewers can see the result without running it. PNG, JPEG, GIF, WebP, MP4 or WebM, up to 25 MB each:
@@ -106,7 +124,7 @@ reviewers can see the result without running it. PNG, JPEG, GIF, WebP, MP4 or We
 curl -s -X POST $KANBAN/api/tickets/$TICKET/attachments -H "X-Actor: $ME" -F file=@screenshot.png
 ```
 
-## 5. Open a pull request and submit for review
+## 6. Open a pull request and submit for review
 
 Push a branch, open the pull request, then submit the ticket with it:
 
@@ -125,7 +143,7 @@ person reads it and closes the ticket. Open a pull request only if the ticket al
 **A parent whose sub-tickets are all finished needs no pull request either** when nothing is left to do: check the
 sub-tickets did what it asked, then submit it with a summary as the comment and no `pullRequest`.
 
-## 6. Answer review feedback
+## 7. Answer review feedback
 
 After submitting, check both places for feedback until the pull request is merged or you are told to stop.
 
@@ -175,6 +193,7 @@ stop there. A human has to fix CI.
 | `409 claimed_by_other`        | The ticket isn't yours; don't touch it.                                    |
 | `409 version_conflict`        | Someone edited it meanwhile. Re-read the ticket and redo your edit.        |
 | `409 pull_request_not_merged` | You tried to move a ticket into the done column. Don't; the merge does it. |
+| `409 awaiting_approval`       | The ticket's plan waits for approval. Stop, and don't work it until then.  |
 | `404 no_ticket_available`     | Nothing to claim right now.                                                |
 | `415 unsupported_media_type`  | Attachments must be PNG, JPEG, GIF, WebP, MP4 or WebM.                     |
 

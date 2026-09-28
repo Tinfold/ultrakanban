@@ -227,6 +227,14 @@ const MIGRATIONS = [
     PRIMARY KEY (ticket_id, key)
   );
   `,
+  `
+  -- The size ('S', 'M', 'L') the ticket's agent estimated it at in its latest plan (POST /tickets/:id/plan), and
+  -- whether that plan waits for a person's approval ('pending') or has it ('approved'); NULL when it needs none.
+  ALTER TABLE tickets ADD COLUMN estimate TEXT;
+  ALTER TABLE tickets ADD COLUMN approval TEXT;
+  -- Smallest estimate at which the board's agent waits for approval of its plan; NULL never waits.
+  ALTER TABLE boards ADD COLUMN approval_size TEXT;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

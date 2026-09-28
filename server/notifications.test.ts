@@ -55,6 +55,19 @@ describe('notifications', () => {
     assert.equal(sent()[0].message, 'CI ran out of minutes')
   })
 
+  test('a plan waiting for approval notifies', async () => {
+    await call('PATCH', `/boards/${boardId}`, { approvalSize: 'L' })
+    const ticket = await addTicket({ title: 'Rewrite the API' })
+    await call('POST', `/tickets/${ticket.id}/claim`, { agent: 'a', moveTo: 'Doing' })
+    await call('POST', `/tickets/${ticket.id}/plan`, { agent: 'a', estimate: 'M', plan: 'Small change' })
+    assert.deepEqual(kinds(), [])
+
+    await call('POST', `/tickets/${ticket.id}/plan`, { agent: 'a', estimate: 'L', plan: 'Split it up' })
+    assert.deepEqual(kinds(), [`approval #${ticket.number}`])
+    assert.equal(sent()[0].title, `#${ticket.number} waits for approval of its plan: Rewrite the API`)
+    assert.equal(sent()[0].message, 'L: Split it up')
+  })
+
   test('an answered question ticket notifies', async () => {
     const ticket = await addTicket({ title: 'Why?', tags: ['question'] })
     await call('POST', `/tickets/${ticket.id}/claim`, { agent: 'a', moveTo: 'Doing' })

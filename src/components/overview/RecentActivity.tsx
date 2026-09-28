@@ -29,6 +29,10 @@ function verb(entry: OverviewActivity) {
       return entry.actor === entry.data.assignee ? 'released' : `unassigned ${entry.data.assignee} from`
     case 'comment':
       return 'commented on'
+    case 'plan':
+      return entry.data.held ? 'posted a plan, waiting for approval, for' : 'posted a plan for'
+    case 'approved':
+      return 'approved the plan of'
     case 'attachment':
       return 'attached a file to'
     case 'pull_request':
