@@ -44,6 +44,7 @@ const agentModel = z
   .nullable()
 const agentEffort = z.enum(AGENT_EFFORTS).nullable()
 const agentConcurrency = z.int().min(1).max(AGENT_MAX_CONCURRENCY).nullable()
+const archiveDoneDays = z.int().min(1).max(3650).nullable()
 /** Skips the merged-pull-request requirement of the board's done column. Meant for humans, not agents. */
 const force = z.boolean().optional()
 
@@ -62,6 +63,7 @@ export const createBoardSchema = z.object({
   agentBacklog: z.boolean().optional(),
   agentAllSkills: z.boolean().optional(),
   autoMerge: z.boolean().optional(),
+  archiveDoneDays: archiveDoneDays.optional(),
 })
 
 export const updateBoardSchema = z.object({
@@ -78,6 +80,7 @@ export const updateBoardSchema = z.object({
   agentBacklog: z.boolean().optional(),
   agentAllSkills: z.boolean().optional(),
   autoMerge: z.boolean().optional(),
+  archiveDoneDays: archiveDoneDays.optional(),
 })
 
 /** Creates a repository on GitHub and links it to the board. */
@@ -227,6 +230,10 @@ export const listTicketsQuerySchema = z.object({
   tag: z.array(ref).optional(),
   priority: z.array(priority).optional(),
   q: z.string().trim().min(1).optional(),
+})
+
+export const boardDetailQuerySchema = z.object({
+  archived: z.stringbool().default(false),
 })
 
 export const overviewQuerySchema = z.object({

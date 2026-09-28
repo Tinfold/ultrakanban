@@ -102,6 +102,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
       return value === NONE ? null : value
     }
     const text = (field: string) => String(data.get(field) ?? '').trim() || null
+    const archiveDays = Number(text('archiveDoneDays'))
     void actions.updateBoard({
       name,
       description: String(data.get('description') ?? ''),
@@ -116,6 +117,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
       agentBacklog: data.get('agentBacklog') === 'on',
       agentAllSkills: data.get('agentAllSkills') === 'on',
       autoMerge: data.get('autoMerge') === 'on',
+      archiveDoneDays: archiveDays >= 1 ? Math.round(archiveDays) : null,
     })
     onClose()
   }
@@ -155,6 +157,29 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
             <Label htmlFor="board-settings-done">Done column</Label>
             <ColumnSelect id="board-settings-done" name="doneColumn" value={detail.board.doneColumnId} />
           </div>
+        </div>
+        <div className="grid gap-1">
+          <div className="flex items-center gap-2 text-sm">
+            <Label htmlFor="board-settings-archive" className="font-normal">
+              Archive done tickets after
+            </Label>
+            <Input
+              id="board-settings-archive"
+              name="archiveDoneDays"
+              type="number"
+              min={1}
+              max={3650}
+              step={1}
+              defaultValue={detail.board.archiveDoneDays ?? ''}
+              placeholder="never"
+              className="h-7 w-20"
+            />
+            days
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Hides tickets that have been in the done column that long, and leaves them out of the board agents read.
+            Search still finds them, and Filter can show them. Leave empty to keep them all.
+          </p>
         </div>
         <div className="grid gap-1">
           <label className="flex items-center gap-2 text-sm">

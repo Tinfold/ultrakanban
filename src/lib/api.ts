@@ -61,7 +61,8 @@ const query = (params: Record<string, string | undefined>) => {
 
 export const api = {
   listBoards: () => request<BoardSummary[]>('GET', '/boards'),
-  getBoard: (boardId: string) => request<BoardDetail>('GET', `/boards/${boardId}`),
+  // Archived tickets too: the board hides them unless asked, and search finds them.
+  getBoard: (boardId: string) => request<BoardDetail>('GET', `/boards/${boardId}?archived=true`),
   createBoard: (input: CreateBoardInput) => request<BoardSummary>('POST', '/boards', input),
   updateBoard: (boardId: string, input: UpdateBoardInput) =>
     request<BoardSummary>('PATCH', `/boards/${boardId}`, input),
