@@ -38,7 +38,7 @@ import { listUsage, recordUsage } from '../store/usage.ts'
 
 const tooLargeMessage = `Attachments can be at most ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB`
 
-export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles }: AppServices) =>
+export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles, notifier }: AppServices) =>
   new Hono()
     .get('/:ticketId', (c) => c.json(getTicket(c.req.param('ticketId'))))
     .patch('/:ticketId', async (c) => {
@@ -58,6 +58,9 @@ export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles }: AppS
       const input = await readJson(c, submitForReviewSchema)
       const ticket = transaction(() => submitForReview(c.req.param('ticketId'), input))
       pullRequests.checkSoon(ticket)
+      if (!ticket.pullRequest && input.comment) {
+        notifier.notify(ticket, 'answer', `answer:${ticket.version}`, input.comment)
+      }
       return c.json(ticket)
     })
     .post('/:ticketId/pull-request/sync', async (c) => c.json(await pullRequests.syncTicket(c.req.param('ticketId'))))
@@ -147,9 +150,12 @@ export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles }: AppS
       )
     })
     .post('/:ticketId/comments', async (c) => {
-      const { body } = await readJson(c, commentSchema)
-      return c.json(
-        transaction(() => addComment(c.req.param('ticketId'), body, actorOf(c))),
-        201,
-      )
+      const { body, notify } = await readJson(c, commentSchema)
+      const ticketId = c.req.param('ticketId')
+      const comment = transaction(() => addComment(ticketId, body, actorOf(c)))
+      const ticket = getTicket(ticketId)
+      // The newest comment is the assignee's while the ticket is worked: its agent waits for an answer.
+      if (notify) notifier.notify(ticket, 'attention', `comment:${comment.id}`, body)
+      else if (ticket.waitingSince) notifier.notify(ticket, 'question', `comment:${comment.id}`, body)
+      return c.json(comment, 201)
     })

@@ -118,6 +118,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
       agentAllSkills: data.get('agentAllSkills') === 'on',
       autoMerge: data.get('autoMerge') === 'on',
       archiveDoneDays: archiveDays >= 1 ? Math.round(archiveDays) : null,
+      notifyUrl: text('notifyUrl'),
     })
     onClose()
   }
@@ -343,6 +344,25 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
           <p className="pl-6 text-xs text-muted-foreground">
             Off, runs only get the ultrakanban skill, unless the repository has skills of its own. Every skill is listed
             in each request a run makes, which costs tokens.
+          </p>
+        </div>
+      </fieldset>
+
+      <fieldset className="grid gap-3 border-t pt-4">
+        <legend className="sr-only">Notifications</legend>
+        <div className="grid gap-2">
+          <Label htmlFor="board-settings-notify">Notify at</Label>
+          <Input
+            id="board-settings-notify"
+            name="notifyUrl"
+            type="url"
+            defaultValue={detail.board.notifyUrl ?? ''}
+            placeholder="https://ntfy.sh/your-topic"
+          />
+          <p className="text-xs text-muted-foreground">
+            Sends a message when a ticket needs you: an agent asks a question, CI needs someone to look at it, a
+            question is answered or a pull request is ready to merge. Takes an ntfy topic, a Discord webhook or any
+            other webhook URL, which gets the notification as JSON. Leave empty to send nothing.
           </p>
         </div>
       </fieldset>

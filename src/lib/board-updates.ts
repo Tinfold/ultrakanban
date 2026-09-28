@@ -25,6 +25,7 @@ export type BoardPatch = Partial<
     | 'agentAllSkills'
     | 'autoMerge'
     | 'archiveDoneDays'
+    | 'notifyUrl'
   >
 >
 export type TicketPatch = Partial<

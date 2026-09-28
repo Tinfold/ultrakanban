@@ -24,6 +24,8 @@ priorities, due dates, checklists, comments and an activity log, backed by SQLit
 - **Quick merge**: merge a single ticket's pull request from its card in the review column
 - **Auto-merge**: optionally, per board, merge pull requests in review by themselves once they have no conflicts,
   every check has passed and every checklist item of their ticket is checked
+- **Notifications**: optionally, per board, send an ntfy, Discord or webhook message when a ticket needs you: an agent
+  asks a question, CI needs someone, a question is answered or a pull request is ready to merge
 - **Archiving**: optionally, per board, hide tickets that have been done for a number of days, so the done column and
   the board agents read stay small; search still finds them and the filter menu can show them
 - **Overview**: a dashboard across all boards (`/overview`): which agents are working on what right now, time
@@ -91,6 +93,7 @@ npm start            # http://127.0.0.1:4317 serves the app and the API
 | `ULTRAKANBAN_ATTACHMENTS` | next to the database  | Directory for uploaded attachment files                                                                           |
 | `GITHUB_TOKEN`            | `gh auth token`       | Token for checking pull requests (private repos need `repo` read access) and creating repositories (`repo` scope) |
 | `GITHUB_SYNC_INTERVAL`    | `60`                  | Seconds between pull request checks                                                                               |
+| `ULTRAKANBAN_URL`         |                       | Address people open the app at, e.g. `http://kanban.lan:4317`; notifications link to the ticket there             |
 
 There is no authentication: only expose it on networks you trust.
 

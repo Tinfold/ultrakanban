@@ -206,6 +206,11 @@ export interface BoardSummary {
    * asked for, but still found by the ticket list and search. Never archived when not set.
    */
   archiveDoneDays: number | null
+  /**
+   * Where to send a message when a ticket needs a person (an agent asks a question, CI needs someone, a pull request
+   * is ready to merge): an ntfy topic, a Discord webhook or any other webhook URL. Nothing is sent when not set.
+   */
+  notifyUrl: string | null
   ticketCount: number
   createdAt: string
   updatedAt: string

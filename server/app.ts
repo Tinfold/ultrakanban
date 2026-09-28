@@ -5,6 +5,7 @@ import { HttpError } from './errors.ts'
 import type { AttachmentFiles } from './attachment-files.ts'
 import { errorBody } from './http.ts'
 import type { MergeQueue } from './merge-queue.ts'
+import type { Notifier } from './notifications.ts'
 import type { PullRequestSync } from './pull-request-sync.ts'
 import { attachmentRoutes } from './routes/attachments.ts'
 import { listAttachmentIds } from './store/attachments.ts'
@@ -21,6 +22,7 @@ export interface AppServices {
   pullRequests: PullRequestSync
   mergeQueue: MergeQueue
   attachmentFiles: AttachmentFiles
+  notifier: Notifier
 }
 
 export function createApp(services: AppServices) {
