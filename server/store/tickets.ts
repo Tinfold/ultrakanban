@@ -655,10 +655,10 @@ export function deleteTicket(id: string) {
   sql.run('DELETE FROM tickets WHERE id = ?', id)
 }
 
-export function addComment(id: string, body: string, actor: string) {
+export function addComment(id: string, body: string, actor: string, pullRequestComment?: string) {
   const ticket = getTicket(id)
   touchBoard(ticket.boardId)
-  return logActivity(id, actor, 'comment', { body })
+  return logActivity(id, actor, 'comment', pullRequestComment ? { body, pullRequestComment } : { body })
 }
 
 export const FIX_CONFLICTS_COMMENT =

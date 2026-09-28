@@ -27,6 +27,8 @@ export const containing = new Set<string>()
 let afterMerge: (key: string) => void = () => {}
 export const setAfterMerge = (fn: typeof afterMerge) => void (afterMerge = fn)
 export const merges: string[] = []
+/** Comments the fake GitHub was asked to post, as `owner/name#number: body`; a body of "fail" is turned down. */
+export const prComments: string[] = []
 export const pull = (repo: string, number: number) => {
   const found = pulls.get(`${repo}#${number}`)
   if (!found) throw new Error(`GitHub responded 404 for ${repo}#${number}`)
@@ -59,6 +61,11 @@ const pullRequests = createPullRequestSync({
     afterMerge(`${repo}#${number}`)
   },
   setPullRequestBase: async (repo, number, base) => void (pull(repo, number).base = base),
+  async commentOnPullRequest(repo, number, body) {
+    if (body === 'fail') throw new GitHubError(403, 'Resource not accessible by integration')
+    prComments.push(`${repo}#${number}: ${body}`)
+    return `https://github.com/${repo}/pull/${number}#issuecomment-${prComments.length}`
+  },
 })
 export const mergeQueue = createMergeQueue(pullRequests, { pollMs: 0 })
 export const app = createApp({ attachmentFiles: createAttachmentFiles(attachmentDir), pullRequests, mergeQueue })

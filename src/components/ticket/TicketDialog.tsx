@@ -147,7 +147,7 @@ function TicketDetail({ ticket, onClose }: { ticket: Ticket; onClose: () => void
               className="-mx-3"
             />
             <AttachmentsSection ticketId={ticket.id} uploads={uploads} />
-            <ActivityFeed ticketId={ticket.id} />
+            <ActivityFeed ticketId={ticket.id} pullRequest={ticket.pullRequest} />
           </div>
         </div>
       </div>

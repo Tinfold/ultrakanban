@@ -226,7 +226,11 @@ export const recordUsageSchema = z.object({
     .default([]),
 })
 
-export const commentSchema = z.object({ body: z.string().trim().min(1).max(20_000) })
+export const commentSchema = z.object({
+  body: z.string().trim().min(1).max(20_000),
+  /** Also post it on the ticket's pull request. */
+  pullRequest: z.boolean().optional(),
+})
 
 export const listTicketsQuerySchema = z.object({
   column: ref.optional(),

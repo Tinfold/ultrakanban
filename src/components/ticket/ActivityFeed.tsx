@@ -1,6 +1,6 @@
 import { SendHorizontalIcon } from 'lucide-react'
 import { type FormEvent, type ReactNode, useMemo, useState } from 'react'
-import { type Activity, type Attachment, parsePullRequestUrl } from '@shared/domain'
+import { type Activity, type Attachment, parsePullRequestUrl, type PullRequest } from '@shared/domain'
 import { Markdown } from '@/components/common/Markdown'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
@@ -115,6 +115,16 @@ function ActivityItem({ entry, attachmentsById, onViewAttachment }: ActivityItem
           <UserAvatar name={entry.actor} size="xs" />
           <span className="font-medium">{entry.actor}</span>
           <Timestamp iso={entry.createdAt} />
+          {entry.data.pullRequestComment && (
+            <a
+              href={entry.data.pullRequestComment}
+              target="_blank"
+              rel="noreferrer"
+              className="ml-auto text-muted-foreground hover:text-foreground hover:underline"
+            >
+              also on the pull request
+            </a>
+          )}
         </div>
         <Markdown className="px-3 py-2.5">{entry.data.body}</Markdown>
       </li>
@@ -153,16 +163,19 @@ function ActivityItem({ entry, attachmentsById, onViewAttachment }: ActivityItem
   )
 }
 
-function CommentComposer({ ticketId }: { ticketId: string }) {
+function CommentComposer({ ticketId, pullRequest }: { ticketId: string; pullRequest: PullRequest | null }) {
   const { actions } = useBoardContext()
   const [body, setBody] = useState('')
   const [sending, setSending] = useState(false)
+  const [onPullRequest, setOnPullRequest] = useState(false)
+  // Merged and closed pull requests aren't where review feedback goes any more.
+  const canPostOnPullRequest = pullRequest?.state === 'open' || pullRequest?.state === 'draft'
 
   const submit = async (event?: FormEvent) => {
     event?.preventDefault()
     if (!body.trim() || sending) return
     setSending(true)
-    const comment = await actions.addComment(ticketId, body.trim())
+    const comment = await actions.addComment(ticketId, body.trim(), canPostOnPullRequest && onPullRequest)
     setSending(false)
     if (comment) setBody('')
   }
@@ -179,6 +192,17 @@ function CommentComposer({ ticketId }: { ticketId: string }) {
         className="min-h-20 resize-y border-0 bg-transparent! shadow-none focus-visible:ring-0"
       />
       <div className="flex items-center justify-end gap-2 px-2 pb-2">
+        {canPostOnPullRequest && (
+          <label className="mr-auto flex items-center gap-1.5 px-1 text-xs text-muted-foreground select-none">
+            <input
+              type="checkbox"
+              checked={onPullRequest}
+              onChange={(event) => setOnPullRequest(event.target.checked)}
+              className="size-3.5 accent-primary"
+            />
+            Also post on {pullRequest.repo}#{pullRequest.number}
+          </label>
+        )}
         <span className="hidden text-xs text-muted-foreground sm:inline">
           <Kbd>⌘</Kbd> <Kbd>↵</Kbd>
         </span>
@@ -191,7 +215,7 @@ function CommentComposer({ ticketId }: { ticketId: string }) {
   )
 }
 
-export function ActivityFeed({ ticketId }: { ticketId: string }) {
+export function ActivityFeed({ ticketId, pullRequest }: { ticketId: string; pullRequest: PullRequest | null }) {
   const { data: activity = [] } = useTicketActivity(ticketId)
   const { data: attachments = [] } = useTicketAttachments(ticketId)
   const attachmentsById = useMemo(() => new Map(attachments.map((item) => [item.id, item])), [attachments])
@@ -207,7 +231,7 @@ export function ActivityFeed({ ticketId }: { ticketId: string }) {
           <ActivityItem key={entry.id} entry={entry} attachmentsById={attachmentsById} onViewAttachment={setViewing} />
         ))}
       </ol>
-      <CommentComposer ticketId={ticketId} />
+      <CommentComposer ticketId={ticketId} pullRequest={pullRequest} />
       <AttachmentViewer ticketId={ticketId} attachment={viewing} onClose={() => setViewing(null)} />
     </section>
   )
