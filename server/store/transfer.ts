@@ -31,6 +31,7 @@ export function exportBoard(id: string): BoardExport {
       dueDate: ticket.dueDate,
       agentEffort: ticket.agentEffort,
       agentModel: ticket.agentModel,
+      agentDocker: ticket.agentDocker,
       pullRequest: ticket.pullRequest && {
         url: ticket.pullRequest.url,
         state: ticket.pullRequest.state,

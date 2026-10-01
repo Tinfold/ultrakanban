@@ -70,6 +70,7 @@ export const createBoardSchema = z.object({
   agentConcurrency: agentConcurrency.optional(),
   agentBacklog: z.boolean().optional(),
   agentAllSkills: z.boolean().optional(),
+  agentDocker: z.boolean().optional(),
   autoMerge: z.boolean().optional(),
   archiveDoneDays: archiveDoneDays.optional(),
   approvalSize: ticketSize.nullable().optional(),
@@ -89,6 +90,7 @@ export const updateBoardSchema = z.object({
   agentConcurrency: agentConcurrency.optional(),
   agentBacklog: z.boolean().optional(),
   agentAllSkills: z.boolean().optional(),
+  agentDocker: z.boolean().optional(),
   autoMerge: z.boolean().optional(),
   archiveDoneDays: archiveDoneDays.optional(),
   approvalSize: ticketSize.nullable().optional(),
@@ -143,6 +145,7 @@ export const createTicketSchema = z.object({
   dueDate: isoDate.optional(),
   agentEffort: agentEffort.optional(),
   agentModel: agentModel.optional(),
+  agentDocker: z.boolean().nullable().optional(),
   pullRequest: pullRequestUrl.nullable().optional(),
   position: position.optional(),
   /** The ticket it is a sub-ticket of: its id or number (`12` or `#12`). */
@@ -162,6 +165,7 @@ export const updateTicketSchema = z.object({
   dueDate: isoDate.optional(),
   agentEffort: agentEffort.optional(),
   agentModel: agentModel.optional(),
+  agentDocker: z.boolean().nullable().optional(),
   pullRequest: pullRequestUrl.nullable().optional(),
   /** Makes it a sub-ticket of another ticket (its id or number), or with `null` a ticket of its own again. */
   parent: ref.nullable().optional(),
@@ -344,6 +348,7 @@ export const boardExportSchema = z.object({
       dueDate: isoDate.default(null),
       agentEffort: agentEffort.default(null),
       agentModel: agentModel.default(null),
+      agentDocker: z.boolean().nullable().default(null),
       pullRequest: z
         .object({
           url: pullRequestUrl,

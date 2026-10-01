@@ -24,7 +24,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useActor } from '@/hooks/use-actor'
-import { parseISODate, toISODate } from '@/lib/format'
+import { boardDockerLabel, dockerLabel, parseISODate, toISODate } from '@/lib/format'
 import { PRIORITIES_DESC, PRIORITY_LABELS } from '@/lib/priority'
 import { cn } from '@/lib/utils'
 import { useBoardContext } from '../board/board-context'
@@ -122,6 +122,30 @@ export function ModelPicker({ value, onChange, children }: PickerProps<string | 
               {model}
             </DropdownMenuRadioItem>
           ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+const BOARD_DOCKER = '__board'
+
+/** Whether the board's agent works a ticket in a Docker container; `null` follows the board's setting. */
+export function DockerPicker({ value, onChange, children }: PickerProps<boolean | null>) {
+  const { detail } = useBoardContext()
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-56">
+        <DropdownMenuRadioGroup
+          value={value === null ? BOARD_DOCKER : String(value)}
+          onValueChange={(next) => onChange(next === BOARD_DOCKER ? null : next === 'true')}
+        >
+          <DropdownMenuRadioItem value={BOARD_DOCKER}>
+            {boardDockerLabel(detail.board.agentDocker)}
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="true">{dockerLabel(true)}</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="false">{dockerLabel(false)}</DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>

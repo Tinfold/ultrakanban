@@ -235,6 +235,12 @@ const MIGRATIONS = [
   -- Smallest estimate at which the board's agent waits for approval of its plan; NULL never waits.
   ALTER TABLE boards ADD COLUMN approval_size TEXT;
   `,
+  `
+  -- Whether the board's agent runs Claude in a Docker container rather than directly on the machine, and a ticket's
+  -- own choice (NULL: the board's).
+  ALTER TABLE boards ADD COLUMN agent_docker INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE tickets ADD COLUMN agent_docker INTEGER;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

@@ -70,3 +70,9 @@ export function formatModel(model: string) {
   }
   return /^[a-z]+$/i.test(model) ? capitalized(model) : model
 }
+
+/** Where the board's agent runs a ticket: in a Docker container or directly on the machine. */
+export const dockerLabel = (docker: boolean) => (docker ? 'Docker' : 'On the machine')
+
+/** The board's own setting for where its agent runs tickets, for a ticket that follows it. */
+export const boardDockerLabel = (docker: boolean) => `Board default (${docker ? 'Docker' : 'on the machine'})`

@@ -213,8 +213,9 @@ describe('pull request workflow', () => {
         initial.agentConcurrency,
         initial.agentBacklog,
         initial.agentAllSkills,
+        initial.agentDocker,
       ],
-      [null, false, null, null, null, null, false, false],
+      [null, false, null, null, null, null, false, false, false],
     )
     assert.equal(agentWorkerName(initial), 'claude/opus/medium')
 
@@ -230,6 +231,7 @@ describe('pull request workflow', () => {
     }
     assert.equal((await call('PATCH', `/boards/${boardId}`, { agentBacklog: 'yes' })).status, 400)
     assert.equal((await call('PATCH', `/boards/${boardId}`, { agentAllSkills: 1 })).status, 400)
+    assert.equal((await call('PATCH', `/boards/${boardId}`, { agentDocker: null })).status, 400)
 
     const { body: on } = await call<BoardSummary>('PATCH', `/boards/${boardId}`, {
       githubRepo: 'acme/app',
@@ -240,10 +242,19 @@ describe('pull request workflow', () => {
       agentConcurrency: 3,
       agentBacklog: true,
       agentAllSkills: true,
+      agentDocker: true,
     })
     assert.deepEqual(
-      [on.githubRepo, on.agentEnabled, on.agentName, on.agentConcurrency, on.agentBacklog, on.agentAllSkills],
-      ['acme/app', true, 'claude-2', 3, true, true],
+      [
+        on.githubRepo,
+        on.agentEnabled,
+        on.agentName,
+        on.agentConcurrency,
+        on.agentBacklog,
+        on.agentAllSkills,
+        on.agentDocker,
+      ],
+      ['acme/app', true, 'claude-2', 3, true, true, true],
     )
     assert.equal(agentWorkerName(on), 'claude-2/claude-sonnet-5/xhigh')
     const { body: boards } = await call<BoardSummary[]>('GET', '/boards')
@@ -258,6 +269,7 @@ describe('pull request workflow', () => {
       agentConcurrency: null,
       agentBacklog: false,
       agentAllSkills: false,
+      agentDocker: false,
     })
     assert.deepEqual(
       [
@@ -269,8 +281,9 @@ describe('pull request workflow', () => {
         cleared.agentConcurrency,
         cleared.agentBacklog,
         cleared.agentAllSkills,
+        cleared.agentDocker,
       ],
-      [null, false, null, null, null, null, false, false],
+      [null, false, null, null, null, null, false, false, false],
     )
   })
 
@@ -379,6 +392,25 @@ describe('pull request workflow', () => {
       `/boards/${boardId}/export`,
     )
     assert.equal(exported.tickets.find((entry) => entry.title === 'Copy edit')?.agentModel, 'claude-haiku-4-5')
+  })
+
+  test('tickets can choose whether the agent works them in Docker', async () => {
+    const ticket = await addTicket({ title: 'Untrusted', agentDocker: true })
+    assert.equal(ticket.agentDocker, true)
+    assert.equal((await addTicket({ title: 'Plain' })).agentDocker, null, 'null follows the board')
+    assert.equal((await call('PATCH', `/tickets/${ticket.id}`, { agentDocker: 'yes' })).status, 400)
+
+    const { body: off } = await call<Ticket>('PATCH', `/tickets/${ticket.id}`, { agentDocker: false })
+    assert.equal(off.agentDocker, false, 'false overrides a board that runs in Docker')
+    const activity = (await call<Activity[]>('GET', `/tickets/${ticket.id}/activity`)).body
+    assert.ok(activity.some((entry) => entry.type === 'updated' && entry.data.fields.includes('agentDocker')))
+    const { body: exported } = await call<{ tickets: { title: string; agentDocker: boolean | null }[] }>(
+      'GET',
+      `/boards/${boardId}/export`,
+    )
+    assert.equal(exported.tickets.find((entry) => entry.title === 'Untrusted')?.agentDocker, false)
+    const { body: cleared } = await call<Ticket>('PATCH', `/tickets/${ticket.id}`, { agentDocker: null })
+    assert.equal(cleared.agentDocker, null)
   })
 
   test('review needs a configured review column', async () => {
