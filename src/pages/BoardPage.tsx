@@ -13,9 +13,16 @@ export function BoardPage({ boardId }: { boardId: string }) {
   const { data, error, isPending } = useBoard(boardId)
   const [, setLastBoard] = useStoredState<string | null>(storageKeys.lastBoard, null)
 
+  // Saved when the board loads and when its tab gets focus, not on every refetch: `data` changes with each live
+  // update, so tabs open on other boards would keep overwriting the board the home page opens.
+  const loaded = !!data
   useEffect(() => {
-    if (data) setLastBoard(boardId)
-  }, [data, boardId, setLastBoard])
+    if (!loaded) return
+    const save = () => setLastBoard(boardId)
+    save()
+    window.addEventListener('focus', save)
+    return () => window.removeEventListener('focus', save)
+  }, [loaded, boardId, setLastBoard])
 
   useEffect(() => {
     if (data) document.title = `${data.board.name} · ultrakanban`
