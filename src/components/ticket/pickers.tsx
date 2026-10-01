@@ -24,7 +24,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useActor } from '@/hooks/use-actor'
-import { dockerLabel, parseISODate, toISODate } from '@/lib/format'
+import { boardDockerLabel, dockerLabel, parseISODate, toISODate } from '@/lib/format'
 import { PRIORITIES_DESC, PRIORITY_LABELS } from '@/lib/priority'
 import { cn } from '@/lib/utils'
 import { useBoardContext } from '../board/board-context'
@@ -142,7 +142,7 @@ export function DockerPicker({ value, onChange, children }: PickerProps<boolean 
           onValueChange={(next) => onChange(next === BOARD_DOCKER ? null : next === 'true')}
         >
           <DropdownMenuRadioItem value={BOARD_DOCKER}>
-            Board default ({dockerLabel(detail.board.agentDocker).toLowerCase()})
+            {boardDockerLabel(detail.board.agentDocker)}
           </DropdownMenuRadioItem>
           <DropdownMenuRadioItem value="true">{dockerLabel(true)}</DropdownMenuRadioItem>
           <DropdownMenuRadioItem value="false">{dockerLabel(false)}</DropdownMenuRadioItem>

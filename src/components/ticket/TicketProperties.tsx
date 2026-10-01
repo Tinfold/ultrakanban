@@ -5,7 +5,7 @@ import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { ColorDot, TagChip } from '@/components/common/TagChip'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
-import { dockerLabel, dueState, formatCost, formatDueDate, formatTokens } from '@/lib/format'
+import { boardDockerLabel, dockerLabel, dueState, formatCost, formatDueDate, formatTokens } from '@/lib/format'
 import { PRIORITY_LABELS } from '@/lib/priority'
 import { cn } from '@/lib/utils'
 import { useBoardContext } from '../board/board-context'
@@ -141,7 +141,7 @@ export function TicketProperties({ ticket }: { ticket: Ticket }) {
             >
               <ContainerIcon />
               {ticket.agentDocker === null
-                ? `Board default (${dockerLabel(detail.board.agentDocker).toLowerCase()})`
+                ? boardDockerLabel(detail.board.agentDocker)
                 : dockerLabel(ticket.agentDocker)}
             </Button>
           </DockerPicker>
