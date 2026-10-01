@@ -177,6 +177,13 @@ are never touched. Before every run the loop fetches and checks out the default 
 from it) or, for feedback on a pull request, its branch, with no local changes, and goes back to the default branch
 afterwards. Logs: `journalctl --user -u ultrakanban-agent -u 'ultrakanban-agent@*' -f`.
 
+Nothing should pause or slow the agents down halfway through a run. While a run goes on, the loop holds a
+systemd-logind inhibitor lock, so the machine doesn't suspend or go idle (`INHIBIT_SLEEP=0` turns this off; see
+`systemd-inhibit --list`). The agent units keep normal CPU and IO priority (`Nice=0`, `CPUWeight=100`,
+`IOWeight=100`), and when the kernel kills a run for lack of memory, the loop carries on and retries it
+(`OOMPolicy=continue`) instead of systemd stopping the whole loop. The units change only when you run
+`scripts/install-services.sh` again.
+
 **Parallel runs.** By default a board's agent runs one `claude -p` at a time. The board's **Parallel runs** setting
 (`agentConcurrency`, up to 8) lets it work that many tickets at once: the unit then runs that many loops, the first in
 the clone and each other one in its own git worktree of it (`boards/<board>/worktrees/<n>`), so their branches and

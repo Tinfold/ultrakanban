@@ -18,3 +18,10 @@ RestartSec=30
 RestartSteps=6
 RestartMaxDelaySec=15min
 TimeoutStopSec=30
+# Nothing may slow the agents down or stop them halfway: normal CPU and IO priority even where user services get less,
+# and when the kernel kills a run for memory, the loop goes on (and retries it) rather than systemd stopping it all.
+Nice=0
+CPUWeight=100
+IOWeight=100
+OOMPolicy=continue
+OOMScoreAdjust=100

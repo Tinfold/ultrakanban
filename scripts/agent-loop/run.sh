@@ -89,6 +89,18 @@ watch_run() {
   done
 }
 
+# Keeps the machine from suspending or going idle while the run (process pid) for the given ticket goes on, so it
+# isn't paused halfway: a systemd-logind inhibitor lock, released by itself when the run ends. Not taken with
+# INHIBIT_SLEEP=0 or without systemd-inhibit; a lock that can't be taken doesn't hold up the run.
+inhibit_sleep() {
+  [[ $INHIBIT_SLEEP == 1 ]] && command -v systemd-inhibit >/dev/null || return 0
+  (
+    if [[ -n $lock_fd ]]; then exec {lock_fd}>&-; fi
+    exec systemd-inhibit --what=sleep:idle --mode=block --who="ultrakanban agent $AGENT" \
+      --why="working on ticket $1" tail --pid="$2" -f /dev/null
+  ) </dev/null >/dev/null 2>&1 &
+}
+
 # The skills the next run gets, as arguments for claude (skill_args): only the ultrakanban skill, in the system prompt,
 # unless the board's agentAllSkills is on or the repository has skills or commands of its own.
 use_skills() {
@@ -122,6 +134,7 @@ run_claude() {
       ${skill_args[@]+"${skill_args[@]}"} --model "$model" --effort "$effort" --output-format json "$@"
   ) <<<"$prompt" >"$output" 2>"$errors" &
   running=$!
+  inhibit_sleep "$id" "$running"
   watch_run "$id" "$running" "$stopped" &
   watcher=$!
   wait "$running"
