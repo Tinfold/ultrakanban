@@ -24,6 +24,7 @@ export type BoardPatch = Partial<
     | 'agentConcurrency'
     | 'agentBacklog'
     | 'agentAllSkills'
+    | 'agentDocker'
     | 'autoMerge'
     | 'archiveDoneDays'
     | 'approvalSize'
@@ -31,7 +32,18 @@ export type BoardPatch = Partial<
   >
 >
 export type TicketPatch = Partial<
-  Pick<Ticket, 'title' | 'description' | 'priority' | 'assignee' | 'dueDate' | 'agentEffort' | 'agentModel' | 'tagIds'>
+  Pick<
+    Ticket,
+    | 'title'
+    | 'description'
+    | 'priority'
+    | 'assignee'
+    | 'dueDate'
+    | 'agentEffort'
+    | 'agentModel'
+    | 'agentDocker'
+    | 'tagIds'
+  >
 >
 export type ColumnPatch = Partial<Pick<Column, 'name' | 'color' | 'wipLimit'>>
 export type TagPatch = Partial<Pick<Tag, 'name' | 'color'>>

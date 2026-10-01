@@ -105,6 +105,58 @@ uses is already loaded, here.
 $(<"$skill")")
 }
 
+# The image runs use in Docker when DOCKER_IMAGE isn't set: the tools the loop gives a run on the machine (claude,
+# git, gh, jq, curl) and Node.js. Built the first time a run needs it.
+read -r -d '' DOCKERFILE <<'DOCKERFILE'
+FROM node:22-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends gh jq ripgrep && rm -rf /var/lib/apt/lists/* \
+  && npm install -g @anthropic-ai/claude-code && npm cache clean --force
+DOCKERFILE
+
+# Whether the ticket's runs go in a Docker container, as the command claude is started with (docker_args): the ticket's
+# agentDocker, or the board's when the ticket doesn't set it. Empty runs claude directly on the machine. Returns 1, with
+# why in docker_error, if the container can't be set up.
+#
+# The container sees the checkout (and, for a worktree, the clone's .git) at the same path, and the agent's Claude,
+# GitHub and git settings, so claude logs in, resumes sessions, pushes and opens pull requests as it does on the
+# machine; nothing else of the home directory. It runs as the agent's user, on the host's network to reach the board,
+# and is removed when the run ends.
+use_docker() {
+  local id=$1 setting git_dir home=$HOME path extra
+  docker_args=() docker_error=
+  setting=$(get "/tickets/$id" | jq -r 'if .agentDocker == null then empty else .agentDocker end')
+  [[ -n $setting ]] || setting=$(get "/boards/$BOARD" | jq -r '.board.agentDocker // false')
+  [[ $setting == true ]] || return 0
+  if ! "$DOCKER" image inspect "$DOCKER_IMAGE" >/dev/null 2>&1; then
+    if [[ $DOCKER_IMAGE != ultrakanban-agent ]]; then
+      docker_error="the Docker image $DOCKER_IMAGE (DOCKER_IMAGE) doesn't exist"
+    else
+      log "building the Docker image $DOCKER_IMAGE"
+      "$DOCKER" build --quiet --tag "$DOCKER_IMAGE" - <<<"$DOCKERFILE" >/dev/null ||
+        docker_error="can't build the Docker image $DOCKER_IMAGE with $DOCKER"
+    fi
+    [[ -z $docker_error ]] || { log "$docker_error"; return 1; }
+  fi
+  docker_args=("$DOCKER" run --rm --interactive --init --name "$(container "$id")" --network host
+    --user "$(id -u):$(id -g)" --workdir "$PWD" --env HOME="$home" --env KANBAN --env BOARD
+    --env CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS --env BASH_MAX_OUTPUT_LENGTH
+    --mount "type=tmpfs,destination=$home,tmpfs-mode=1777" --mount "type=bind,source=$PWD,destination=$PWD")
+  git_dir=$(readlink -f "$(git rev-parse --git-common-dir 2>/dev/null)")
+  if [[ -n $git_dir && $git_dir != "$PWD"/* ]]; then
+    docker_args+=(--mount "type=bind,source=$git_dir,destination=$git_dir")
+  fi
+  for path in .claude .claude.json .config/gh .gitconfig .config/git; do
+    [[ -e $home/$path ]] && docker_args+=(--mount "type=bind,source=$home/$path,destination=$home/$path")
+  done
+  [[ -n ${GH_TOKEN:-} ]] && docker_args+=(--env GH_TOKEN)
+  [[ -n ${ANTHROPIC_API_KEY:-} ]] && docker_args+=(--env ANTHROPIC_API_KEY)
+  read -r -a extra <<<"${DOCKER_ARGS:-}"
+  docker_args+=(${extra[@]+"${extra[@]}"} "$DOCKER_IMAGE")
+}
+
+# The name of the container a run on the given ticket goes in.
+container() { printf 'ultrakanban-%s-%s-%s' "$BOARD" "$1" "$$"; }
+
 # Runs claude on a ticket with the given prompt and further arguments (the session to start or resume), telling the
 # board it is going on and what it does (run_step, see heartbeat) until it ends. Prints its
 # final message (and keeps it in claude_result, and what it printed to stderr in claude_errors) and reports the tokens
@@ -115,10 +167,15 @@ run_claude() {
   shift 2
   output=$(mktemp) && errors=$(mktemp) && stopped=$(mktemp) || return 1
   use_skills
+  if ! use_docker "$id"; then
+    claude_stopped= claude_errors= claude_result="Can't run it in Docker: $docker_error."
+    rm -f "$output" "$errors" "$stopped"
+    return 1
+  fi
   (
     # Without the ticket lock's descriptor: anything claude leaves running mustn't keep the ticket locked.
     if [[ -n $lock_fd ]]; then exec {lock_fd}>&-; fi
-    exec timeout --foreground "$TICKET_TIMEOUT" claude -p ${claude_args[@]+"${claude_args[@]}"} \
+    exec timeout --foreground "$TICKET_TIMEOUT" ${docker_args[@]+"${docker_args[@]}"} claude -p ${claude_args[@]+"${claude_args[@]}"} \
       ${skill_args[@]+"${skill_args[@]}"} --model "$model" --effort "$effort" --output-format json "$@"
   ) <<<"$prompt" >"$output" 2>"$errors" &
   running=$!
@@ -129,6 +186,8 @@ run_claude() {
   kill "$watcher" 2>/dev/null
   wait "$watcher" 2>/dev/null
   end_run "$id"
+  # A container whose docker client was killed would go on running.
+  if ((${#docker_args[@]})); then "$DOCKER" rm --force "$(container "$id")" >/dev/null 2>&1; fi
   running= watcher=
   claude_stopped=$(<"$stopped")
   claude_errors=$(<"$errors")

@@ -54,6 +54,10 @@
 # repository has skills or commands of its own (under .claude/): the account's and plugins' skills are listed in every
 # request a run makes, and it has no use for them.
 #
+# A board with agentDocker on (or a ticket with its own agentDocker on) runs claude in a Docker container rather than
+# directly on the machine (see use_docker in agent-loop/run.sh): a run then only sees its checkout and the agent's
+# Claude, GitHub and git settings, not the rest of the machine. Everything else, the checkout included, is the same.
+#
 # Each run's token usage (from claude's JSON output) is reported to the board with POST /tickets/:id/usage, so the
 # overview can show how many tokens each agent uses. A run stopped by the timeout reports nothing.
 #
@@ -116,6 +120,13 @@
 #                       the most tokens of a file one Read returns to a run, and the most characters of a command's
 #                       output it sees: whatever a run reads is sent again with each of its later requests, so a big
 #                       read costs many times its size (default: 10000 and 15000; Claude Code's own are 25000 and 30000)
+#   DOCKER              command that runs the containers of a board or ticket with agentDocker on (default: docker;
+#                       podman works too, with DOCKER_ARGS=--userns=keep-id when rootless, and
+#                       --security-opt label=disable under SELinux)
+#   DOCKER_IMAGE        image those runs use: it needs claude, git and gh, and whatever the repository's builds and
+#                       tests need. The default, ultrakanban-agent, is built from run.sh's DOCKERFILE (Node.js, claude,
+#                       git, gh, jq, curl) the first time a run needs it (default: ultrakanban-agent)
+#   DOCKER_ARGS         extra arguments for docker run, separated by spaces, e.g. --memory 8g --cpus 4
 #   CLAUDE_ARGS         extra arguments for claude; set the model and effort with MODEL and EFFORT, not here
 #   STATE_DIR           where watermarks are kept (default: $XDG_STATE_HOME/ultrakanban-agent-loop/BOARD-AGENT)
 #   AGENT_LOOP_CLEAN    1 when running in a dedicated clone: before each run the loop fetches, discards local
@@ -178,6 +189,8 @@ read -r -a disallowed <<<"$DISALLOWED_TOOLS"
 if ((${#disallowed[@]})); then
   claude_args+=(--disallowedTools "$(IFS=,; echo "${disallowed[*]}")")
 fi
+DOCKER=${DOCKER:-docker}
+DOCKER_IMAGE=${DOCKER_IMAGE:-ultrakanban-agent}
 export CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS=${CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS:-10000}
 export BASH_MAX_OUTPUT_LENGTH=${BASH_MAX_OUTPUT_LENGTH:-15000}
 mkdir -p "$STATE_DIR" || exit 1

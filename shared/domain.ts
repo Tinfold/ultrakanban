@@ -276,6 +276,11 @@ export interface BoardSummary {
    */
   agentAllSkills: boolean
   /**
+   * Whether the agent runs Claude in a Docker container (see scripts/agent-loop/Dockerfile) instead of directly on the
+   * machine. A ticket can override it with its own `agentDocker`.
+   */
+  agentDocker: boolean
+  /**
    * Whether the server merges the review column's pull requests by itself once they are ready: open, not a draft,
    * no conflicts, every check passed and every checklist item of the ticket checked.
    */
@@ -333,6 +338,8 @@ export interface Ticket {
   agentEffort: AgentEffort | null
   /** Claude model the board's agent works this ticket with; the board's `agentModel` when not set. */
   agentModel: string | null
+  /** Whether the board's agent works this ticket in a Docker container; the board's `agentDocker` when not set. */
+  agentDocker: boolean | null
   tagIds: string[]
   pullRequest: PullRequest | null
   position: number

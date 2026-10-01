@@ -1,11 +1,11 @@
-import { CalendarIcon, CpuIcon, GaugeIcon, TagIcon, UserRoundIcon } from 'lucide-react'
+import { CalendarIcon, ContainerIcon, CpuIcon, GaugeIcon, TagIcon, UserRoundIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { AGENT_DEFAULTS, type Ticket } from '@shared/domain'
 import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { ColorDot, TagChip } from '@/components/common/TagChip'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
-import { dueState, formatCost, formatDueDate, formatTokens } from '@/lib/format'
+import { dockerLabel, dueState, formatCost, formatDueDate, formatTokens } from '@/lib/format'
 import { PRIORITY_LABELS } from '@/lib/priority'
 import { cn } from '@/lib/utils'
 import { useBoardContext } from '../board/board-context'
@@ -13,6 +13,7 @@ import {
   AssigneePicker,
   ColumnPicker,
   DueDatePicker,
+  DockerPicker,
   EffortPicker,
   ModelPicker,
   PriorityPicker,
@@ -124,6 +125,26 @@ export function TicketProperties({ ticket }: { ticket: Ticket }) {
               {ticket.agentModel ?? `Board default (${detail.board.agentModel ?? AGENT_DEFAULTS.model})`}
             </Button>
           </ModelPicker>
+        </Property>
+      )}
+
+      {(detail.board.agentEnabled || ticket.agentDocker !== null) && (
+        <Property label="Agent runs in">
+          <DockerPicker
+            value={ticket.agentDocker}
+            onChange={(agentDocker) => actions.updateTicket(ticket.id, { agentDocker })}
+          >
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(triggerClass, ticket.agentDocker === null && 'text-muted-foreground')}
+            >
+              <ContainerIcon />
+              {ticket.agentDocker === null
+                ? `Board default (${dockerLabel(detail.board.agentDocker).toLowerCase()})`
+                : dockerLabel(ticket.agentDocker)}
+            </Button>
+          </DockerPicker>
         </Property>
       )}
 

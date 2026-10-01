@@ -20,6 +20,7 @@ interface BoardRow {
   agent_concurrency: number | null
   agent_backlog: number
   agent_all_skills: number
+  agent_docker: number
   auto_merge: number
   archive_done_days: number | null
   approval_size: TicketSize | null
@@ -47,6 +48,7 @@ const toBoard = (row: BoardRow): BoardSummary => ({
   agentConcurrency: row.agent_concurrency,
   agentBacklog: row.agent_backlog === 1,
   agentAllSkills: row.agent_all_skills === 1,
+  agentDocker: row.agent_docker === 1,
   autoMerge: row.auto_merge === 1,
   archiveDoneDays: row.archive_done_days,
   approvalSize: row.approval_size,
@@ -102,6 +104,7 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     agentConcurrency,
     agentBacklog,
     agentAllSkills,
+    agentDocker,
     autoMerge,
     archiveDoneDays,
     approvalSize,
@@ -118,6 +121,7 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     agentConcurrency,
     agentBacklog,
     agentAllSkills,
+    agentDocker,
     autoMerge,
     archiveDoneDays,
     approvalSize,
@@ -141,6 +145,7 @@ export function updateBoard(id: string, input: UpdateBoardInput): BoardSummary {
     agent_concurrency: input.agentConcurrency,
     agent_backlog: input.agentBacklog === undefined ? undefined : Number(input.agentBacklog),
     agent_all_skills: input.agentAllSkills === undefined ? undefined : Number(input.agentAllSkills),
+    agent_docker: input.agentDocker === undefined ? undefined : Number(input.agentDocker),
     auto_merge: input.autoMerge === undefined ? undefined : Number(input.autoMerge),
     archive_done_days: input.archiveDoneDays,
     approval_size: input.approvalSize,

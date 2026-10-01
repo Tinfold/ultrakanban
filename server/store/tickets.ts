@@ -53,6 +53,7 @@ interface TicketRow {
   due_date: string | null
   agent_effort: AgentEffort | null
   agent_model: string | null
+  agent_docker: number | null
   pr_url: string | null
   pr_state: string
   pr_title: string | null
@@ -158,6 +159,7 @@ const toTicket = (row: TicketRow): Ticket => ({
   dueDate: row.due_date,
   agentEffort: row.agent_effort,
   agentModel: row.agent_model,
+  agentDocker: row.agent_docker === null ? null : row.agent_docker === 1,
   tagIds: row.tag_ids ? row.tag_ids.split(',') : [],
   pullRequest: row.pr_url ? toPullRequest(row.pr_url, row) : null,
   position: row.position,
@@ -181,7 +183,15 @@ const DAY_MS = 24 * 60 * 60 * 1000
 
 const priorityRank = (priority: Priority) => PRIORITIES.indexOf(priority)
 
-const EDITABLE_FIELDS = ['title', 'description', 'priority', 'dueDate', 'agentEffort', 'agentModel'] as const
+const EDITABLE_FIELDS = [
+  'title',
+  'description',
+  'priority',
+  'dueDate',
+  'agentEffort',
+  'agentModel',
+  'agentDocker',
+] as const
 
 /** Actor recorded for changes caused by GitHub pull request updates. */
 export const GITHUB_ACTOR = 'github'
@@ -380,8 +390,8 @@ export function createTicket(boardId: string, input: CreateTicketInput, actor: s
   const timestamp = now()
   sql.run(
     `INSERT INTO tickets (id, board_id, column_id, number, title, description, priority, assignee, due_date,
-       agent_effort, agent_model, parent_id, position, moved_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       agent_effort, agent_model, agent_docker, parent_id, position, moved_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     boardId,
     column.id,
@@ -393,6 +403,7 @@ export function createTicket(boardId: string, input: CreateTicketInput, actor: s
     input.dueDate ?? null,
     input.agentEffort ?? null,
     input.agentModel ?? null,
+    input.agentDocker == null ? null : Number(input.agentDocker),
     parentId,
     count,
     timestamp,
@@ -422,6 +433,7 @@ export function updateTicket(id: string, input: UpdateTicketInput, actor: string
     due_date: has('dueDate') ? input.dueDate : undefined,
     agent_effort: has('agentEffort') ? input.agentEffort : undefined,
     agent_model: has('agentModel') ? input.agentModel : undefined,
+    agent_docker: has('agentDocker') ? (input.agentDocker == null ? null : Number(input.agentDocker)) : undefined,
   })
 
   if (input.tags) {

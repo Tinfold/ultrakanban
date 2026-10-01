@@ -132,6 +132,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
       agentEnabled: data.get('agentEnabled') === 'on',
       agentBacklog: data.get('agentBacklog') === 'on',
       agentAllSkills: data.get('agentAllSkills') === 'on',
+      agentDocker: data.get('agentDocker') === 'on',
       autoMerge: data.get('autoMerge') === 'on',
       archiveDoneDays: archiveDays >= 1 ? Math.round(archiveDays) : null,
       approvalSize: approvalSize === NONE ? null : (approvalSize as TicketSize),
@@ -361,6 +362,21 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
           <p className="pl-6 text-xs text-muted-foreground">
             Off, runs only get the ultrakanban skill, unless the repository has skills of its own. Every skill is listed
             in each request a run makes, which costs tokens.
+          </p>
+        </div>
+        <div className="grid gap-1">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              name="agentDocker"
+              defaultChecked={detail.board.agentDocker}
+              className="size-4 accent-primary"
+            />
+            Run the agent in Docker containers
+          </label>
+          <p className="pl-6 text-xs text-muted-foreground">
+            Each run works in a throwaway container with only its checkout and the agent's Claude, GitHub and git
+            settings, instead of directly on the machine. A ticket can choose otherwise. Needs Docker on the machine.
           </p>
         </div>
         <div className="grid gap-2">
