@@ -120,7 +120,9 @@ DOCKERFILE
 # The container sees the checkout (and, for a worktree, the clone's .git) at the same path, and the agent's Claude,
 # GitHub and git settings, so claude logs in, resumes sessions, pushes and opens pull requests as it does on the
 # machine; nothing else of the home directory. It runs as the agent's user, on the host's network to reach the board,
-# and is removed when the run ends.
+# and is removed when the run ends. GitHub's token goes in GH_TOKEN, as gh can't reach the machine's keyring from there.
+# With podman, the container keeps the agent's user id (rootless podman maps it to root otherwise) and runs without
+# SELinux labels, which would deny it the mounted files.
 use_docker() {
   local id=$1 setting git_dir home=$HOME path extra
   docker_args=() docker_error=
@@ -148,7 +150,12 @@ use_docker() {
   for path in .claude .claude.json .config/gh .gitconfig .config/git; do
     [[ -e $home/$path ]] && docker_args+=(--mount "type=bind,source=$home/$path,destination=$home/$path")
   done
-  [[ -n ${GH_TOKEN:-} ]] && docker_args+=(--env GH_TOKEN)
+  if "$DOCKER" --version 2>/dev/null | grep -qi podman; then
+    docker_args+=(--security-opt label=disable)
+    [[ $("$DOCKER" info --format '{{.Host.Security.Rootless}}' 2>/dev/null) == true ]] && docker_args+=(--userns keep-id)
+  fi
+  [[ -n ${GH_TOKEN:-} ]] || GH_TOKEN=$(gh auth token 2>/dev/null) || GH_TOKEN=
+  [[ -n $GH_TOKEN ]] && export GH_TOKEN && docker_args+=(--env GH_TOKEN)
   [[ -n ${ANTHROPIC_API_KEY:-} ]] && docker_args+=(--env ANTHROPIC_API_KEY)
   read -r -a extra <<<"${DOCKER_ARGS:-}"
   docker_args+=(${extra[@]+"${extra[@]}"} "$DOCKER_IMAGE")

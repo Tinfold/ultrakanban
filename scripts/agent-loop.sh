@@ -120,9 +120,8 @@
 #                       the most tokens of a file one Read returns to a run, and the most characters of a command's
 #                       output it sees: whatever a run reads is sent again with each of its later requests, so a big
 #                       read costs many times its size (default: 10000 and 15000; Claude Code's own are 25000 and 30000)
-#   DOCKER              command that runs the containers of a board or ticket with agentDocker on (default: docker;
-#                       podman works too, with DOCKER_ARGS=--userns=keep-id when rootless, and
-#                       --security-opt label=disable under SELinux)
+#   DOCKER              command that runs the containers of a board or ticket with agentDocker on (default: docker,
+#                       or podman when docker isn't installed; podman works as it is, rootless or not)
 #   DOCKER_IMAGE        image those runs use: it needs claude, git and gh, and whatever the repository's builds and
 #                       tests need. The default, ultrakanban-agent, is built from run.sh's DOCKERFILE (Node.js, claude,
 #                       git, gh, jq, curl) the first time a run needs it (default: ultrakanban-agent)
@@ -189,7 +188,10 @@ read -r -a disallowed <<<"$DISALLOWED_TOOLS"
 if ((${#disallowed[@]})); then
   claude_args+=(--disallowedTools "$(IFS=,; echo "${disallowed[*]}")")
 fi
-DOCKER=${DOCKER:-docker}
+if [[ -z ${DOCKER:-} ]]; then
+  DOCKER=docker
+  command -v docker >/dev/null || ! command -v podman >/dev/null || DOCKER=podman
+fi
 DOCKER_IMAGE=${DOCKER_IMAGE:-ultrakanban-agent}
 export CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS=${CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS:-10000}
 export BASH_MAX_OUTPUT_LENGTH=${BASH_MAX_OUTPUT_LENGTH:-15000}

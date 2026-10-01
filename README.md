@@ -295,11 +295,11 @@ run costs about its number of requests times its context. Besides loading no MCP
 loop starts each run's `claude -p` in a throwaway container instead of directly on the machine. The container gets the
 run's checkout (at the same path), the agent's `~/.claude`, `~/.claude.json`, gh and git settings and the host's
 network (to reach the board), and nothing else of the machine. A ticket can choose otherwise in its **Agent runs in**
-property, either way. It needs Docker on the host; the default image, `ultrakanban-agent` (Node.js, Claude Code, git,
-gh, jq), is built the first time a run needs it. A repository that needs more to build and test (another language,
-a database) needs an image of its own with Claude Code, git and gh in it: set `DOCKER_IMAGE` for the loop, and
-`DOCKER_ARGS` for limits such as `--memory 8g --cpus 4`. `DOCKER=podman` works too (with
-`DOCKER_ARGS="--userns=keep-id"` when rootless, plus `--security-opt label=disable` under SELinux).
+property, either way. It needs Docker or Podman on the host (Podman, rootless or not, when Docker isn't installed, or
+with `DOCKER=podman`); the default image, `ultrakanban-agent` (Node.js, Claude Code, git, gh, jq), is built the first
+time a run needs it. A repository that needs more to build and test (another language, a database) needs an image of its
+own with Claude Code, git and gh in it: set `DOCKER_IMAGE` for the loop, and `DOCKER_ARGS` for limits such as `--memory
+8g --cpus 4`. A gh login kept in the machine's keyring reaches the container as `GH_TOKEN`.
 
 To run the loop by hand instead, start it in a dedicated clone of the repository:
 
