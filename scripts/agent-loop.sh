@@ -97,6 +97,8 @@
 #   TICKET_TIMEOUT      stop a run that takes longer than this, as accepted by timeout(1) (default: 4h)
 #   TICKET_CHECK_SECONDS  how often a run's ticket is checked for having been taken away from the agent, and a
 #                       heartbeat sent for it; keep it well under 10 minutes (default: 30)
+#   INHIBIT_SLEEP       1 keeps the machine from suspending or going idle while a run is going (a systemd-logind
+#                       inhibitor lock, where systemd-inhibit is available), 0 doesn't (default: 1)
 #   RETRY_SECONDS       wait before retrying a failed run, doubled after each failure (default: 600)
 #   MAX_ATTEMPTS        failed runs in a row before waiting for new feedback (default: 3)
 #   MAX_CI_RUNS         runs in a row started only by failing CI, with no human feedback between (default: 2)
@@ -153,6 +155,7 @@ CANCELLED_COLUMN=${CANCELLED_COLUMN:-Cancelled}
 IDLE_SECONDS=${IDLE_SECONDS:-300}
 TICKET_TIMEOUT=${TICKET_TIMEOUT:-4h}
 TICKET_CHECK_SECONDS=${TICKET_CHECK_SECONDS:-30}
+INHIBIT_SLEEP=${INHIBIT_SLEEP:-1}
 RETRY_SECONDS=${RETRY_SECONDS:-600}
 MAX_ATTEMPTS=${MAX_ATTEMPTS:-3}
 MAX_CI_RUNS=${MAX_CI_RUNS:-2}
