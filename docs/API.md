@@ -606,6 +606,31 @@ Stale or duplicate agent names can be cleared from the list: `POST /overview/hid
 actor), and `DELETE /overview/hidden-agents` (204) lists every cleared agent again. Totals, charts and sessions still
 include their work.
 
+## Updating ultrakanban
+
+The app can't update itself from its container; the agent supervisor (`scripts/agent-supervisor.sh`, on the host) does
+it when asked. `GET /system/update` returns the state:
+
+```ts
+{
+  state: 'idle' | 'requested' | 'running' | 'done' | 'failed'
+  requestedAt: string | null, requestedBy: string | null
+  finishedAt: string | null // when it last finished, done or failed
+  message: string | null // the new version, or why it failed
+  updaterSeenAt: string | null // when the supervisor last checked in; null if it never has
+  version: string | null // the checkout's commit, as "<short sha> <subject>"
+  behind: number | null // commits its default branch is behind origin, as of the supervisor's last fetch
+}
+```
+
+`POST /system/update` (202) asks for an update: the supervisor pulls its checkout's default branch, rebuilds and
+restarts the board, and reports how it went. `409 update_in_progress` while one is requested or running.
+`DELETE /system/update` withdraws a request the supervisor hasn't taken yet (`409 update_running` once it has).
+
+The supervisor reports with `POST /system/update/status` and `{ state?, message?, version?, behind? }`: without
+`state` it only checks in; `running` takes the request (`409 update_not_requested` if there is none), `done` and
+`failed` finish it.
+
 ## Live updates
 
 `GET /events?board=:boardId` is a server-sent event stream. It emits `change` events with data `{ "boardId": "..." }`

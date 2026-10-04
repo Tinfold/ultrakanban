@@ -1,6 +1,7 @@
 import type {
   Activity,
   AgentSuggestion,
+  AppUpdate,
   ApiErrorBody,
   Attachment,
   BoardDetail,
@@ -135,6 +136,9 @@ export const api = {
   overview: (days: OverviewRange) => request<Overview>('GET', `/overview${query({ days: String(days) })}`),
   hideAgents: (names: string[]) => request<void>('POST', '/overview/hidden-agents', { names }),
   showHiddenAgents: () => request<void>('DELETE', '/overview/hidden-agents'),
+  appUpdate: () => request<AppUpdate>('GET', '/system/update'),
+  requestAppUpdate: () => request<AppUpdate>('POST', '/system/update'),
+  cancelAppUpdate: () => request<AppUpdate>('DELETE', '/system/update'),
 }
 
 export const errorMessage = (error: unknown) => (error instanceof Error ? error.message : 'Something went wrong')

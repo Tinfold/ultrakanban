@@ -14,6 +14,7 @@ import { columnRoutes } from './routes/columns.ts'
 import { eventRoutes } from './routes/events.ts'
 import { overviewRoutes } from './routes/overview.ts'
 import { epicRoutes } from './routes/epics.ts'
+import { systemRoutes } from './routes/system.ts'
 import { tagRoutes } from './routes/tags.ts'
 import { ticketRoutes } from './routes/tickets.ts'
 
@@ -44,6 +45,7 @@ export function createApp(services: AppServices) {
     .route('/attachments', attachmentRoutes(attachmentFiles))
     .route('/events', eventRoutes)
     .route('/overview', overviewRoutes)
+    .route('/system', systemRoutes)
     .all('*', (c) => c.json(errorBody('not_found', `No route for ${c.req.method} ${c.req.path}`), 404))
 
   return new Hono().route('/api', api).onError((error, c) => {

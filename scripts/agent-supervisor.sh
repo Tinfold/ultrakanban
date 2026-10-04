@@ -12,12 +12,19 @@
 # this script copies the branch's versions over the installed ones: each agent loop starts again with them before its
 # next run (see agent-board.sh), and this script restarts itself. Other branches checked out there change nothing.
 #
-# Settings: KANBAN (default http://localhost:4317), POLL_SECONDS (default 30) and ULTRAKANBAN_AGENT_HOME.
+# And it updates ultrakanban itself when someone asks for it in the app (the update button in the header): it pulls
+# that checkout's default branch, rebuilds and restarts the board (ultrakanban.service's compose project), and reports
+# how it went. Every poll it checks in with the checkout's version and how many commits it is behind origin (fetched
+# every UPDATE_FETCH_SECONDS), which the app shows next to the button.
+#
+# Settings: KANBAN (default http://localhost:4317), POLL_SECONDS (default 30), UPDATE_FETCH_SECONDS (default 900) and
+# ULTRAKANBAN_AGENT_HOME.
 
 set -uo pipefail
 
 KANBAN=${KANBAN:-http://localhost:4317}
 POLL_SECONDS=${POLL_SECONDS:-30}
+UPDATE_FETCH_SECONDS=${UPDATE_FETCH_SECONDS:-900}
 AGENT_HOME=${ULTRAKANBAN_AGENT_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/ultrakanban-agent}
 self=$(readlink -f "$0")
 # The installed files and where they come from in the checkout.
@@ -61,6 +68,99 @@ update_scripts() {
     echo "restarting with the new agent-supervisor.sh"
     exec "$self"
   fi
+}
+
+# Posts to the board's update status (see reportAppUpdateSchema): `report <json>`. Prints the status it answers with.
+report() {
+  curl -sf -X POST "$KANBAN/api/system/update/status" -H 'Content-Type: application/json' \
+    -H 'X-Actor: agent-supervisor' -d "$1"
+}
+
+# The checkout's version and how far its default branch is behind origin, as report fields.
+checkout_state() {
+  local checkout=$1 branch=$2 behind
+  behind=$(git -C "$checkout" rev-list --count "$branch..origin/$branch" 2>/dev/null) || behind=null
+  jq -nc --arg version "$(git -C "$checkout" log -1 --format='%h %s' 2>/dev/null)" --argjson behind "$behind" \
+    '{version: (if $version == "" then null else $version end), behind: $behind}'
+}
+
+last_fetch=
+interrupted=1
+# Checks in with the board, and updates it when someone has asked for that.
+check_in() {
+  local checkout branch fields status
+  { read -r checkout; } 2>/dev/null <"$AGENT_HOME/installed-from" || return 0
+  branch=$(git -C "$checkout" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null) || branch=origin/main
+  branch=${branch#origin/}
+  if [[ -z $last_fetch ]] || ((SECONDS - last_fetch >= UPDATE_FETCH_SECONDS)); then
+    GIT_TERMINAL_PROMPT=0 timeout 60 git -C "$checkout" fetch --quiet origin "$branch" 2>/dev/null
+    last_fetch=$SECONDS
+  fi
+  fields=$(checkout_state "$checkout" "$branch")
+  status=$(report "$fields") || return 0
+  # An update this script was doing when it stopped (it doesn't restart itself until it has reported on one).
+  if [[ -n $interrupted && $(jq -r .state <<<"$status") == running ]]; then
+    report '{"state":"failed","message":"The agent supervisor stopped during the update. Ask for it again."}' >/dev/null
+  fi
+  interrupted=
+  [[ $(jq -r .state <<<"$status") == requested ]] && update_board "$checkout" "$branch"
+}
+
+# Pulls the checkout's default branch, then rebuilds and restarts the board on it.
+update_board() {
+  local checkout=$1 branch=$2 current output compose waited=0
+  update_failed() {
+    echo "update failed: $1"
+    report "$(jq -nc --arg message "$1" --argjson fields "$(checkout_state "$checkout" "$branch")" \
+      '$fields + {state: "failed", message: $message}')" >/dev/null
+  }
+  # Taking the request fails when it was withdrawn meanwhile.
+  report "$(jq -nc --arg message "Pulling $branch in $checkout" '{state: "running", message: $message}')" \
+    >/dev/null || return 0
+  echo "updating ultrakanban: pulling $branch in $checkout"
+
+  current=$(git -C "$checkout" symbolic-ref --quiet --short HEAD 2>/dev/null)
+  if [[ $current != "$branch" ]]; then
+    update_failed "$checkout has ${current:-a detached HEAD} checked out, not $branch. Switch it back to $branch to update."
+    return
+  fi
+  if [[ -n $(git -C "$checkout" status --porcelain --untracked-files=no) ]]; then
+    update_failed "$checkout has local changes. Commit or stash them to update."
+    return
+  fi
+  if ! output=$(GIT_TERMINAL_PROMPT=0 timeout 300 git -C "$checkout" pull --ff-only --quiet origin "$branch" 2>&1); then
+    update_failed "git pull failed: $(tail -c 1500 <<<"$output")"
+    return
+  fi
+  last_fetch=$SECONDS
+
+  if ! systemctl --user cat ultrakanban.service >/dev/null 2>&1; then
+    update_failed "Pulled $(git -C "$checkout" log -1 --format='%h %s'), but the board doesn't run as ultrakanban.service \
+(scripts/install-services.sh), so restart it yourself."
+    return
+  fi
+  if command -v podman-compose >/dev/null; then
+    compose=(podman-compose)
+  elif docker compose version >/dev/null 2>&1; then
+    compose=(docker compose)
+  else
+    update_failed "Pulled, but found neither podman-compose nor docker compose to rebuild the board with."
+    return
+  fi
+  echo "rebuilding and restarting the board"
+  if ! output=$("${compose[@]}" -f "$checkout/docker-compose.yml" up -d --build 2>&1); then
+    update_failed "Rebuilding the board failed: $(tail -c 1500 <<<"$output")"
+    return
+  fi
+  # The app restarts with the new build; wait for it to answer again, so the report gets through.
+  until curl -sf "$KANBAN/api/system/update" >/dev/null || ((waited >= 300)); do
+    sleep 5
+    ((waited += 5))
+  done
+  echo "updated ultrakanban to $(git -C "$checkout" log -1 --format='%h %s')"
+  report "$(jq -nc --arg message "Updated to $(git -C "$checkout" log -1 --format='%h %s')" \
+    --argjson fields "$(checkout_state "$checkout" "$branch")" '$fields + {state: "done", message: $message}')" \
+    >/dev/null || echo "couldn't report the update to $KANBAN"
 }
 
 reconcile() {
@@ -109,6 +209,7 @@ trap 'kill $! 2>/dev/null; exit 0' INT TERM
 
 echo "watching $KANBAN for boards with the agent switched on"
 while true; do
+  check_in
   update_scripts
   reconcile
   sleep "$POLL_SECONDS" &
