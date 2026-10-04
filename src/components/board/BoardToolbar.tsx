@@ -6,7 +6,9 @@ import { Kbd, KbdGroup } from '@/components/ui/kbd'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useHotkey } from '@/hooks/use-hotkey'
 import type { ViewPrefs } from '@/lib/board-view'
+import { useBoardContext } from './board-context'
 import { FilterMenu } from './FilterMenu'
+import { NewEpicButton } from './NewEpicButton'
 import { SortMenu } from './SortMenu'
 
 const SHORTCUTS: Array<{ keys: string[]; label: string }> = [
@@ -68,6 +70,7 @@ export function BoardToolbar({
   selecting,
   onSelectingChange,
 }: BoardToolbarProps) {
+  const { detail } = useBoardContext()
   const searchRef = useRef<HTMLInputElement>(null)
   useHotkey('/', () => searchRef.current?.focus())
   useHotkey('c', onNewTicket)
@@ -121,6 +124,7 @@ export function BoardToolbar({
         <ListChecksIcon />
         <span className="hidden sm:inline">Select</span>
       </Button>
+      {detail.epics.length === 0 && <NewEpicButton />}
       <span className="ml-auto hidden text-xs text-muted-foreground tabular-nums md:inline">
         {visibleCount === totalCount ? `${totalCount} tickets` : `${visibleCount} of ${totalCount} tickets`}
       </span>

@@ -9,6 +9,7 @@ import { useBoardContext } from './board-context'
 import { BoardCanvas } from './BoardCanvas'
 import { BoardToolbar } from './BoardToolbar'
 import { BulkActionBar } from './BulkActionBar'
+import { EpicBar } from './EpicBar'
 import { SelectionContext } from './selection-context'
 
 const TICKET_PARAM = 'ticket'
@@ -60,6 +61,9 @@ export function BoardView() {
   const closeTicket = useCallback(() => setSearchParams({}, { replace: true }), [setSearchParams])
 
   const filtered = activeFilterCount(prefs.filter) > 0 || deferredQuery.trim() !== ''
+  const epicIds = prefs.filter.epicIds ?? []
+  // New tickets go in the epic the board is filtered to, so they don't vanish from view.
+  const newTicketEpicId = epicIds.length === 1 ? epicIds[0] : null
 
   return (
     <>
@@ -75,6 +79,12 @@ export function BoardView() {
         selecting={selecting}
         onSelectingChange={(on) => (on ? setSelectMode(true) : clearSelection())}
       />
+      {detail.epics.length > 0 && (
+        <EpicBar
+          selected={epicIds}
+          onSelectedChange={(selected) => setPrefs({ ...prefs, filter: { ...prefs.filter, epicIds: selected } })}
+        />
+      )}
       {/* Leaves room for the bulk action bar, so it doesn't cover the last tickets. */}
       <main className={cn('min-h-0 flex-1', selecting && 'pb-14')}>
         {detail.columns.length === 0 && (
@@ -99,7 +109,12 @@ export function BoardView() {
       <Suspense>
         <TicketDialog ticketId={openTicketId} onClose={closeTicket} />
         {detail.columns.length > 0 && (
-          <CreateTicketDialog open={creating} onOpenChange={setCreating} onCreated={openTicket} />
+          <CreateTicketDialog
+            open={creating}
+            onOpenChange={setCreating}
+            onCreated={openTicket}
+            epicId={newTicketEpicId}
+          />
         )}
       </Suspense>
     </>

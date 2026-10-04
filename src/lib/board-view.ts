@@ -17,6 +17,8 @@ export interface TicketFilter {
   tagIds: string[]
   /** `null` matches unassigned tickets. */
   assignees: (string | null)[]
+  /** `null` matches tickets in no epic. Missing from view preferences saved before there were epics. */
+  epicIds?: (string | null)[]
 }
 
 export interface ViewPrefs {
@@ -28,11 +30,13 @@ export interface ViewPrefs {
 
 export const DEFAULT_VIEW: ViewPrefs = {
   sort: 'manual',
-  filter: { priorities: [], tagIds: [], assignees: [] },
+  filter: { priorities: [], tagIds: [], assignees: [], epicIds: [] },
 }
 
+export const NO_FILTER: TicketFilter = DEFAULT_VIEW.filter
+
 export const activeFilterCount = (filter: TicketFilter) =>
-  filter.priorities.length + filter.tagIds.length + filter.assignees.length
+  filter.priorities.length + filter.tagIds.length + filter.assignees.length + (filter.epicIds?.length ?? 0)
 
 function matchesQuery(ticket: Ticket, query: string, tagsById: Map<string, Tag>) {
   const needle = query
@@ -63,6 +67,7 @@ export function filterTickets(
       (!filter.priorities.length || filter.priorities.includes(ticket.priority)) &&
       (!filter.tagIds.length || filter.tagIds.some((tagId) => ticket.tagIds.includes(tagId))) &&
       (!filter.assignees.length || filter.assignees.includes(ticket.assignee)) &&
+      (!filter.epicIds?.length || filter.epicIds.includes(ticket.epicId)) &&
       matchesQuery(ticket, query, tagsById),
   )
 }

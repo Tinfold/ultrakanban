@@ -3,6 +3,7 @@ import {
   type BoardDetail,
   type BoardSummary,
   type Column,
+  type Epic,
   parsePullRequestUrl,
   type Tag,
   type Ticket,
@@ -43,10 +44,12 @@ export type TicketPatch = Partial<
     | 'agentModel'
     | 'agentDocker'
     | 'tagIds'
+    | 'epicId'
   >
 >
 export type ColumnPatch = Partial<Pick<Column, 'name' | 'color' | 'wipLimit'>>
 export type TagPatch = Partial<Pick<Tag, 'name' | 'color'>>
+export type EpicPatch = Partial<Pick<Epic, 'title' | 'description' | 'color'>>
 
 /** Drops `undefined` values so a patch only changes the fields it sets, matching the API's semantics. */
 const defined = <T extends object>(patch: T) =>
@@ -138,6 +141,8 @@ export interface BulkChange {
   priority?: Ticket['priority']
   addTagIds?: string[]
   removeTagIds?: string[]
+  /** The epic to put them in; null takes them out of theirs. */
+  epicId?: string | null
 }
 
 /** Applies the same change to several tickets; moved tickets are appended in the order given, like the API does. */
@@ -150,7 +155,8 @@ export function bulkChangeTickets(detail: BoardDetail, ticketIds: string[], chan
       const tagIds = [...new Set([...ticket.tagIds, ...(change.addTagIds ?? [])])].filter(
         (tagId) => !change.removeTagIds?.includes(tagId),
       )
-      return { ...ticket, tagIds, priority: change.priority ?? ticket.priority }
+      const epicId = change.epicId === undefined ? ticket.epicId : change.epicId
+      return { ...ticket, tagIds, epicId, priority: change.priority ?? ticket.priority }
     }),
   }
   if (change.moveTo) {
@@ -213,4 +219,22 @@ export const removeTag = (detail: BoardDetail, tagId: string): BoardDetail => ({
   tickets: detail.tickets.map((ticket) =>
     ticket.tagIds.includes(tagId) ? { ...ticket, tagIds: ticket.tagIds.filter((id) => id !== tagId) } : ticket,
   ),
+})
+
+export const addEpic = (detail: BoardDetail, epic: Epic): BoardDetail => ({
+  ...detail,
+  epics: detail.epics.some((existing) => existing.id === epic.id)
+    ? detail.epics.map((existing) => (existing.id === epic.id ? epic : existing))
+    : [...detail.epics, epic],
+})
+
+export const patchEpic = (detail: BoardDetail, epicId: string, patch: EpicPatch): BoardDetail => ({
+  ...detail,
+  epics: detail.epics.map((epic) => (epic.id === epicId ? { ...epic, ...defined(patch) } : epic)),
+})
+
+export const removeEpic = (detail: BoardDetail, epicId: string): BoardDetail => ({
+  ...detail,
+  epics: detail.epics.filter((epic) => epic.id !== epicId),
+  tickets: detail.tickets.map((ticket) => (ticket.epicId === epicId ? { ...ticket, epicId: null } : ticket)),
 })

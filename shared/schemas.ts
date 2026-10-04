@@ -135,6 +135,20 @@ export const createTagSchema = z.object({ name, color: color.optional() })
 
 export const updateTagSchema = z.object({ name: name.optional(), color: color.optional() })
 
+const epicDescription = z.string().max(100_000)
+
+export const createEpicSchema = z.object({
+  title: name,
+  description: epicDescription.optional(),
+  color: color.optional(),
+})
+
+export const updateEpicSchema = z.object({
+  title: name.optional(),
+  description: epicDescription.optional(),
+  color: color.optional(),
+})
+
 export const createTicketSchema = z.object({
   title: name,
   description: z.string().max(100_000).optional(),
@@ -150,6 +164,8 @@ export const createTicketSchema = z.object({
   position: position.optional(),
   /** The ticket it is a sub-ticket of: its id or number (`12` or `#12`). */
   parent: ref.nullable().optional(),
+  /** The epic it belongs to: its id or title. An unknown title creates the epic. */
+  epic: ref.nullable().optional(),
   force,
 })
 
@@ -169,6 +185,8 @@ export const updateTicketSchema = z.object({
   pullRequest: pullRequestUrl.nullable().optional(),
   /** Makes it a sub-ticket of another ticket (its id or number), or with `null` a ticket of its own again. */
   parent: ref.nullable().optional(),
+  /** Puts it in an epic (its id or title; an unknown title creates the epic), or with `null` takes it out of one. */
+  epic: ref.nullable().optional(),
   ifVersion: version.optional(),
 })
 
@@ -187,7 +205,7 @@ export const moveTicketSchema = z.object({
 
 /**
  * Changes several tickets of a board at once, all or nothing: moves them (appended, in the order given), sets their
- * priority, adds and removes tags, or deletes them.
+ * priority, adds and removes tags, puts them in an epic (`null` takes them out of theirs), or deletes them.
  */
 export const bulkTicketsSchema = z
   .object({
@@ -197,17 +215,25 @@ export const bulkTicketsSchema = z
     priority: priority.optional(),
     addTags: z.array(ref).max(50).optional(),
     removeTags: z.array(ref).max(50).optional(),
+    epic: ref.nullable().optional(),
     delete: z.literal(true).optional(),
   })
   .refine(
-    (input) => input.moveTo || input.priority || input.addTags?.length || input.removeTags?.length || input.delete,
-    {
-      message: 'Say what to do: moveTo, priority, addTags, removeTags or delete',
-    },
+    (input) =>
+      input.moveTo ||
+      input.priority ||
+      input.addTags?.length ||
+      input.removeTags?.length ||
+      input.epic !== undefined ||
+      input.delete,
+    { message: 'Say what to do: moveTo, priority, addTags, removeTags, epic or delete' },
   )
-  .refine((input) => !input.delete || !(input.moveTo || input.priority || input.addTags || input.removeTags), {
-    message: 'delete cannot be combined with other changes',
-  })
+  .refine(
+    (input) =>
+      !input.delete ||
+      !(input.moveTo || input.priority || input.addTags || input.removeTags || input.epic !== undefined),
+    { message: 'delete cannot be combined with other changes' },
+  )
 
 export const submitForReviewSchema = z.object({
   agent: name,
@@ -300,6 +326,8 @@ export const listTicketsQuerySchema = z.object({
   unassigned: z.stringbool().optional(),
   tag: z.array(ref).optional(),
   priority: z.array(priority).optional(),
+  /** An epic's id or title, or `none` for tickets in no epic. */
+  epic: ref.optional(),
   q: z.string().trim().min(1).optional(),
 })
 
@@ -337,6 +365,9 @@ export const boardExportSchema = z.object({
   }),
   columns: z.array(z.object({ name, color: color.default('gray'), wipLimit: wipLimit.default(null) })),
   tags: z.array(z.object({ name, color: color.default('gray') })),
+  epics: z
+    .array(z.object({ title: name, description: z.string().default(''), color: color.default('gray') }))
+    .default([]),
   tickets: z.array(
     z.object({
       title: name,
@@ -360,6 +391,8 @@ export const boardExportSchema = z.object({
       comments: z.array(z.object({ actor: name, body: z.string().min(1), createdAt: z.iso.datetime() })).default([]),
       /** Index in `tickets` of the ticket it is a sub-ticket of. */
       parent: z.number().int().min(0).nullable().default(null),
+      /** Index in `epics` of the epic it belongs to. */
+      epic: z.number().int().min(0).nullable().default(null),
     }),
   ),
 })
@@ -371,6 +404,8 @@ export type CreateColumnInput = z.input<typeof createColumnSchema>
 export type UpdateColumnInput = z.input<typeof updateColumnSchema>
 export type CreateTagInput = z.input<typeof createTagSchema>
 export type UpdateTagInput = z.input<typeof updateTagSchema>
+export type CreateEpicInput = z.input<typeof createEpicSchema>
+export type UpdateEpicInput = z.input<typeof updateEpicSchema>
 export type CreateTicketInput = z.input<typeof createTicketSchema>
 export type CreateSubticketInput = z.input<typeof createSubticketSchema>
 export type UpdateTicketInput = z.input<typeof updateTicketSchema>

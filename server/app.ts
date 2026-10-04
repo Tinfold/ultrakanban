@@ -13,6 +13,7 @@ import { boardRoutes } from './routes/boards.ts'
 import { columnRoutes } from './routes/columns.ts'
 import { eventRoutes } from './routes/events.ts'
 import { overviewRoutes } from './routes/overview.ts'
+import { epicRoutes } from './routes/epics.ts'
 import { tagRoutes } from './routes/tags.ts'
 import { ticketRoutes } from './routes/tickets.ts'
 
@@ -38,6 +39,7 @@ export function createApp(services: AppServices) {
     .route('/boards', boardRoutes(services))
     .route('/columns', columnRoutes)
     .route('/tags', tagRoutes)
+    .route('/epics', epicRoutes)
     .route('/tickets', ticketRoutes(services))
     .route('/attachments', attachmentRoutes(attachmentFiles))
     .route('/events', eventRoutes)

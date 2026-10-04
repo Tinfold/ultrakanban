@@ -1,4 +1,12 @@
-import { CalendarIcon, CheckIcon, FileTextIcon, PlusIcon, UserRoundXIcon } from 'lucide-react'
+import {
+  CalendarIcon,
+  CheckIcon,
+  CircleOffIcon,
+  FileTextIcon,
+  LayersIcon,
+  PlusIcon,
+  UserRoundXIcon,
+} from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 import {
   AGENT_DEFAULTS,
@@ -24,6 +32,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useActor } from '@/hooks/use-actor'
+import { swatch } from '@/lib/colors'
 import { boardDockerLabel, dockerLabel, parseISODate, toISODate } from '@/lib/format'
 import { PRIORITIES_DESC, PRIORITY_LABELS } from '@/lib/priority'
 import { cn } from '@/lib/utils'
@@ -293,6 +302,62 @@ export function TagPicker({ value, onChange, children }: PickerProps<string[]>) 
                 <CommandItem value={`__create ${typed}`} onSelect={create}>
                   <PlusIcon />
                   Create tag “{typed}”
+                </CommandItem>
+              )}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+/** Picks the epic a ticket belongs to, or none; typing a new title creates the epic. */
+export function EpicPicker({ value, onChange, children }: PickerProps<string | null>) {
+  const { detail, actions } = useBoardContext()
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const typed = search.trim()
+  const canCreate = typed && !detail.epics.some((epic) => epic.title.toLowerCase() === typed.toLowerCase())
+
+  const select = (next: string | null) => {
+    onChange(next)
+    setOpen(false)
+    setSearch('')
+  }
+
+  const create = async () => {
+    const epic = await actions.createEpic({ title: typed })
+    if (epic) select(epic.id)
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>{children}</PopoverTrigger>
+      <PopoverContent align="start" className="w-64 p-0">
+        <Command>
+          <CommandInput placeholder="Search or create epic…" value={search} onValueChange={setSearch} />
+          <CommandList>
+            {!canCreate && <CommandEmpty>No epics found. Type to create one.</CommandEmpty>}
+            <CommandGroup>
+              <CommandItem value="__none" onSelect={() => select(null)}>
+                <CircleOffIcon className="text-muted-foreground" />
+                No epic
+                {value === null && <CheckIcon className="ml-auto" />}
+              </CommandItem>
+              {detail.epics.map((epic) => (
+                <CommandItem key={epic.id} value={epic.title} onSelect={() => select(epic.id)}>
+                  <LayersIcon style={swatch(epic.color)} className="text-(--swatch)" />
+                  <span className={cn('truncate', epic.done && 'text-muted-foreground line-through')}>
+                    {epic.title}
+                  </span>
+                  {value === epic.id && <CheckIcon className="ml-auto" />}
+                </CommandItem>
+              ))}
+              {canCreate && (
+                <CommandItem value={`__create ${typed}`} onSelect={create}>
+                  <PlusIcon />
+                  Create epic “{typed}”
                 </CommandItem>
               )}
             </CommandGroup>

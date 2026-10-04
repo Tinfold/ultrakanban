@@ -1,4 +1,4 @@
-import { ArchiveIcon, ListFilterIcon, UserRoundXIcon, XIcon } from 'lucide-react'
+import { ArchiveIcon, CircleOffIcon, LayersIcon, ListFilterIcon, UserRoundXIcon, XIcon } from 'lucide-react'
 import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { ColorDot } from '@/components/common/TagChip'
 import { UserAvatar } from '@/components/common/UserAvatar'
@@ -14,7 +14,8 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { activeFilterCount, type TicketFilter } from '@/lib/board-view'
+import { activeFilterCount, NO_FILTER, type TicketFilter } from '@/lib/board-view'
+import { swatch } from '@/lib/colors'
 import { PRIORITIES_DESC, PRIORITY_LABELS } from '@/lib/priority'
 import { useBoardContext } from './board-context'
 
@@ -36,6 +37,7 @@ interface FilterMenuProps {
 export function FilterMenu({ filter, onChange, archivedCount, showArchived, onShowArchivedChange }: FilterMenuProps) {
   const { detail, assignees } = useBoardContext()
   const count = activeFilterCount(filter)
+  const epicIds = filter.epicIds ?? []
 
   return (
     <div className="flex items-center">
@@ -86,6 +88,30 @@ export function FilterMenu({ filter, onChange, archivedCount, showArchived, onSh
             </DropdownMenuSubContent>
           </DropdownMenuSub>
           <DropdownMenuSub>
+            <DropdownMenuSubTrigger>Epic</DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="max-h-80 w-52 overflow-y-auto">
+              <DropdownMenuCheckboxItem
+                checked={epicIds.includes(null)}
+                onSelect={keepOpen}
+                onCheckedChange={() => onChange({ ...filter, epicIds: toggle(epicIds, null) })}
+              >
+                <CircleOffIcon className="text-muted-foreground" />
+                No epic
+              </DropdownMenuCheckboxItem>
+              {detail.epics.map((epic) => (
+                <DropdownMenuCheckboxItem
+                  key={epic.id}
+                  checked={epicIds.includes(epic.id)}
+                  onSelect={keepOpen}
+                  onCheckedChange={() => onChange({ ...filter, epicIds: toggle(epicIds, epic.id) })}
+                >
+                  <LayersIcon style={swatch(epic.color)} className="text-(--swatch)" />
+                  <span className="truncate">{epic.title}</span>
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+          <DropdownMenuSub>
             <DropdownMenuSubTrigger>Assignee</DropdownMenuSubTrigger>
             <DropdownMenuSubContent className="max-h-80 w-48 overflow-y-auto">
               <DropdownMenuCheckboxItem
@@ -126,7 +152,7 @@ export function FilterMenu({ filter, onChange, archivedCount, showArchived, onSh
           {count > 0 && (
             <>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => onChange({ priorities: [], tagIds: [], assignees: [] })}>
+              <DropdownMenuItem onSelect={() => onChange(NO_FILTER)}>
                 <XIcon />
                 Clear filters
               </DropdownMenuItem>
@@ -140,7 +166,7 @@ export function FilterMenu({ filter, onChange, archivedCount, showArchived, onSh
           size="icon-sm"
           className="rounded-l-none"
           aria-label="Clear filters"
-          onClick={() => onChange({ priorities: [], tagIds: [], assignees: [] })}
+          onClick={() => onChange(NO_FILTER)}
         >
           <XIcon />
         </Button>

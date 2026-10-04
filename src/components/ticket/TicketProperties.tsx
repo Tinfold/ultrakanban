@@ -1,6 +1,7 @@
-import { CalendarIcon, ContainerIcon, CpuIcon, GaugeIcon, TagIcon, UserRoundIcon } from 'lucide-react'
+import { CalendarIcon, ContainerIcon, CpuIcon, GaugeIcon, LayersIcon, TagIcon, UserRoundIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { AGENT_DEFAULTS, type Ticket } from '@shared/domain'
+import { EpicChip } from '@/components/common/EpicChip'
 import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { ColorDot, TagChip } from '@/components/common/TagChip'
 import { UserAvatar } from '@/components/common/UserAvatar'
@@ -15,6 +16,7 @@ import {
   DueDatePicker,
   DockerPicker,
   EffortPicker,
+  EpicPicker,
   ModelPicker,
   PriorityPicker,
   TagPicker,
@@ -33,9 +35,10 @@ function Property({ label, children }: { label: string; children: ReactNode }) {
 const triggerClass = 'h-auto min-h-7 w-full justify-start px-2 py-1 font-normal'
 
 export function TicketProperties({ ticket }: { ticket: Ticket }) {
-  const { actions, detail, moveTicket, columnsById, tagsById } = useBoardContext()
+  const { actions, detail, moveTicket, columnsById, tagsById, epicsById } = useBoardContext()
   const column = columnsById.get(ticket.columnId)
   const tags = ticket.tagIds.flatMap((tagId) => tagsById.get(tagId) ?? [])
+  const epic = ticket.epicId ? epicsById.get(ticket.epicId) : undefined
 
   return (
     <dl className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-start gap-x-2 gap-y-0.5">
@@ -164,6 +167,21 @@ export function TicketProperties({ ticket }: { ticket: Ticket }) {
           </p>
         </Property>
       )}
+
+      <Property label="Epic">
+        <EpicPicker value={ticket.epicId} onChange={(epicId) => actions.updateTicket(ticket.id, { epicId })}>
+          <Button variant="ghost" size="sm" className={triggerClass}>
+            {epic ? (
+              <EpicChip epic={epic} />
+            ) : (
+              <span className="flex items-center gap-1.5 text-muted-foreground">
+                <LayersIcon />
+                No epic
+              </span>
+            )}
+          </Button>
+        </EpicPicker>
+      </Property>
 
       <Property label="Tags">
         <TagPicker value={ticket.tagIds} onChange={(tagIds) => actions.updateTicket(ticket.id, { tagIds })}>

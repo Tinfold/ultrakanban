@@ -241,6 +241,21 @@ const MIGRATIONS = [
   ALTER TABLE boards ADD COLUMN agent_docker INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE tickets ADD COLUMN agent_docker INTEGER;
   `,
+  `
+  -- Epics group tickets of a board into a larger piece of work; they are done once all their tickets are.
+  CREATE TABLE epics (
+    id TEXT PRIMARY KEY,
+    board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+    title TEXT NOT NULL COLLATE NOCASE,
+    description TEXT NOT NULL DEFAULT '',
+    color TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (board_id, title)
+  );
+  ALTER TABLE tickets ADD COLUMN epic_id TEXT REFERENCES epics(id) ON DELETE SET NULL;
+  CREATE INDEX tickets_epic ON tickets(epic_id);
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'
@@ -309,7 +324,7 @@ export function touchBoard(boardId: string) {
   changedBoards?.add(boardId)
 }
 
-type Table = 'boards' | 'columns' | 'tags' | 'tickets'
+type Table = 'boards' | 'columns' | 'tags' | 'epics' | 'tickets'
 
 /** Updates the given columns of a row, ignoring `undefined` values. */
 export function updateRow(table: Table, id: string, fields: Record<string, SQLInputValue | undefined>) {
