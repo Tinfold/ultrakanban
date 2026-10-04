@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useMemo } from 'react'
 import { toast } from 'sonner'
 import type { BoardDetail, MergeMethod } from '@shared/domain'
-import type { CreateColumnInput, CreateTagInput, CreateTicketInput } from '@shared/schemas'
+import type { CreateColumnInput, CreateEpicInput, CreateTagInput, CreateTicketInput } from '@shared/schemas'
 import { api, errorMessage } from '@/lib/api'
 import * as updates from '@/lib/board-updates'
 import { ticketRef } from '@/lib/format'
@@ -118,12 +118,24 @@ export function useBoardActions(boardId: string) {
           (d) => updates.removeTag(d, tagId),
         ),
 
+      createEpic: (input: CreateEpicInput) => run(() => api.createEpic(boardId, input), undefined, updates.addEpic),
+      updateEpic: (epicId: string, patch: updates.EpicPatch) =>
+        run(
+          () => api.updateEpic(epicId, patch),
+          (d) => updates.patchEpic(d, epicId, patch),
+        ),
+      deleteEpic: (epicId: string) =>
+        run(
+          () => api.deleteEpic(epicId),
+          (d) => updates.removeEpic(d, epicId),
+        ),
+
       createTicket: (input: CreateTicketInput) =>
         run(() => api.createTicket(boardId, input), undefined, updates.addTicket),
       updateTicket: (ticketId: string, patch: updates.TicketPatch) => {
-        const { tagIds, ...fields } = patch
+        const { tagIds, epicId, ...fields } = patch
         return run(
-          () => api.updateTicket(ticketId, { ...fields, tags: tagIds }),
+          () => api.updateTicket(ticketId, { ...fields, tags: tagIds, epic: epicId }),
           (d) => updates.patchTicket(d, ticketId, patch),
         )
       },
@@ -198,6 +210,7 @@ export function useBoardActions(boardId: string) {
               priority: change.priority,
               addTags: change.addTagIds,
               removeTags: change.removeTagIds,
+              epic: change.epicId,
             }),
           (d) => updates.bulkChangeTickets(d, ticketIds, change),
         )

@@ -6,6 +6,7 @@ import type {
   BoardDetail,
   BoardSummary,
   Column,
+  Epic,
   MergeMethod,
   MergePlan,
   MergeRun,
@@ -19,12 +20,14 @@ import type {
   BulkTicketsInput,
   CreateBoardInput,
   CreateColumnInput,
+  CreateEpicInput,
   CreateGitHubRepoInput,
   CreateTagInput,
   CreateTicketInput,
   MoveTicketInput,
   UpdateBoardInput,
   UpdateColumnInput,
+  UpdateEpicInput,
   UpdateTagInput,
   UpdateTicketInput,
 } from '@shared/schemas'
@@ -89,6 +92,10 @@ export const api = {
   createTag: (boardId: string, input: CreateTagInput) => request<Tag>('POST', `/boards/${boardId}/tags`, input),
   updateTag: (tagId: string, input: UpdateTagInput) => request<Tag>('PATCH', `/tags/${tagId}`, input),
   deleteTag: (tagId: string) => request<void>('DELETE', `/tags/${tagId}`),
+
+  createEpic: (boardId: string, input: CreateEpicInput) => request<Epic>('POST', `/boards/${boardId}/epics`, input),
+  updateEpic: (epicId: string, input: UpdateEpicInput) => request<Epic>('PATCH', `/epics/${epicId}`, input),
+  deleteEpic: (epicId: string) => request<void>('DELETE', `/epics/${epicId}`),
 
   /** A model and effort for a ticket about to be created, from how similar tickets went. */
   agentSuggestion: (boardId: string, input: { title: string; tags: string[]; steps: number }) => {

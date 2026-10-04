@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import type { BoardDetail, Column, Tag, Ticket } from '@shared/domain'
+import type { BoardDetail, Column, Epic, Tag, Ticket } from '@shared/domain'
 import type { BoardActions } from '@/hooks/use-board-actions'
 
 export interface BoardContextValue {
@@ -10,6 +10,7 @@ export interface BoardContextValue {
   ticketsById: Map<string, Ticket>
   columnsById: Map<string, Column>
   tagsById: Map<string, Tag>
+  epicsById: Map<string, Epic>
   /** Everyone currently assigned to a ticket on this board. */
   assignees: string[]
 }

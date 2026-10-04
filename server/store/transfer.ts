@@ -3,14 +3,16 @@ import { BOARD_EXPORT_FORMAT, type BoardExport } from '../../shared/schemas.ts'
 import { listActivity, logActivity } from './activity.ts'
 import { createBoard, getBoardDetail, updateBoard } from './boards.ts'
 import { createColumn } from './columns.ts'
+import { createEpic } from './epics.ts'
 import { createTag } from './tags.ts'
 import { createTicket, setPullRequestStatus, updateTicket } from './tickets.ts'
 
 export function exportBoard(id: string): BoardExport {
-  const { board, columns, tags, tickets } = getBoardDetail(id, { archived: true })
+  const { board, columns, tags, epics, tickets } = getBoardDetail(id, { archived: true })
   const columnName = new Map(columns.map((column) => [column.id, column.name]))
   const tagName = new Map(tags.map((tag) => [tag.id, tag.name]))
   const index = new Map(tickets.map((ticket, i) => [ticket.id, i]))
+  const epicIndex = new Map(epics.map((epic, i) => [epic.id, i]))
   return {
     format: BOARD_EXPORT_FORMAT,
     board: {
@@ -21,6 +23,7 @@ export function exportBoard(id: string): BoardExport {
     },
     columns: columns.map(({ name, color, wipLimit }) => ({ name, color, wipLimit })),
     tags: tags.map(({ name, color }) => ({ name, color })),
+    epics: epics.map(({ title, description, color }) => ({ title, description, color })),
     tickets: tickets.map((ticket) => ({
       title: ticket.title,
       description: ticket.description,
@@ -41,6 +44,7 @@ export function exportBoard(id: string): BoardExport {
         entry.type === 'comment' ? [{ actor: entry.actor, body: entry.data.body, createdAt: entry.createdAt }] : [],
       ),
       parent: ticket.parentId ? (index.get(ticket.parentId) ?? null) : null,
+      epic: ticket.epicId ? (epicIndex.get(ticket.epicId) ?? null) : null,
     })),
   }
 }
@@ -50,9 +54,11 @@ export function importBoard(data: BoardExport, actor: string): BoardSummary {
   const board = createBoard(details)
   for (const column of data.columns) createColumn(board.id, column)
   for (const tag of data.tags) createTag(board.id, tag)
+  const epicIds = data.epics.map((epic) => createEpic(board.id, epic).id)
   const ids: string[] = []
-  for (const { comments, pullRequest, parent: _parent, ...ticket } of data.tickets) {
-    const { id } = createTicket(board.id, { ...ticket, pullRequest: pullRequest?.url }, actor)
+  for (const { comments, pullRequest, parent: _parent, epic, ...ticket } of data.tickets) {
+    const epicId = epic === null ? null : (epicIds[epic] ?? null)
+    const { id } = createTicket(board.id, { ...ticket, pullRequest: pullRequest?.url, epic: epicId }, actor)
     ids.push(id)
     if (pullRequest && pullRequest.state !== 'unknown') {
       setPullRequestStatus(id, { state: pullRequest.state, title: pullRequest.title })

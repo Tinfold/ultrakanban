@@ -1,4 +1,13 @@
-import { ArrowRightIcon, SignalHighIcon, TagIcon, Trash2Icon, XIcon } from 'lucide-react'
+import {
+  ArrowRightIcon,
+  CheckIcon,
+  CircleOffIcon,
+  LayersIcon,
+  SignalHighIcon,
+  TagIcon,
+  Trash2Icon,
+  XIcon,
+} from 'lucide-react'
 import { useState } from 'react'
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { PriorityIcon } from '@/components/common/PriorityIcon'
@@ -13,6 +22,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import type { BulkChange } from '@/lib/board-updates'
+import { swatch } from '@/lib/colors'
 import { PRIORITIES_DESC, PRIORITY_LABELS } from '@/lib/priority'
 import { requiresMergedPullRequest } from '@/lib/workflow'
 import { useBoardContext } from './board-context'
@@ -26,7 +36,7 @@ interface BulkActionBarProps {
   onClear: () => void
 }
 
-/** Moves, tags, sets the priority of or deletes the selected tickets together. */
+/** Moves, tags, sets the priority or epic of, or deletes the selected tickets together. */
 export function BulkActionBar({ ticketIds, visibleCount, onSelectAll, onClear }: BulkActionBarProps) {
   const { detail, actions, ticketsById } = useBoardContext()
   const [pendingMove, setPendingMove] = useState<{ columnId: string; count: number } | null>(null)
@@ -40,6 +50,8 @@ export function BulkActionBar({ ticketIds, visibleCount, onSelectAll, onClear }:
     if (unmerged) setPendingMove({ columnId, count: unmerged })
     else change({ moveTo: columnId })
   }
+  // The epic all the selected tickets are in (null: none of them is in one), or undefined when they differ.
+  const sharedEpic = tickets.every((ticket) => ticket.epicId === tickets[0]?.epicId) ? tickets[0]?.epicId : undefined
   const pendingColumn = pendingMove && detail.columns.find((column) => column.id === pendingMove.columnId)
 
   return (
@@ -122,6 +134,29 @@ export function BulkActionBar({ ticketIds, visibleCount, onSelectAll, onClear }:
               </DropdownMenuCheckboxItem>
             )
           })}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="sm" disabled={none || detail.epics.length === 0} aria-label="Epic">
+            <LayersIcon />
+            <span className="hidden sm:inline">Epic</span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="center" side="top" className="max-h-72 w-56 overflow-y-auto">
+          <DropdownMenuLabel>Put in epic</DropdownMenuLabel>
+          <DropdownMenuItem onSelect={() => change({ epicId: null })}>
+            <CircleOffIcon className="text-muted-foreground" />
+            No epic
+            {sharedEpic === null && <CheckIcon className="ml-auto" />}
+          </DropdownMenuItem>
+          {detail.epics.map((epic) => (
+            <DropdownMenuItem key={epic.id} onSelect={() => change({ epicId: epic.id })}>
+              <LayersIcon style={swatch(epic.color)} className="text-(--swatch)" />
+              <span className="truncate">{epic.title}</span>
+              {sharedEpic === epic.id && <CheckIcon className="ml-auto" />}
+            </DropdownMenuItem>
+          ))}
         </DropdownMenuContent>
       </DropdownMenu>
       <Button

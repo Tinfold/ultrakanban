@@ -39,6 +39,7 @@ import { badRequest, conflict, HttpError, notFound } from '../errors.ts'
 import { publish } from '../events.ts'
 import { logActivity } from './activity.ts'
 import { getColumn, listColumns, resolveColumn, workflowColumns } from './columns.ts'
+import { resolveEpic } from './epics.ts'
 import { resolveTags } from './tags.ts'
 
 interface TicketRow {
@@ -72,6 +73,7 @@ interface TicketRow {
   updated_at: string
   archive_days: number | null
   parent_id: string | null
+  epic_id: string | null
   subtickets_total: number
   subtickets_done: number
   tag_ids: string | null
@@ -175,6 +177,7 @@ const toTicket = (row: TicketRow): Ticket => ({
   archived: row.archive_days !== null && Date.parse(row.moved_at) < Date.now() - row.archive_days * DAY_MS,
   parentId: row.parent_id,
   subtickets: row.subtickets_total ? { done: row.subtickets_done, total: row.subtickets_total } : null,
+  epicId: row.epic_id,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 })
@@ -261,6 +264,12 @@ export function listTickets(boardId: string, query: ListTicketsQuery = {}): Tick
   for (const tagId of resolveTags(boardId, query.tag ?? [], { create: false })) {
     where.push('EXISTS (SELECT 1 FROM ticket_tags WHERE ticket_id = t.id AND tag_id = ?)')
     params.push(tagId)
+  }
+  if (query.epic === 'none') {
+    where.push('t.epic_id IS NULL')
+  } else if (query.epic) {
+    where.push('t.epic_id = ?')
+    params.push(resolveEpic(boardId, query.epic, { create: false })!)
   }
   if (query.priority?.length) {
     where.push(`t.priority IN (${query.priority.map(() => '?').join(', ')})`)
@@ -380,6 +389,11 @@ export function createTicket(boardId: string, input: CreateTicketInput, actor: s
   if (!column) throw badRequest('Board has no columns; create a column first')
   assertCanEnter({ id: null, boardId, columnId: null, pullRequest: null, subtickets: null }, column, input.force)
   const parentId = parentFor(boardId, null, input.parent ?? null)
+  // A sub-ticket joins its parent's epic unless told otherwise.
+  const epicId =
+    input.epic !== undefined
+      ? resolveEpic(boardId, input.epic, { create: true })
+      : parentId && getTicket(parentId).epicId
 
   const { number } = sql.get<{ number: number }>(
     'UPDATE boards SET next_number = next_number + 1 WHERE id = ? RETURNING next_number - 1 AS number',
@@ -390,8 +404,8 @@ export function createTicket(boardId: string, input: CreateTicketInput, actor: s
   const timestamp = now()
   sql.run(
     `INSERT INTO tickets (id, board_id, column_id, number, title, description, priority, assignee, due_date,
-       agent_effort, agent_model, agent_docker, parent_id, position, moved_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       agent_effort, agent_model, agent_docker, parent_id, epic_id, position, moved_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     boardId,
     column.id,
@@ -405,6 +419,7 @@ export function createTicket(boardId: string, input: CreateTicketInput, actor: s
     input.agentModel ?? null,
     input.agentDocker == null ? null : Number(input.agentDocker),
     parentId,
+    epicId,
     count,
     timestamp,
     timestamp,
@@ -448,6 +463,13 @@ export function updateTicket(id: string, input: UpdateTicketInput, actor: string
     if (parentId !== ticket.parentId) {
       updateRow('tickets', id, { parent_id: parentId })
       changed.push('parent')
+    }
+  }
+  if (input.epic !== undefined) {
+    const epicId = resolveEpic(ticket.boardId, input.epic, { create: true })
+    if (epicId !== ticket.epicId) {
+      updateRow('tickets', id, { epic_id: epicId })
+      changed.push('epic')
     }
   }
   if (changed.length) logActivity(id, actor, 'updated', { fields: changed })
@@ -513,9 +535,10 @@ export function bulkUpdateTickets(boardId: string, input: BulkTicketsInput, acto
   const added = input.addTags?.length ? resolveTags(boardId, input.addTags, { create: true }) : []
   const removed = input.removeTags?.length ? resolveTags(boardId, input.removeTags, { create: false }) : []
   const target = input.moveTo === undefined ? undefined : resolveColumn(boardId, input.moveTo)
+  const epic = input.epic === undefined ? undefined : resolveEpic(boardId, input.epic, { create: true })
   return tickets.map((ticket) => {
     const tagIds = [...new Set([...ticket.tagIds, ...added])].filter((tagId) => !removed.includes(tagId))
-    updateTicket(ticket.id, { priority: input.priority, tags: tagIds }, actor)
+    updateTicket(ticket.id, { priority: input.priority, tags: tagIds, epic }, actor)
     if (target && target.id !== ticket.columnId) {
       moveTicket(ticket.id, { column: target.id, force: input.force }, actor)
     }

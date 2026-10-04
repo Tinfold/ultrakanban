@@ -1,6 +1,7 @@
-import { CalendarIcon, CpuIcon, FileTextIcon, GaugeIcon, TagIcon, UserRoundIcon } from 'lucide-react'
+import { CalendarIcon, CpuIcon, FileTextIcon, GaugeIcon, LayersIcon, TagIcon, UserRoundIcon } from 'lucide-react'
 import { type FormEvent, useRef, useState } from 'react'
 import { AGENT_DEFAULTS, type AgentEffort, type Priority, TICKET_TEMPLATES } from '@shared/domain'
+import { EpicChip } from '@/components/common/EpicChip'
 import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { ColorDot, TagChip } from '@/components/common/TagChip'
 import { UserAvatar } from '@/components/common/UserAvatar'
@@ -25,6 +26,7 @@ import {
   ColumnPicker,
   DueDatePicker,
   EffortPicker,
+  EpicPicker,
   ModelPicker,
   PriorityPicker,
   TagPicker,
@@ -35,9 +37,11 @@ interface CreateTicketDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onCreated: (ticketId: string) => void
+  /** The epic the new ticket starts in, e.g. the one the board is filtered to. */
+  epicId?: string | null
 }
 
-export function CreateTicketDialog({ open, onOpenChange, onCreated }: CreateTicketDialogProps) {
+export function CreateTicketDialog({ open, onOpenChange, onCreated, epicId = null }: CreateTicketDialogProps) {
   const createdId = useRef<string | null>(null)
 
   return (
@@ -54,6 +58,7 @@ export function CreateTicketDialog({ open, onOpenChange, onCreated }: CreateTick
       >
         {open && (
           <CreateTicketForm
+            initialEpicId={epicId}
             onDone={() => onOpenChange(false)}
             onCreated={(ticketId) => {
               createdId.current = ticketId
@@ -66,8 +71,14 @@ export function CreateTicketDialog({ open, onOpenChange, onCreated }: CreateTick
   )
 }
 
-function CreateTicketForm({ onDone, onCreated }: { onDone: () => void; onCreated: (ticketId: string) => void }) {
-  const { detail, actions, columnsById, tagsById } = useBoardContext()
+interface CreateTicketFormProps {
+  initialEpicId: string | null
+  onDone: () => void
+  onCreated: (ticketId: string) => void
+}
+
+function CreateTicketForm({ initialEpicId, onDone, onCreated }: CreateTicketFormProps) {
+  const { detail, actions, columnsById, tagsById, epicsById } = useBoardContext()
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [columnId, setColumnId] = useState(detail.columns[0]?.id ?? '')
@@ -75,10 +86,12 @@ function CreateTicketForm({ onDone, onCreated }: { onDone: () => void; onCreated
   const [assignee, setAssignee] = useState<string | null>(null)
   const [dueDate, setDueDate] = useState<string | null>(null)
   const [tagIds, setTagIds] = useState<string[]>([])
+  const [epicId, setEpicId] = useState<string | null>(initialEpicId)
   const [agentEffort, setAgentEffort] = useState<AgentEffort | null>(null)
   const [agentModel, setAgentModel] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const column = columnsById.get(columnId)
+  const epic = epicId ? epicsById.get(epicId) : undefined
 
   const applyTemplate = async (template: (typeof TICKET_TEMPLATES)[number]) => {
     setDescription(template.description)
@@ -105,6 +118,7 @@ function CreateTicketForm({ onDone, onCreated }: { onDone: () => void; onCreated
       assignee,
       dueDate,
       tags: tagIds,
+      epic: epicId,
       agentEffort,
       agentModel,
     })
@@ -180,6 +194,18 @@ function CreateTicketForm({ onDone, onCreated }: { onDone: () => void; onCreated
               )}
             </Button>
           </TagPicker>
+          <EpicPicker value={epicId} onChange={setEpicId}>
+            <Button type="button" variant="outline" size="sm">
+              {epic ? (
+                <EpicChip epic={epic} className="-mx-1" />
+              ) : (
+                <>
+                  <LayersIcon />
+                  Epic
+                </>
+              )}
+            </Button>
+          </EpicPicker>
           {(detail.board.agentEnabled || agentEffort) && (
             <EffortPicker value={agentEffort} onChange={setAgentEffort}>
               <Button type="button" variant="outline" size="sm">

@@ -39,6 +39,7 @@ export function BoardProvider({ detail, children }: { detail: BoardDetail; child
       ticketsById,
       columnsById,
       tagsById: indexById(detail.tags),
+      epicsById: indexById(detail.epics),
       assignees: assigneesOf(detail.tickets),
     }),
     [detail, actions, moveTicket, ticketsById, columnsById],

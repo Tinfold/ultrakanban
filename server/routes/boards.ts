@@ -7,6 +7,7 @@ import {
   claimNextSchema,
   createBoardSchema,
   createColumnSchema,
+  createEpicSchema,
   createGitHubRepoSchema,
   createTagSchema,
   createTicketSchema,
@@ -22,6 +23,7 @@ import { actorOf, readJson } from '../http.ts'
 import type { AppServices } from '../app.ts'
 import { createBoard, deleteBoard, getBoard, getBoardDetail, listBoards, updateBoard } from '../store/boards.ts'
 import { createColumn } from '../store/columns.ts'
+import { createEpic, listEpics } from '../store/epics.ts'
 import { createTag } from '../store/tags.ts'
 import {
   bulkUpdateTickets,
@@ -98,6 +100,14 @@ export const boardRoutes = ({ pullRequests, mergeQueue }: AppServices) =>
         201,
       )
     })
+    .get('/:boardId/epics', (c) => c.json(listEpics(getBoard(c.req.param('boardId')).id)))
+    .post('/:boardId/epics', async (c) => {
+      const input = await readJson(c, createEpicSchema)
+      return c.json(
+        transaction(() => createEpic(c.req.param('boardId'), input)),
+        201,
+      )
+    })
     .get('/:boardId/tickets', (c) => {
       const boardId = getBoard(c.req.param('boardId')).id
       const query = listTicketsQuerySchema.parse({
@@ -106,6 +116,7 @@ export const boardRoutes = ({ pullRequests, mergeQueue }: AppServices) =>
         unassigned: c.req.query('unassigned'),
         tag: c.req.queries('tag'),
         priority: c.req.queries('priority'),
+        epic: c.req.query('epic'),
         q: c.req.query('q'),
       })
       return c.json(listTickets(boardId, query))

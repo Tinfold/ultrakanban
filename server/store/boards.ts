@@ -3,6 +3,7 @@ import type { CreateBoardInput, UpdateBoardInput } from '../../shared/schemas.ts
 import { newId, now, sql, touchBoard, updateRow } from '../db.ts'
 import { badRequest, notFound } from '../errors.ts'
 import { createColumn, listColumns, resolveColumn } from './columns.ts'
+import { listEpics } from './epics.ts'
 import { listTags } from './tags.ts'
 import { listTickets } from './tickets.ts'
 
@@ -76,6 +77,7 @@ export function getBoardDetail(id: string, { archived = false } = {}): BoardDeta
     board: getBoard(id),
     columns: listColumns(id),
     tags: listTags(id),
+    epics: listEpics(id),
     tickets: shown,
     archivedCount: tickets.length - shown.length,
   }

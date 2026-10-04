@@ -218,6 +218,21 @@ setting that can do the work well saves tokens. Omit both (the board's defaults)
 The board can suggest a setting from how similar tickets went: `GET $KANBAN/api/boards/$BOARD/agent-suggestion?title=...&tag=bug`
 returns the cheapest model and effort that finished tickets like it (`suggestion`, null when there is no history yet).
 
+### Grouping tickets in an epic
+
+When you file several tickets that together make up one larger feature, group them in an epic so people can follow
+and filter the feature as a whole. Look for a fitting one first (`GET $KANBAN/api/boards/$BOARD/epics`), otherwise
+create it with a short description of the feature:
+
+```sh
+curl -s -X POST $KANBAN/api/boards/$BOARD/epics \
+  -H 'Content-Type: application/json' -H "X-Actor: $ME" \
+  -d '{"title":"Dark mode","description":"markdown: what the feature is and why"}'
+```
+
+Then pass `"epic":"Dark mode"` (its title or id) on each ticket you file for it. An epic isn't work to claim: it is
+done by itself once all its tickets are. Don't make an epic for a single ticket, or for tickets that are unrelated.
+
 ## Splitting a ticket into sub-tickets
 
 When a ticket is too big for one pull request, or you are asked to break it up, split it instead of working it:

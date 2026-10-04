@@ -18,6 +18,7 @@ import type { Ticket } from '@shared/domain'
 import { CheckStatusIcon } from '@/components/common/CheckStatusIcon'
 import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { PullRequestIcon } from '@/components/common/PullRequestIcon'
+import { EpicChip } from '@/components/common/EpicChip'
 import { TagChip } from '@/components/common/TagChip'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { WaitingBadge } from '@/components/common/WaitingBadge'
@@ -45,12 +46,13 @@ interface TicketCardProps {
 }
 
 export function TicketCard({ ticket, overlay, selecting, selected }: TicketCardProps) {
-  const { detail, tagsById, ticketsById } = useBoardContext()
+  const { detail, tagsById, epicsById, ticketsById } = useBoardContext()
   const checklist = checklistProgress(ticket.description)
   const tags = ticket.tagIds.flatMap((tagId) => tagsById.get(tagId) ?? [])
   // The agent doesn't claim a ticket that waits for an unfinished one, so say why it sits there.
   const blockers = openBlockers(ticket, detail.tickets, detail.board.doneColumnId ?? detail.columns.at(-1)?.id)
   const parent = ticket.parentId ? ticketsById.get(ticket.parentId) : undefined
+  const epic = ticket.epicId ? epicsById.get(ticket.epicId) : undefined
   const subtickets = ticket.subtickets
   const hasMeta =
     blockers.length > 0 ||
@@ -99,8 +101,9 @@ export function TicketCard({ ticket, overlay, selecting, selected }: TicketCardP
         {ticket.assignee && <UserAvatar name={ticket.assignee} size="xs" className="ml-auto" />}
       </div>
       <p className="mt-1.5 line-clamp-3 text-[13px] leading-snug font-medium text-pretty break-words">{ticket.title}</p>
-      {tags.length > 0 && (
+      {(epic || tags.length > 0) && (
         <div className="mt-2 flex flex-wrap gap-1">
+          {epic && <EpicChip epic={epic} />}
           {tags.map((tag) => (
             <TagChip key={tag.id} tag={tag} />
           ))}

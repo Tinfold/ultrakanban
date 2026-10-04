@@ -321,6 +321,28 @@ export interface Tag {
   color: Color
 }
 
+/**
+ * A larger piece of work that groups tickets of a board (`epicId` on them), sub-tickets included. Agents never claim
+ * it: it is done by itself once all its tickets are.
+ */
+export interface Epic {
+  id: string
+  boardId: string
+  title: string
+  /** Markdown. */
+  description: string
+  color: Color
+  /**
+   * Its tickets that are finished (in the done column or with a merged pull request) out of all of them, leaving out
+   * cancelled ones.
+   */
+  progress: { done: number; total: number }
+  /** Whether it has tickets and they are all finished. */
+  done: boolean
+  createdAt: string
+  updatedAt: string
+}
+
 export interface Ticket {
   id: string
   boardId: string
@@ -371,6 +393,8 @@ export interface Ticket {
    * out cancelled ones. Null when it has none. It waits for them: claim-next skips it until they are all finished.
    */
   subtickets: { done: number; total: number } | null
+  /** The epic it belongs to; null when it is in none. */
+  epicId: string | null
   createdAt: string
   updatedAt: string
 }
@@ -442,6 +466,8 @@ export interface BoardDetail {
   board: BoardSummary
   columns: Column[]
   tags: Tag[]
+  /** Oldest first. */
+  epics: Epic[]
   tickets: Ticket[]
   /** Archived tickets left out of `tickets`; 0 when they were asked for. */
   archivedCount: number
