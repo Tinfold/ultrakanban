@@ -5,6 +5,7 @@ import { EditorContent, Extension, InputRule, useEditor } from '@tiptap/react'
 import { StarterKit } from '@tiptap/starter-kit'
 import { useEffect } from 'react'
 import { cn } from '@/lib/utils'
+import { CodeBlockWithCopy } from './code-block'
 import { EditorToolbar } from './EditorToolbar'
 
 /** Typing `[ ] ` or `[x] ` at the start of a bullet item (or paragraph) turns it into a checklist item. */
@@ -47,7 +48,11 @@ export function DescriptionEditor({
 }: DescriptionEditorProps) {
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ link: { openOnClick: false, autolink: true, defaultProtocol: 'https' } }),
+      StarterKit.configure({
+        link: { openOnClick: false, autolink: true, defaultProtocol: 'https' },
+        codeBlock: false,
+      }),
+      CodeBlockWithCopy,
       TaskList,
       TaskItem.configure({ nested: true }),
       ChecklistShortcut,
