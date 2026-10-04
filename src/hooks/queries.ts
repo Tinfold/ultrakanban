@@ -16,6 +16,7 @@ export const queryKeys = {
   mergeRun: (boardId: string) => ['merge-run', boardId] as const,
   overview: (days: OverviewRange) => ['overview', days] as const,
   allOverviews: ['overview'] as const,
+  appUpdate: ['app-update'] as const,
 }
 
 export const useBoards = () => useQuery({ queryKey: queryKeys.boards, queryFn: api.listBoards })
@@ -69,4 +70,15 @@ export const useMergeRun = (boardId: string, enabled: boolean) =>
     queryFn: () => api.mergeRun(boardId),
     enabled,
     refetchInterval: (query) => (query.state.data?.status === 'running' ? 1000 : false),
+  })
+
+/** Checked every few seconds while an update is on its way, so the header follows it through the restart. */
+export const useAppUpdate = () =>
+  useQuery({
+    queryKey: queryKeys.appUpdate,
+    queryFn: api.appUpdate,
+    refetchInterval: (query) => {
+      const state = query.state.data?.state
+      return state === 'requested' || state === 'running' ? 3000 : 60_000
+    },
   })

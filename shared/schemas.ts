@@ -288,6 +288,14 @@ export const mergeRunSchema = z.object({ method: z.enum(MERGE_METHODS) })
 
 export const mergeTicketSchema = z.object({ method: z.enum(MERGE_METHODS).optional() })
 
+/** The agent supervisor checking in, and reporting on an update it is doing. */
+export const reportAppUpdateSchema = z.object({
+  state: z.enum(['running', 'done', 'failed']).optional(),
+  message: z.string().trim().max(4000).nullable().optional(),
+  version: z.string().trim().max(300).nullable().optional(),
+  behind: z.int().min(0).nullable().optional(),
+})
+
 const tokens = z.int().min(0)
 const cost = z.number().min(0).nullable().default(null)
 
@@ -417,6 +425,7 @@ export type ReleaseTicketInput = z.input<typeof releaseTicketSchema>
 export type HeartbeatInput = z.input<typeof heartbeatSchema>
 export type ReleaseIdleInput = z.input<typeof releaseIdleSchema>
 export type SubmitForReviewInput = z.input<typeof submitForReviewSchema>
+export type ReportAppUpdateInput = z.input<typeof reportAppUpdateSchema>
 export type PostPlanInput = z.input<typeof postPlanSchema>
 export type ApprovePlanInput = z.input<typeof approvePlanSchema>
 export type ClaimNextInput = z.input<typeof claimNextSchema>

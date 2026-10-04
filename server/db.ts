@@ -256,6 +256,21 @@ const MIGRATIONS = [
   ALTER TABLE tickets ADD COLUMN epic_id TEXT REFERENCES epics(id) ON DELETE SET NULL;
   CREATE INDEX tickets_epic ON tickets(epic_id);
   `,
+  `
+  -- Updating ultrakanban itself (one row): asked for in the app, done on the host by the agent supervisor.
+  CREATE TABLE app_update (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    state TEXT NOT NULL DEFAULT 'idle',
+    requested_at TEXT,
+    requested_by TEXT,
+    finished_at TEXT,
+    message TEXT,
+    updater_seen_at TEXT,
+    version TEXT,
+    behind INTEGER
+  );
+  INSERT INTO app_update (id) VALUES (1);
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { cn } from '@/lib/utils'
 import { ActorMenu } from './ActorMenu'
 import { ThemeToggle } from './ThemeToggle'
+import { UpdateMenu } from './UpdateMenu'
 
 export function Logo() {
   return (
@@ -50,6 +51,7 @@ export function AppHeader({ boardId, children }: { boardId?: string; children?: 
       <BoardSwitcher currentBoardId={boardId} />
       {children}
       <div className="ml-auto flex items-center gap-0.5">
+        <UpdateMenu />
         <OverviewLink />
         <ThemeToggle />
         <ActorMenu />

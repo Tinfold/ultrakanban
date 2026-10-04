@@ -753,3 +753,27 @@ export interface Overview {
   /** The latest activity entries across all boards, newest first. */
   recent: OverviewActivity[]
 }
+
+/**
+ * Updating ultrakanban itself, done on the host by the agent supervisor (`scripts/agent-supervisor.sh`): someone asks
+ * for it in the app (`requested`), the supervisor picks it up (`running`), pulls the checkout, rebuilds and restarts
+ * the board, and reports how it went (`done` or `failed`).
+ */
+export const APP_UPDATE_STATES = ['idle', 'requested', 'running', 'done', 'failed'] as const
+export type AppUpdateState = (typeof APP_UPDATE_STATES)[number]
+
+export interface AppUpdate {
+  state: AppUpdateState
+  requestedAt: string | null
+  requestedBy: string | null
+  /** When it last finished, done or failed. */
+  finishedAt: string | null
+  /** What the supervisor last said about it: the new version, or why it failed. */
+  message: string | null
+  /** When the supervisor last checked in; null if it never has, so nothing would act on a request. */
+  updaterSeenAt: string | null
+  /** The checkout's commit, as `<short sha> <subject>`. */
+  version: string | null
+  /** Commits the checkout's default branch is behind origin, as of the supervisor's last fetch. */
+  behind: number | null
+}
