@@ -17,6 +17,7 @@ export const queryKeys = {
   overview: (days: OverviewRange) => ['overview', days] as const,
   allOverviews: ['overview'] as const,
   appUpdate: ['app-update'] as const,
+  claudeUsage: ['claude-usage'] as const,
 }
 
 export const useBoards = () => useQuery({ queryKey: queryKeys.boards, queryFn: api.listBoards })
@@ -82,3 +83,7 @@ export const useAppUpdate = () =>
       return state === 'requested' || state === 'running' ? 3000 : 60_000
     },
   })
+
+/** The supervisor reports Claude usage every few minutes. */
+export const useClaudeUsage = () =>
+  useQuery({ queryKey: queryKeys.claudeUsage, queryFn: api.claudeUsage, refetchInterval: 60_000 })

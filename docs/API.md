@@ -631,6 +631,23 @@ The supervisor reports with `POST /system/update/status` and `{ state?, message?
 `state` it only checks in; `running` takes the request (`409 update_not_requested` if there is none), `done` and
 `failed` finish it.
 
+## Claude usage
+
+How much of the Claude plan's usage limits is used, as the agent supervisor last read it on the host with its claude
+login (from Claude's usage endpoint, what `/usage` in claude shows). `GET /system/claude-usage` returns:
+
+```ts
+{
+  reportedAt: string | null // when the supervisor last reported; null if it never has
+  plan: string | null // the subscription, e.g. "pro" or "max"
+  limits: Array<{ label: string; percent: number; resetsAt: string | null }> // e.g. "Current session", "Week, all models"
+  error: string | null // why there are no limits, e.g. no claude login on the host
+}
+```
+
+The supervisor reports with `POST /system/claude-usage` and `{ plan?, usage?, error? }`: `usage` is the usage
+endpoint's answer as it is (the board picks the limits out of it), `error` says why it couldn't get one.
+
 ## Live updates
 
 `GET /events?board=:boardId` is a server-sent event stream. It emits `change` events with data `{ "boardId": "..." }`

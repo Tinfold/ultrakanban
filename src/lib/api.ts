@@ -4,6 +4,7 @@ import type {
   AppUpdate,
   ApiErrorBody,
   Attachment,
+  ClaudeUsage,
   BoardDetail,
   BoardSummary,
   Column,
@@ -137,6 +138,7 @@ export const api = {
   hideAgents: (names: string[]) => request<void>('POST', '/overview/hidden-agents', { names }),
   showHiddenAgents: () => request<void>('DELETE', '/overview/hidden-agents'),
   appUpdate: () => request<AppUpdate>('GET', '/system/update'),
+  claudeUsage: () => request<ClaudeUsage>('GET', '/system/claude-usage'),
   requestAppUpdate: () => request<AppUpdate>('POST', '/system/update'),
   cancelAppUpdate: () => request<AppUpdate>('DELETE', '/system/update'),
 }

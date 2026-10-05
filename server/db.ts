@@ -271,6 +271,17 @@ const MIGRATIONS = [
   );
   INSERT INTO app_update (id) VALUES (1);
   `,
+  `
+  -- How much of the Claude plan's usage limits is used (one row), as the agent supervisor last reported it.
+  CREATE TABLE claude_usage (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    reported_at TEXT,
+    plan TEXT,
+    limits TEXT NOT NULL DEFAULT '[]',
+    error TEXT
+  );
+  INSERT INTO claude_usage (id) VALUES (1);
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

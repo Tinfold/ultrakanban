@@ -6,13 +6,14 @@ import { mergeUsage, noUsage, OVERVIEW_RANGES, type OverviewRange, totalTokens, 
 import { AppHeader } from '@/components/app/AppHeader'
 import { AgentList } from '@/components/overview/AgentList'
 import { BoardTable } from '@/components/overview/BoardTable'
+import { ClaudeUsage } from '@/components/overview/ClaudeUsage'
 import { type ChartSeries, ColumnChart } from '@/components/overview/ColumnChart'
 import { NeedsAttention } from '@/components/overview/NeedsAttention'
 import { RecentActivity } from '@/components/overview/RecentActivity'
 import { TicketUsageTable, type UsageGrouping } from '@/components/overview/TicketUsageTable'
 import { Button } from '@/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { queryKeys, useOverview } from '@/hooks/queries'
+import { queryKeys, useClaudeUsage, useOverview } from '@/hooks/queries'
 import { useNow } from '@/hooks/use-now'
 import { useStoredState } from '@/hooks/use-stored-state'
 import { api, errorMessage } from '@/lib/api'
@@ -177,6 +178,7 @@ export function OverviewPage() {
   const [days, setDays] = useStoredState<OverviewRange>(storageKeys.overviewRange, 14)
   const [usageGrouping, setUsageGrouping] = useState<UsageGrouping>('tickets')
   const { data: overview, error, isPlaceholderData } = useOverview(days)
+  const { data: claudeUsage } = useClaudeUsage()
   const now = useNow()
   const queryClient = useQueryClient()
 
@@ -245,6 +247,8 @@ export function OverviewPage() {
     content = (
       <div className={cn('grid grid-cols-1 gap-6 transition-opacity', isPlaceholderData && 'opacity-60')}>
         <JumpBar attention={attention.waiting.length + attention.review.length + attention.stalled.length} />
+
+        {claudeUsage && <ClaudeUsage usage={claudeUsage} now={now} />}
 
         <div className="grid grid-cols-2 gap-3 *:last:col-span-2 md:grid-cols-3 md:*:last:col-span-1 xl:grid-cols-5">
           <Stat
