@@ -17,14 +17,18 @@
 # how it went. Every poll it checks in with the checkout's version and how many commits it is behind origin (fetched
 # every UPDATE_FETCH_SECONDS), which the app shows next to the button.
 #
-# Settings: KANBAN (default http://localhost:4317), POLL_SECONDS (default 30), UPDATE_FETCH_SECONDS (default 900) and
-# ULTRAKANBAN_AGENT_HOME.
+# And every CLAUDE_USAGE_SECONDS it reads how much of the Claude plan's usage limits is used, with your claude login (as
+# /usage in claude does), and reports it to the board for the overview. The board can't: it runs in a container.
+#
+# Settings: KANBAN (default http://localhost:4317), POLL_SECONDS (default 30), UPDATE_FETCH_SECONDS (default 900),
+# CLAUDE_USAGE_SECONDS (default 300) and ULTRAKANBAN_AGENT_HOME.
 
 set -uo pipefail
 
 KANBAN=${KANBAN:-http://localhost:4317}
 POLL_SECONDS=${POLL_SECONDS:-30}
 UPDATE_FETCH_SECONDS=${UPDATE_FETCH_SECONDS:-900}
+CLAUDE_USAGE_SECONDS=${CLAUDE_USAGE_SECONDS:-300}
 AGENT_HOME=${ULTRAKANBAN_AGENT_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/ultrakanban-agent}
 self=$(readlink -f "$0")
 # The installed files and where they come from in the checkout.
@@ -163,6 +167,31 @@ update_board() {
     >/dev/null || echo "couldn't report the update to $KANBAN"
 }
 
+last_usage=
+# Reports how much Claude usage is left to the board (see reportClaudeUsageSchema), every CLAUDE_USAGE_SECONDS.
+report_claude_usage() {
+  local credentials token plan usage body
+  [[ -z $last_usage ]] || ((SECONDS - last_usage >= CLAUDE_USAGE_SECONDS)) || return 0
+  last_usage=$SECONDS
+  credentials=${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json
+  token=$(jq -r '.claudeAiOauth.accessToken // empty' "$credentials" 2>/dev/null)
+  plan=$(jq -r '.claudeAiOauth.subscriptionType // empty' "$credentials" 2>/dev/null)
+  if [[ -z $token ]]; then
+    body=$(jq -nc --arg error "No claude login found in $credentials. Sign in with claude on the host." '{error: $error}')
+  # The token goes to curl on stdin, not on its command line, where other users could read it.
+  elif usage=$(printf 'header = "Authorization: Bearer %s"\n' "$token" |
+    curl -sf --max-time 30 -K - -H 'anthropic-beta: oauth-2025-04-20' https://api.anthropic.com/api/oauth/usage) &&
+    jq -e 'type == "object"' >/dev/null 2>&1 <<<"$usage"; then
+    body=$(jq -nc --arg plan "$plan" --argjson usage "$usage" '{plan: ($plan | select(. != "")), usage: $usage}')
+  else
+    # Claude refreshes an expired login the next time it runs.
+    body=$(jq -nc --arg plan "$plan" '{plan: ($plan | select(. != "")),
+      error: "Claude didn\u0027t answer with the usage; the claude login may have expired. Running claude refreshes it."}')
+  fi
+  curl -sf -X POST "$KANBAN/api/system/claude-usage" -H 'Content-Type: application/json' \
+    -H 'X-Actor: agent-supervisor' -d "$body" >/dev/null || echo "couldn't report Claude usage to $KANBAN"
+}
+
 reconcile() {
   local boards wanted id repo agent model effort concurrency settings unit state units
   boards=$(curl -sf "$KANBAN/api/boards") || { echo "can't reach $KANBAN; leaving the loops as they are"; return; }
@@ -210,6 +239,7 @@ trap 'kill $! 2>/dev/null; exit 0' INT TERM
 echo "watching $KANBAN for boards with the agent switched on"
 while true; do
   check_in
+  report_claude_usage
   update_scripts
   reconcile
   sleep "$POLL_SECONDS" &

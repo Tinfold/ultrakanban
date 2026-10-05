@@ -777,3 +777,26 @@ export interface AppUpdate {
   /** Commits the checkout's default branch is behind origin, as of the supervisor's last fetch. */
   behind: number | null
 }
+
+/** One of the Claude plan's usage limits: the current session, the week, or the week for one model. */
+export interface ClaudeUsageLimit {
+  label: string
+  /** How much of it is used, 0 to 100. */
+  percent: number
+  /** When it resets; null if it isn't running (no usage yet in the window). */
+  resetsAt: string | null
+}
+
+/**
+ * How much Claude usage is left, as the agent supervisor (`scripts/agent-supervisor.sh`, on the host) last read it from
+ * Claude's usage endpoint with the host's claude login.
+ */
+export interface ClaudeUsage {
+  /** When the supervisor last reported; null if it never has. */
+  reportedAt: string | null
+  /** The subscription, e.g. "pro" or "max". */
+  plan: string | null
+  limits: ClaudeUsageLimit[]
+  /** Why the last report has no limits, e.g. no claude login on the host. */
+  error: string | null
+}

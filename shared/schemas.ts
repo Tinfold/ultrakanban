@@ -288,6 +288,16 @@ export const mergeRunSchema = z.object({ method: z.enum(MERGE_METHODS) })
 
 export const mergeTicketSchema = z.object({ method: z.enum(MERGE_METHODS).optional() })
 
+/**
+ * The agent supervisor reporting Claude usage: the answer of Claude's usage endpoint as it is (`usage`), or why it
+ * couldn't get one (`error`).
+ */
+export const reportClaudeUsageSchema = z.object({
+  plan: z.string().trim().max(100).nullable().optional(),
+  usage: z.record(z.string(), z.unknown()).optional(),
+  error: z.string().trim().max(4000).nullable().optional(),
+})
+
 /** The agent supervisor checking in, and reporting on an update it is doing. */
 export const reportAppUpdateSchema = z.object({
   state: z.enum(['running', 'done', 'failed']).optional(),
@@ -426,6 +436,7 @@ export type HeartbeatInput = z.input<typeof heartbeatSchema>
 export type ReleaseIdleInput = z.input<typeof releaseIdleSchema>
 export type SubmitForReviewInput = z.input<typeof submitForReviewSchema>
 export type ReportAppUpdateInput = z.input<typeof reportAppUpdateSchema>
+export type ReportClaudeUsageInput = z.input<typeof reportClaudeUsageSchema>
 export type PostPlanInput = z.input<typeof postPlanSchema>
 export type ApprovePlanInput = z.input<typeof approvePlanSchema>
 export type ClaimNextInput = z.input<typeof claimNextSchema>

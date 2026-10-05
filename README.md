@@ -175,6 +175,11 @@ and how many commits it is behind origin (fetched every 15 minutes). **Update & 
 another branch checked out or local changes. To keep everything running while you
 are logged out, also run `loginctl enable-linger`.
 
+**Claude usage.** The supervisor also reads how much of your Claude plan's usage limits is used (the current session,
+the week, and any per-model weekly limit, as `/usage` in claude shows them) every 5 minutes (`CLAUDE_USAGE_SECONDS`),
+with the claude login in `~/.claude/.credentials.json` (or `$CLAUDE_CONFIG_DIR`), and the overview shows it as bars of
+the usage left and when each resets. The board itself can't read it: it runs in a container, without your login.
+
 Then, per board, open **Board menu → Board settings**, set the **GitHub repository** (`owner/name`, or **New** to
 create one on GitHub with the server's login and link it) and switch on
 **Run the agent on this board** (or `PATCH /api/boards/:id` with `githubRepo` and `agentEnabled`). The supervisor
