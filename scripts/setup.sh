@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Sets up ultrakanban on this machine from a fresh clone:
 #   scripts/setup.sh              build and start the board with docker compose (or podman-compose) on port 4317
-#   scripts/setup.sh --agents     the same, then install the systemd user services that keep the board running and
-#                                 run the agents on boards that have them switched on (scripts/install-services.sh)
+#   scripts/setup.sh --agents     the same, plus the agents for boards that have them switched on: on Linux with
+#                                 systemd, as user services on this machine (scripts/install-services.sh); elsewhere
+#                                 (Windows, macOS) in the agents container
+#   scripts/setup.sh --agents=container   the agents in the container, on Linux too
 #   scripts/setup.sh --no-docker  without containers: install, build and start it with Node.js 22.13+ in the foreground
 #
 # With docker it creates .env from .env.example (GITHUB_TOKEN from `gh auth token` when gh is logged in). It is safe
@@ -14,13 +16,15 @@ repo=$(cd "$(dirname "$0")/.." && pwd)
 cd "$repo"
 
 agents=0
+container=0
 docker=1
 for arg in "$@"; do
   case $arg in
     --agents) agents=1 ;;
+    --agents=container) agents=1 container=1 ;;
     --no-docker) docker=0 ;;
     -h | --help)
-      sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -32,6 +36,11 @@ done
 if ((agents && !docker)); then
   echo "setup: --agents runs the board as a service with docker compose or podman-compose; drop --no-docker" >&2
   exit 1
+fi
+# Without systemd user services (Windows, macOS, containers) the agents run in their container.
+if ((agents && !container)) && ! systemctl --user show-environment >/dev/null 2>&1; then
+  container=1
+  echo "No systemd user services here: the agents will run in a container."
 fi
 
 missing=()
@@ -57,8 +66,7 @@ else
   need node 'Node.js 22.13+, https://nodejs.org'
   need npm 'comes with Node.js'
 fi
-if ((agents)); then
-  need systemctl 'the agent services are systemd user services, so they need Linux with systemd'
+if ((agents && !container)); then
   need gh 'GitHub CLI, https://cli.github.com, then: gh auth login'
   need jq 'your package manager'
   need claude 'Claude Code, https://claude.com/claude-code, then log in once by running: claude'
@@ -73,7 +81,7 @@ if ((!docker)); then
     exit 1
   fi
 fi
-if ((agents)) && ! gh auth status >/dev/null 2>&1; then
+if ((agents && !container)) && ! gh auth status >/dev/null 2>&1; then
   echo "setup: gh is not logged in; run: gh auth login" >&2
   exit 1
 fi
@@ -99,7 +107,9 @@ fi
 port=$(sed -n 's/^ULTRAKANBAN_PORT=//p' .env | tail -n 1)
 port=${port:-4317}
 
-if ((agents)); then
+if ((container)); then
+  "${compose[@]}" --profile agents up -d --build
+elif ((agents)); then
   # The service starts the board; build it first so the service's `up -d` doesn't build it with no output.
   "${compose[@]}" build
   "${compose[@]}" up -d
@@ -115,8 +125,15 @@ for _ in $(seq 60); do
     echo
     echo "ultrakanban is running at $url"
     if ((agents)); then
-      [[ $port == 4317 ]] ||
+      ((container)) || [[ $port == 4317 ]] ||
         echo "Note: the agent services expect the board on port 4317; set ULTRAKANBAN_PORT=4317 in .env."
+      if ((container)); then
+        [[ -n $(sed -n 's/^GITHUB_TOKEN=//p' .env) ]] ||
+          echo "The agents need a GitHub token to push: set GITHUB_TOKEN in .env, then run this again."
+        "${compose[@]}" exec -T agents test -f /home/node/.claude/.credentials.json 2>/dev/null ||
+          [[ -n $(sed -n 's/^CLAUDE_CODE_OAUTH_TOKEN=//p' .env) ]] ||
+          echo "Log the agents in to Claude once: ${compose[*]} exec -it agents claude (then /login, and /exit)"
+      fi
       echo "To run the agent on a board: Board menu → Board settings, set the GitHub repository and switch on"
       echo "\"Run the agent on this board\"."
     else

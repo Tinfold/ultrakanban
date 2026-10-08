@@ -7,6 +7,10 @@
 # that dies (with backoff), gives each one its own log in the journal, and stopping a unit kills everything it
 # started, so no processes are left behind. This script only decides which units should run.
 #
+# Where there are no systemd user services (the agents container, macOS), or with NO_SYSTEMD=1, it runs the loops itself
+# as its child processes instead: it restarts one that dies (waiting 30 s, doubling up to 15 min) and stops them all
+# when it stops. Their logs go to its own output, each line marked with the board.
+#
 # It also keeps the installed scripts and skill up to date. install-services.sh notes the checkout it installed them
 # from and that checkout's default branch commit, in AGENT_HOME/installed-from. When that branch moves (you pull),
 # this script copies the branch's versions over the installed ones: each agent loop starts again with them before its
@@ -21,7 +25,7 @@
 # /usage in claude does), and reports it to the board for the overview. The board can't: it runs in a container.
 #
 # Settings: KANBAN (default http://localhost:4317), POLL_SECONDS (default 30), UPDATE_FETCH_SECONDS (default 900),
-# CLAUDE_USAGE_SECONDS (default 300) and ULTRAKANBAN_AGENT_HOME.
+# CLAUDE_USAGE_SECONDS (default 300), NO_SYSTEMD and ULTRAKANBAN_AGENT_HOME.
 
 set -uo pipefail
 
@@ -31,6 +35,8 @@ UPDATE_FETCH_SECONDS=${UPDATE_FETCH_SECONDS:-900}
 CLAUDE_USAGE_SECONDS=${CLAUDE_USAGE_SECONDS:-300}
 AGENT_HOME=${ULTRAKANBAN_AGENT_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/ultrakanban-agent}
 self=$(readlink -f "$0")
+systemd=1
+[[ -z ${NO_SYSTEMD:-} ]] && systemctl --user show-environment >/dev/null 2>&1 || systemd=
 # The installed files and where they come from in the checkout.
 INSTALLED=(bin/agent-loop.sh:scripts/agent-loop.sh bin/agent-board.sh:scripts/agent-board.sh
   bin/agent-supervisor.sh:scripts/agent-supervisor.sh skill/SKILL.md:.claude/skills/ultrakanban/SKILL.md)
@@ -176,8 +182,11 @@ report_claude_usage() {
   credentials=${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json
   token=$(jq -r '.claudeAiOauth.accessToken // empty' "$credentials" 2>/dev/null)
   plan=$(jq -r '.claudeAiOauth.subscriptionType // empty' "$credentials" 2>/dev/null)
+  # A token from `claude setup-token`, which the agents container can be given instead of a login.
+  [[ -n $token ]] || token=${CLAUDE_CODE_OAUTH_TOKEN:-}
   if [[ -z $token ]]; then
-    body=$(jq -nc --arg error "No claude login found in $credentials. Sign in with claude on the host." '{error: $error}')
+    body=$(jq -nc --arg error "No claude login found in $credentials. Sign in by running claude where the agents run." \
+      '{error: $error}')
   # The token goes to curl on stdin, not on its command line, where other users could read it.
   elif usage=$(printf 'header = "Authorization: Bearer %s"\n' "$token" |
     curl -sf --max-time 30 -K - -H 'anthropic-beta: oauth-2025-04-20' https://api.anthropic.com/api/oauth/usage) &&
@@ -206,37 +215,106 @@ reconcile() {
     if [[ $(cat "$AGENT_HOME/boards/$id/settings" 2>/dev/null) != "$settings" ]]; then
       echo "board $id: starting its agent loop ($repo as $agent/$model/$effort, $concurrency at a time)"
       mkdir -p "$AGENT_HOME/boards/$id" && printf '%s\n' "$settings" >"$AGENT_HOME/boards/$id/settings"
-      systemctl --user restart "$unit"
+      loop_restart "$id"
       continue
     fi
-    state=$(systemctl --user is-active "$unit")
+    loop_state "$id"
     case $state in
       active | activating | reloading | deactivating) ;;
       *)
-        echo "board $id: agent loop is $state; starting it"
-        systemctl --user reset-failed "$unit" 2>/dev/null
-        systemctl --user start "$unit"
+        if ((SECONDS < ${not_before[$id]:-0})); then
+          echo "board $id: agent loop stopped; starting it again in $((not_before[$id] - SECONDS)) s"
+        else
+          echo "board $id: agent loop is $state; starting it"
+        fi
+        loop_start "$id"
         ;;
     esac
   done <<<"$wanted"
 
-  units=$(systemctl --user list-units --all --plain --no-legend 'ultrakanban-agent@*.service' | awk '{print $1}')
-  for unit in $units; do
-    id=${unit#ultrakanban-agent@}
-    id=${id%.service}
+  for id in $(loop_list); do
     [[ $'\n'$wanted == *$'\n'"$id"$'\t'* ]] && continue
-    state=$(systemctl --user is-active "$unit")
+    loop_state "$id"
     [[ $state == inactive ]] && continue
     echo "board $id: agent switched off or board deleted; stopping its loop"
-    systemctl --user stop "$unit"
-    systemctl --user reset-failed "$unit" 2>/dev/null
+    loop_stop "$id"
     rm -f "$AGENT_HOME/boards/$id/settings"
   done
 }
 
-trap 'kill $! 2>/dev/null; exit 0' INT TERM
+# The loops: systemd units, or this script's child processes without systemd (see the top).
+declare -A pids=() failures=() started=() not_before=()
+loop_list() {
+  if [[ -n $systemd ]]; then
+    systemctl --user list-units --all --plain --no-legend 'ultrakanban-agent@*.service' |
+      awk '{sub(/^ultrakanban-agent@/, "", $1); sub(/\.service$/, "", $1); print $1}'
+  else
+    printf '%s\n' "${!pids[@]}"
+  fi
+}
+# Sets state to the board's loop's state, as systemctl is-active says it.
+loop_state() {
+  local failed
+  if [[ -n $systemd ]]; then
+    state=$(systemctl --user is-active "ultrakanban-agent@$1.service")
+  elif [[ -n ${pids[$1]:-} ]] && kill -0 "${pids[$1]}" 2>/dev/null; then
+    state=active
+  elif [[ -n ${pids[$1]:-} ]]; then
+    # It stopped by itself: start it again after a wait that grows with each quick failure, as systemd does.
+    ((SECONDS - started[$1] < 900)) || failures[$1]=0
+    failed=${failures[$1]:-0}
+    not_before[$1]=$((SECONDS + (failed < 5 ? 30 << failed : 900)))
+    failures[$1]=$((failed + 1))
+    unset 'pids[$1]'
+    state=failed
+  elif ((SECONDS < ${not_before[$1]:-0})); then
+    state=activating # waiting to be started again
+  else
+    state=inactive
+  fi
+}
+loop_start() {
+  if [[ -n $systemd ]]; then
+    systemctl --user reset-failed "ultrakanban-agent@$1.service" 2>/dev/null
+    systemctl --user start "ultrakanban-agent@$1.service"
+    return
+  fi
+  ((SECONDS >= ${not_before[$1]:-0})) || return 0
+  "${self%/*}/agent-board.sh" "$1" > >(while IFS= read -r line; do printf 'board %s: %s\n' "$1" "$line"; done) 2>&1 &
+  pids[$1]=$!
+  started[$1]=$SECONDS
+}
+loop_stop() {
+  local waited=0
+  if [[ -n $systemd ]]; then
+    systemctl --user stop "ultrakanban-agent@$1.service"
+    systemctl --user reset-failed "ultrakanban-agent@$1.service" 2>/dev/null
+    return
+  fi
+  if [[ -n ${pids[$1]:-} ]]; then
+    kill "${pids[$1]}" 2>/dev/null
+    while kill -0 "${pids[$1]}" 2>/dev/null && ((waited++ < 30)); do sleep 1; done
+    kill -KILL "${pids[$1]}" 2>/dev/null
+  fi
+  unset 'pids[$1]' 'failures[$1]' 'not_before[$1]'
+}
+loop_restart() {
+  if [[ -n $systemd ]]; then
+    systemctl --user restart "ultrakanban-agent@$1.service"
+  else
+    loop_stop "$1"
+    loop_start "$1"
+  fi
+}
+stop_all() {
+  local id
+  [[ -n $systemd ]] && return
+  for id in "${!pids[@]}"; do loop_stop "$id"; done
+}
 
-echo "watching $KANBAN for boards with the agent switched on"
+trap 'kill $! 2>/dev/null; stop_all; exit 0' INT TERM
+
+echo "watching $KANBAN for boards with the agent switched on${systemd:+ (loops run as systemd user units)}"
 while true; do
   check_in
   report_claude_usage

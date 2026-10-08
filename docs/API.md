@@ -287,7 +287,7 @@ request down (e.g. the name is taken, or the token can't create repositories the
 Administration write), and `read:org` plus access to the organization to create one in an organization.
 
 `agentEnabled` can only be switched on once `githubRepo` is set (`400` otherwise). It is read by
-`scripts/agent-supervisor.sh`, which runs on the host and keeps one agent loop per enabled board; see the README.
+`scripts/agent-supervisor.sh`, which runs on the host and keeps one agent loop per enabled board; see `docs/agents.md`.
 The loop runs Claude Code with `agentModel` and `agentEffort` and claims tickets as
 `<agentName>/<agentModel>/<agentEffort>`, e.g. `claude/opus/medium` with nothing set. A ticket's own `agentModel`
 and `agentEffort` override the board's for that ticket: the loop runs it with them and under that name.

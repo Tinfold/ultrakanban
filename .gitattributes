@@ -1,0 +1,2 @@
+# Shell scripts run in Linux containers even when cloned on Windows: keep LF line endings everywhere.
+* text=auto eol=lf
