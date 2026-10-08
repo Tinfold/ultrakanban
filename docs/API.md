@@ -609,8 +609,9 @@ include their work.
 
 ## Updating ultrakanban
 
-The app can't update itself from its container; the agent supervisor (`scripts/agent-supervisor.sh`, on the host) does
-it when asked. `GET /system/update` returns the state:
+The app can't update itself from its container; the updater does it when asked: the agent supervisor
+(`scripts/agent-supervisor.sh`) on a Linux host, or the updater container (`deploy/updater.sh`, compose profile
+`updater`) on Windows and macOS. Below, "the supervisor" is either. `GET /system/update` returns the state:
 
 ```ts
 {

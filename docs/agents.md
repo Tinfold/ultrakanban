@@ -90,9 +90,16 @@ volume. Log it in once, on the board's Setup page:
 - More of the machine: the agents see only their volume and the network. Mount what else they need under `volumes:`
   of the `agents` service in `docker-compose.yml`, and install other tools with your own image on top of it.
 
-The container can't do everything the services on the machine do: it doesn't update itself from the app's update
-button (pull, then run the `up` command again), and **Run the agent in Docker containers** doesn't work in it (there is
-no Docker inside). Logs: `docker compose logs -f agents`.
+The container can't do everything the services on the machine do: **Run the agent in Docker containers** doesn't work
+in it (there is no Docker inside). Logs: `docker compose logs -f agents`.
+
+The app's update button needs the **updater container** there instead of the services (`--profile updater`, which
+`scripts/setup.sh` adds where there are no systemd user services, with docker compose;
+[`deploy/updater.sh`](../deploy/updater.sh)). It mounts the checkout and the Docker socket: when someone asks for an
+update it pulls the checkout's default branch and runs `docker compose up -d --build` on the containers that run (the
+board, nginx and the agents), with the compose files they were started with, so `deploy/compose.gpu.yml` stays. Agent
+runs stopped by the restart are picked up again. It doesn't rebuild its own container: run the `up` command yourself
+when `deploy/updater.Dockerfile` changes. Logs: `docker compose logs -f updater`.
 
 When the agents need the machine itself (a Mac's GPU, its apps or devices), run the supervisor there without systemd:
 it then keeps the loops as its own child processes. On macOS that takes the GNU tools the scripts use

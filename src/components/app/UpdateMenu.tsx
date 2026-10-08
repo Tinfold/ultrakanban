@@ -12,7 +12,7 @@ import { api, errorMessage } from '@/lib/api'
 import { formatRelative } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
-/** The supervisor checks in every 30 seconds; after this long without it, nothing would act on a request soon. */
+/** The updater checks in every 30 seconds; after this long without it, nothing would act on a request soon. */
 const UPDATER_OFFLINE_MS = 3 * 60_000
 
 const loadedAt = new Date().toISOString()
@@ -20,7 +20,7 @@ const loadedAt = new Date().toISOString()
 function UpdateStatus({ update }: { update: AppUpdate }) {
   switch (update.state) {
     case 'requested':
-      return <p className="text-xs text-muted-foreground">Waiting for the agent supervisor to start the update…</p>
+      return <p className="text-xs text-muted-foreground">Waiting for the updater to start the update…</p>
     case 'running':
       return (
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -46,8 +46,9 @@ function UpdateStatus({ update }: { update: AppUpdate }) {
 }
 
 /**
- * Updates and restarts ultrakanban: the agent supervisor on the host pulls the latest default branch and rebuilds the
- * board. Shown once a supervisor has checked in, since nothing else would act on the request.
+ * Updates and restarts ultrakanban: the updater (the agent supervisor on a Linux host, or the updater container on
+ * Windows and macOS) pulls the latest default branch and rebuilds the board. Shown once an updater has checked in, since
+ * nothing else would act on the request.
  */
 export function UpdateMenu() {
   const queryClient = useQueryClient()
@@ -102,8 +103,7 @@ export function UpdateMenu() {
         <UpdateStatus update={update} />
         {offline && (
           <p className="text-xs text-muted-foreground">
-            The agent supervisor last checked in {formatRelative(update.updaterSeenAt)}; an update starts once it is
-            back.
+            The updater last checked in {formatRelative(update.updaterSeenAt)}; an update starts once it is back.
           </p>
         )}
         <div className="flex justify-end gap-2">
@@ -127,7 +127,7 @@ export function UpdateMenu() {
         open={confirming}
         onOpenChange={setConfirming}
         title="Update and restart ultrakanban?"
-        description="The agent supervisor pulls the latest version, rebuilds the board and restarts it. The board is unreachable for a minute or so meanwhile; agent runs carry on."
+        description="This pulls the latest version, rebuilds the board and restarts it. The board is unreachable for a minute or so meanwhile. Agent runs carry on; agents in a container restart and pick up their runs again."
         confirmLabel="Update & restart"
         onConfirm={() => send(api.requestAppUpdate)}
       />

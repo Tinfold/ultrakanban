@@ -75,8 +75,10 @@ The **Setup page** (`/setup`, the gear in the header) shows what's left and does
 3. **A board.** Create one, open **Board menu → Board settings**, set its GitHub repository (or create one there) and
    switch on **Run the agent on this board**. The agent then works the board's Todo tickets.
 
-To update: on Linux, the update button in the header (once the agents run). On macOS and Windows, `git pull`, then run
-the same command again.
+To update: the update button in the header. On Linux it shows once the agents run as services; on macOS and Windows
+the updater container that `scripts/setup.sh` starts does the update (it pulls this checkout and rebuilds the board and
+the agents container). In PowerShell, add `--profile updater` to the `up` command above for it. Or `git pull`, then
+run the same command again.
 
 ## Docs
 

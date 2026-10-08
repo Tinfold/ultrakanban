@@ -9,7 +9,9 @@
 #
 # With docker it creates .env from .env.example, with your GitHub token from gh if gh is logged in. The rest of the setup
 # is on the board's Setup page (/setup), which it opens: the board's GitHub token, and the agents' GitHub and Claude
-# logins, wherever they run. It is safe to run again: it keeps an existing .env, and rebuilds the board.
+# logins, wherever they run. It is safe to run again: it keeps an existing .env, and rebuilds the board. Where there are
+# no systemd user services (Windows, macOS) it also starts the updater container (with docker compose, not podman),
+# which updates the board from the app's update button; on Linux the agent services do that.
 
 set -euo pipefail
 
@@ -25,7 +27,7 @@ for arg in "$@"; do
     --agents=container) agents=1 container=1 ;;
     --no-docker) docker=0 ;;
     -h | --help)
-      sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -38,8 +40,10 @@ if ((agents && !docker)); then
   echo "setup: --agents runs the board as a service with docker compose or podman-compose; drop --no-docker" >&2
   exit 1
 fi
+systemd=1
+systemctl --user show-environment >/dev/null 2>&1 || systemd=0
 # Without systemd user services (Windows, macOS, containers) the agents run in their container.
-if ((agents && !container)) && ! systemctl --user show-environment >/dev/null 2>&1; then
+if ((agents && !container && !systemd)); then
   container=1
   echo "No systemd user services here: the agents will run in a container."
 fi
@@ -122,15 +126,19 @@ fi
 port=$(env_get ULTRAKANBAN_PORT)
 port=${port:-4317}
 
-if ((container)); then
-  "${compose[@]}" --profile agents up -d --build
-elif ((agents)); then
+# Without the agent services on this machine, the updater container acts on the app's update button. It runs docker
+# compose through the Docker socket, so not with podman.
+profiles=()
+((systemd)) || [[ ${compose[0]} != docker ]] || profiles+=(--profile updater)
+((!container)) || profiles+=(--profile agents)
+
+if ((container)) || ((!agents)); then
+  "${compose[@]}" ${profiles[@]+"${profiles[@]}"} up -d --build
+else
   # The service starts the board; build it first so the service's `up -d` doesn't build it with no output.
   "${compose[@]}" build
   "${compose[@]}" up -d
   scripts/install-services.sh
-else
-  "${compose[@]}" up -d --build
 fi
 
 url=http://localhost:$port
