@@ -1,6 +1,6 @@
 import { CalendarIcon, CpuIcon, FileTextIcon, GaugeIcon, LayersIcon, TagIcon, UserRoundIcon } from 'lucide-react'
 import { type FormEvent, useRef, useState } from 'react'
-import { AGENT_DEFAULTS, type AgentEffort, type Priority, TICKET_TEMPLATES } from '@shared/domain'
+import { AGENT_DEFAULTS, type AgentEffort, isClaudeModel, type Priority, TICKET_TEMPLATES } from '@shared/domain'
 import { EpicChip } from '@/components/common/EpicChip'
 import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { ColorDot, TagChip } from '@/components/common/TagChip'
@@ -96,7 +96,8 @@ function CreateTicketForm({ initialEpicId, onDone, onCreated }: CreateTicketForm
   const applyTemplate = async (template: (typeof TICKET_TEMPLATES)[number]) => {
     setDescription(template.description)
     setAgentEffort(template.agentEffort)
-    setAgentModel(template.agentModel)
+    // The templates' models are Claude's, which a board's agent on another model (through an endpoint) can't run.
+    setAgentModel(isClaudeModel(detail.board.agentModel ?? AGENT_DEFAULTS.model) ? template.agentModel : null)
     const added: string[] = []
     for (const tagName of template.tags) {
       const existing = detail.tags.find((tag) => tag.name.toLowerCase() === tagName.toLowerCase())

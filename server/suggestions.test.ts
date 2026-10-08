@@ -102,6 +102,23 @@ describe('agent suggestions', () => {
     assert.deepEqual([result.suggestion?.costUsd, result.suggestion?.tokens], [2.2, 10_500])
   })
 
+  test("counts only tickets the board's own agent did most of the work on", async () => {
+    // Other agents run models the board's agent can't, whatever they call their effort.
+    await pastTicket('Tidy up the settings page', 'done', [['codex/gpt-5-codex/high', 0.1]])
+    await pastTicket('Tidy up the setup page', 'done', [
+      ['gemini/gemini-2.5-pro/default', null, 9000],
+      ['claude/haiku/low', 0.01],
+    ])
+    // Its model can be any the endpoint it uses serves.
+    await pastTicket('Tidy up the overview page', 'done', [['claude/openrouter/qwen/qwen3-coder/medium', 0.2]])
+    assert.deepEqual(settings(await suggest('title=Tidy+up+the+board+page')), ['openrouter/qwen/qwen3-coder/medium'])
+
+    // Under another name, only the runs under that name count.
+    await pastTicket('Tidy up the epics page', 'done', [['bot/sonnet/high', 0.3]])
+    await call('PATCH', `/boards/${boardId}`, { agentName: 'bot' })
+    assert.deepEqual(settings(await suggest('title=Tidy+up+the+board+page')), ['sonnet/high'])
+  })
+
   test('compares by tokens when runs reported no cost', async () => {
     await pastTicket('Rename column setting', 'done', [['claude/opus/high', null, 90_000]])
     await pastTicket('Rename board setting', 'done', [['claude/haiku/low', null, 20_000]])

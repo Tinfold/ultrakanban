@@ -35,7 +35,7 @@ function StatusBadge({ status }: { status: OverviewAgent['status'] }) {
 function usageSummary({ usage }: OverviewAgent) {
   const runs = `${usage.runs} ${usage.runs === 1 ? 'run' : 'runs'}`
   return [
-    `${runs}, ${formatCost(usage.costUsd)} estimated`,
+    usage.costUsd === null ? runs : `${runs}, ${formatCost(usage.costUsd)} estimated`,
     `Input: ${usage.inputTokens.toLocaleString()}`,
     `Output: ${usage.outputTokens.toLocaleString()}`,
     `Cache writes: ${usage.cacheWriteTokens.toLocaleString()}`,

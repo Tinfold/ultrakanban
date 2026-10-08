@@ -28,6 +28,10 @@ Unknown tag names are created automatically when creating or updating tickets.
 effort level. Use the name you were given if there is one; otherwise build it this way and never invent a new one,
 so the board and its history show which model and effort did each piece of work. The board's own agent names its
 runs like this from the board settings (`agentWorkerName` in `shared/domain.ts`).
+Agents other than Claude Code do the same, with their own effort levels (`codex/gpt-5.1-codex/minimal`) or `default`
+for a model that has none (`gemini/gemini-2.5-pro/default`). The model is everything between the first and the last
+`/`, so it can have slashes of its own (`opencode/openrouter/qwen/qwen3-coder/default`) and Ollama tags
+(`opencode/qwen3-coder:30b/default`).
 
 1. `GET /api/boards` and pick a board. `GET /api/boards/:boardId` shows its columns, tags, tickets and workflow
    (`board.reviewColumnId`, `board.doneColumnId`).
@@ -438,7 +442,9 @@ the same, with `ticketId: null`. Every ticket carries its runs' totals in `usage
 
 A run can also say how its tokens split between the models it called (`models`, one entry per model, from
 `claude -p`'s `modelUsage`; the agent loop sends it), so the overview can show token usage by model. The overview
-counts a run that doesn't as one of the model in its agent's name (`opus` for `claude/opus/high`), or of `unknown`.
+counts a run that doesn't as one of the model in its agent's name (`opus` for `claude/opus/high`, `gpt-5.1-codex`
+for `codex/gpt-5.1-codex/minimal`), or of `unknown`. `costUsd` is optional: leave it out when the agent doesn't know
+its cost (local models cost nothing), and the totals show no cost rather than $0 until a run reports one.
 
 | Method | Path                       | Body                                                                                                                                                                                               | Returns                                              |
 | ------ | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
@@ -474,7 +480,9 @@ when unknown).
 
 - **Past tickets** count once they are decided: finished (in the done column or with a merged pull request), or given
   up on (in the cancelled column, or with their pull request closed unmerged). Each counts at the setting of the
-  `<agent>/<model>/<effort>` name whose runs used the most tokens on it, with the cost of all its runs.
+  `<agent>/<model>/<effort>` name whose runs used the most tokens on it, with the cost of all its runs. Only tickets
+  the board's own agent did most of (names starting with its `agentName`, `claude` by default) count: the suggestion
+  sets the model and effort it works the ticket at, and another agent's (Codex on GPT, say) aren't any it can run.
 - **Similar** means sharing tags (45%) or title words (45%, stop words left out); a similar number of checklist steps
   adds up to 10% but isn't enough alone. The 20 most similar count, each weighted by its similarity.
 - **The suggestion** is the cheapest setting (by cost, or by tokens when runs reported no cost) whose weighted success
@@ -583,7 +591,7 @@ interface Overview {
   recent: (Activity & { ticket: { number; title; boardId; boardName } })[] // latest 30, newest first
 }
 
-// Token usage added up over runs; costUsd sums the runs that reported a cost.
+// Token usage added up over runs; costUsd sums the runs that reported a cost (null when none did).
 interface UsageTotals {
   inputTokens
   outputTokens

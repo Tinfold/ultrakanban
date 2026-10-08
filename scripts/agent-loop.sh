@@ -89,7 +89,9 @@
 #
 # Optional settings (environment variables):
 #   AGENT               name of the board's agent; its workers claim tickets as AGENT/MODEL/EFFORT (default: claude)
-#   MODEL               Claude model the workers run, an alias or a full name such as claude-opus-5-5 (default: opus)
+#   MODEL               Claude model the workers run, an alias or a full name such as claude-opus-5-5, or one that
+#                       the endpoint in ANTHROPIC_BASE_URL serves instead, such as qwen3-coder:30b (see docs/agents.md;
+#                       default: opus)
 #   EFFORT              effort level the workers run at unless the ticket sets its own: low, medium, high, xhigh
 #                       or max (default: medium)
 #   TODO_COLUMN         column to take new tickets from (default: Todo)

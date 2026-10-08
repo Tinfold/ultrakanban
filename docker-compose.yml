@@ -37,6 +37,9 @@ services:
       GH_TOKEN: ${GITHUB_TOKEN:-}
       # Optional: a token from `claude setup-token`, instead of logging the agents in to Claude on the Setup page
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # Optional: an endpoint that serves a local model or another provider's instead of Claude, and its token
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
     volumes:
       # Home directory: claude's and gh's logins, and the clones the agents work in
       - ultrakanban-agent-home:/home/node

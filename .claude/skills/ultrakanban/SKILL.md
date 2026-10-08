@@ -18,6 +18,8 @@ agents can work the same board safely.
   `claude/claude-opus-5-5/high`. When you are given a name (the board's agent loop always gives one), use exactly
   that. Otherwise build it this way, with `claude` as the agent for Claude Code, and never make one up: the board
   and its dashboard group work by name, so the same model and effort must always show up under the same name.
+  Other agents name themselves the same way, e.g. `codex/gpt-5.1-codex/medium`, with `default` as the effort for a
+  model that has no effort levels, e.g. `opencode/qwen3-coder:30b/default`.
 
 ## Working rules
 
