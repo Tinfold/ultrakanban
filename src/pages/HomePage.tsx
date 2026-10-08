@@ -1,5 +1,5 @@
 import { UploadIcon } from 'lucide-react'
-import { Redirect } from 'wouter'
+import { Link, Redirect } from 'wouter'
 import { AppHeader, Logo } from '@/components/app/AppHeader'
 import { CreateBoardForm } from '@/components/boards/CreateBoardDialog'
 import { Button } from '@/components/ui/button'
@@ -37,6 +37,13 @@ export function HomePage() {
             <UploadIcon />
             Import a board from file
           </Button>
+          <p className="mt-4 text-center text-sm text-muted-foreground">
+            To have agents work your tickets,{' '}
+            <Link href="/setup" className="text-foreground underline underline-offset-2">
+              connect GitHub and Claude
+            </Link>
+            .
+          </p>
         </div>
       </main>
     </>

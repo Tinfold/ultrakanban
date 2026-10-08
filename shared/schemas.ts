@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import {
   AGENT_EFFORTS,
+  AGENT_LOGIN_KINDS,
   AGENT_MAX_CONCURRENCY,
   COLORS,
   MERGE_METHODS,
@@ -306,6 +307,31 @@ export const reportAppUpdateSchema = z.object({
   behind: z.int().min(0).nullable().optional(),
 })
 
+/** A GitHub token for the board, set on the Setup page. */
+export const setGitHubTokenSchema = z.object({ token: z.string().trim().min(1).max(500) })
+
+/** The agent supervisor checking in with where it runs and the agents' logins (see `AgentHost`). */
+export const reportAgentHostSchema = z.object({
+  runsIn: z.enum(['machine', 'container']),
+  githubLogin: z.string().trim().max(100).nullable().optional(),
+  claudeAccount: z.string().trim().max(300).nullable().optional(),
+  gitIdentity: z.string().trim().max(300).nullable().optional(),
+})
+
+/** Asking the agent supervisor to run a login. */
+export const requestAgentLoginSchema = z.object({ kind: z.enum(AGENT_LOGIN_KINDS) })
+
+/** The code Claude's sign-in page shows, pasted on the Setup page for the supervisor's `claude auth login`. */
+export const agentLoginCodeSchema = z.object({ code: z.string().trim().min(1).max(1000) })
+
+/** The agent supervisor reporting on a login it runs. */
+export const reportAgentLoginSchema = z.object({
+  state: z.enum(['waiting', 'checking', 'done', 'failed']),
+  url: z.url().max(2000).nullable().optional(),
+  userCode: z.string().trim().max(100).nullable().optional(),
+  message: z.string().trim().max(4000).nullable().optional(),
+})
+
 const tokens = z.int().min(0)
 const cost = z.number().min(0).nullable().default(null)
 
@@ -437,6 +463,8 @@ export type ReleaseIdleInput = z.input<typeof releaseIdleSchema>
 export type SubmitForReviewInput = z.input<typeof submitForReviewSchema>
 export type ReportAppUpdateInput = z.input<typeof reportAppUpdateSchema>
 export type ReportClaudeUsageInput = z.input<typeof reportClaudeUsageSchema>
+export type ReportAgentHostInput = z.input<typeof reportAgentHostSchema>
+export type ReportAgentLoginInput = z.input<typeof reportAgentLoginSchema>
 export type PostPlanInput = z.input<typeof postPlanSchema>
 export type ApprovePlanInput = z.input<typeof approvePlanSchema>
 export type ClaimNextInput = z.input<typeof claimNextSchema>

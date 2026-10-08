@@ -1,9 +1,15 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { type CheckStatus, MERGE_METHODS, type MergeMethod, parsePullRequestUrl } from '../shared/domain.ts'
+import {
+  type CheckStatus,
+  type GitHubAuthSource,
+  MERGE_METHODS,
+  type MergeMethod,
+  parsePullRequestUrl,
+} from '../shared/domain.ts'
 import type { PullRequestStatus } from './store/tickets.ts'
 
-export type GitHubAuth = 'env' | 'gh' | null
+export type GitHubAuth = GitHubAuthSource | null
 
 export interface NewRepository {
   /** User or organization to create it under; the signed-in user when omitted. */
@@ -31,6 +37,12 @@ export interface GitHubPullRequest {
 export interface GitHubClient {
   /** Where the API token comes from; `null` means unauthenticated (public repos only, 60 requests/hour). */
   auth: () => Promise<GitHubAuth>
+  /** The account the token belongs to; `error` when there is no token or GitHub turns it down. */
+  account: () => Promise<{ login: string | null; error: string | null }>
+  /** The account a token belongs to, before using it; throws a `GitHubError` when GitHub turns it down. */
+  verifyToken: (token: string) => Promise<string>
+  /** Looks for the token again, after it was changed on the Setup page. */
+  resetAuth: () => void
   fetchPullRequestStatus: (url: string) => Promise<PullRequestStatus>
   /** Creates a repository with an initial commit, so it has a default branch to clone and branch from. */
   createRepository: (input: NewRepository) => Promise<{ repo: string; url: string }>
@@ -59,7 +71,9 @@ export class GitHubError extends Error {
   }
 }
 
-async function resolveToken(): Promise<{ token: string | null; auth: GitHubAuth }> {
+async function resolveToken(storedToken: () => string | null): Promise<{ token: string | null; auth: GitHubAuth }> {
+  const stored = storedToken()
+  if (stored) return { token: stored, auth: 'board' }
   const envToken = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN
   if (envToken) return { token: envToken, auth: 'env' }
   try {
@@ -88,13 +102,16 @@ const REPO_MERGE_SETTINGS: Record<MergeMethod, string> = {
   rebase: 'allow_rebase_merge',
 }
 
-/** GitHub REST client authenticated with GITHUB_TOKEN / GH_TOKEN or the GitHub CLI's login. */
-export function createGitHubClient(): GitHubClient {
+/**
+ * GitHub REST client authenticated with the token set on the Setup page (`storedToken`), GITHUB_TOKEN / GH_TOKEN, or
+ * the GitHub CLI's login, in that order.
+ */
+export function createGitHubClient(storedToken: () => string | null = () => null): GitHubClient {
   let credentials: ReturnType<typeof resolveToken> | undefined
-  const getCredentials = () => (credentials ??= resolveToken())
+  const getCredentials = () => (credentials ??= resolveToken(storedToken))
 
-  async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const { token } = await getCredentials()
+  async function request<T>(method: string, path: string, body?: unknown, withToken?: string): Promise<T> {
+    const token = withToken ?? (await getCredentials()).token
     const response = await fetch(`https://api.github.com${path}`, {
       method,
       headers: {
@@ -157,6 +174,22 @@ export function createGitHubClient(): GitHubClient {
 
   return {
     auth: async () => (await getCredentials()).auth,
+
+    async account() {
+      if (!(await getCredentials()).token) return { login: null, error: 'No GitHub token' }
+      try {
+        return { login: await getLogin(), error: null }
+      } catch (error) {
+        return { login: null, error: error instanceof Error ? error.message : String(error) }
+      }
+    },
+
+    verifyToken: async (token) => (await request<{ login: string }>('GET', '/user', undefined, token)).login,
+
+    resetAuth() {
+      credentials = undefined
+      login = undefined
+    },
 
     async fetchPullRequestStatus(url) {
       const pullRequest = parsePullRequestUrl(url)

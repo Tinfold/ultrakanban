@@ -61,8 +61,9 @@ you pull this checkout's default branch, it installs the new versions, and each 
 next run. Run the script again only when the systemd units in `deploy/` change.
 
 The agents use your own logins on the machine: gh's (`gh auth login`), claude's (`claude auth login`), and git's commit
-name and email. `scripts/setup.sh --agents` checks them before it installs the services, logs you in to what is
-missing, and sets git's name and email from your GitHub account if you have none.
+name and email. The board's **Setup page** (`/setup`, the gear in the header) shows which of them the agents have, and
+logs them in for you (see [Logins from the Setup page](#logins-from-the-setup-page)); `scripts/setup.sh --agents` sets
+git's name and email from your GitHub account if you have none.
 
 **Windows, macOS, or no systemd: the agents container.** `docker compose --profile agents up -d --build` (what
 `scripts/setup.sh --agents` does where there are no systemd user services, and `scripts/setup.sh --agents=container`
@@ -71,16 +72,17 @@ does on Linux too) runs the supervisor and its loops in the
 gh, jq, Node.js 22, Python 3, a C toolchain, and Playwright with Chromium (`require('playwright')` works from any
 directory) so agents can take screenshots of UI changes; the loops run as the container's own child processes instead of
 systemd units, and its home directory (claude's and gh's logins, the boards' clones) is the `ultrakanban-agent-home`
-volume. Set it up once (`scripts/setup.sh` does this, asking for the logins that are missing):
+volume. Log it in once, on the board's Setup page:
 
-- `GITHUB_TOKEN` in `.env` is its GitHub login (`GH_TOKEN`): it needs write access to the boards' repositories, as
-  agents push branches and open pull requests with it. `gh auth token` gives yours where gh is logged in; or create a
+- **GitHub**: **Log in to GitHub** shows a code to enter at github.com/login/device. The agents push branches and open
+  pull requests with that login, and commit as that GitHub user; the board gets its token too if it has none. Or set
+  `GITHUB_TOKEN` in `.env` (the container gets it as `GH_TOKEN`; it needs write access to the boards' repositories):
+  `gh auth token` gives yours where gh is logged in, or create a
   [classic token](https://github.com/settings/tokens/new?scopes=repo,read:org,workflow&description=ultrakanban) with the
-  `repo`, `read:org` and `workflow` scopes. Without gh on the machine, setup.sh logs gh in inside the container
-  (`gh auth login`, with a code you enter on github.com) and puts its token in `.env`. The container commits as that
-  GitHub user.
-- Log in to Claude once: `docker compose exec -it agents claude auth login` (open the link it prints, then paste the
-  code back). Or put a token from `claude setup-token` in `.env` as `CLAUDE_CODE_OAUTH_TOKEN`.
+  `repo`, `read:org` and `workflow` scopes. `scripts/setup.sh` puts gh's token there when gh is logged in.
+- **Claude**: **Log in to Claude** gives you Claude's sign-in link; paste the code it shows back on the page. Or
+  `docker compose exec -it agents claude auth login`, or put a token from `claude setup-token` in `.env` as
+  `CLAUDE_CODE_OAUTH_TOKEN`.
 - GPUs: add [`deploy/compose.gpu.yml`](../deploy/compose.gpu.yml)
   (`docker compose -f docker-compose.yml -f deploy/compose.gpu.yml --profile agents up -d`) to give it the NVIDIA GPUs,
   on Linux with the NVIDIA Container Toolkit or on Windows with Docker Desktop's WSL 2 backend. Docker on macOS can't
@@ -97,6 +99,22 @@ it then keeps the loops as its own child processes. On macOS that takes the GNU 
 (`brew install bash coreutils flock jq gh`, with `$(brew --prefix)/opt/coreutils/libexec/gnubin` first in `PATH`), and
 then `scripts/agent-supervisor.sh` in a terminal that stays open. This is untested on macOS. On Windows, use WSL 2
 (Ubuntu with systemd on), where it is the same as on Linux.
+
+### Logins from the Setup page
+
+The supervisor checks in with the board every 30 seconds: where it runs (on the machine or in the container), the
+GitHub account gh is logged in as, the Claude account claude is logged in as, and git's commit name and email. The
+Setup page shows them, and **Log in to GitHub** or **Log in to Claude** there asks the supervisor to run
+`gh auth login --web` or `claude auth login` where the agents run, within a few seconds:
+
+- GitHub: the page shows gh's one-time code and a link to github.com/login/device. Once you approve it, the supervisor
+  sets git up to push with it (`gh auth setup-git`), sets git's name and email from the GitHub account if there are
+  none, and gives the board the token if the board has none.
+- Claude: the page shows Claude's sign-in link and a box for the code Claude shows after you sign in; the supervisor
+  passes it to `claude auth login`.
+
+A login that isn't finished in 15 minutes stops, as its code expires. The board's own GitHub token can also be pasted
+there; it is kept in the board's database, takes precedence over `GITHUB_TOKEN` and gh, and the API never sends it back.
 
 **Updating from the app.** Once the supervisor runs, the header shows an update button, with the version the board runs
 and how many commits it is behind origin (fetched every 15 minutes). **Update & restart** asks the supervisor to

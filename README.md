@@ -6,46 +6,63 @@ checklists, epics, sub-tickets, an overview dashboard, and an atomic JSON API ba
 
 ## Install
 
-You need [git](https://git-scm.com) and [Docker](https://docs.docker.com/get-docker/) (Docker Desktop on Windows and
-macOS; on Linux, Docker Engine with compose, or podman-compose).
+You need a [GitHub](https://github.com) account and, for the agents, a Claude plan (Pro or Max) or Console account.
+Install the tools for your system, then run the setup script from a terminal. It starts the board at
+<http://localhost:4317> and opens its Setup page, where you do the rest.
+
+**Linux.** Install git and [Docker Engine](https://docs.docker.com/engine/install/) with the compose plugin (or
+podman-compose). For the agents, also the [GitHub CLI](https://cli.github.com), jq and
+[Claude Code](https://claude.com/claude-code).
 
 ```sh
 git clone https://github.com/Tinfold/ultrakanban.git
 cd ultrakanban
-scripts/setup.sh           # the board, at http://localhost:4317
-scripts/setup.sh --agents  # the board and the agents
+scripts/setup.sh --agents   # leave out --agents for the board alone
 ```
 
-The script asks for the logins that are missing: GitHub (your `gh` login, or a token it tells you how to create) and,
-for the agents, Claude. Run it again any time to add one you skipped.
+The agents run as systemd user services on your machine, with full access to it (your files, tools and GPUs). To run
+them in a container instead, use `--agents=container`.
 
-On Windows, run these in Git Bash or WSL. Or skip the script, on any system:
+**macOS.** Install [Docker Desktop](https://docs.docker.com/desktop/setup/install/mac-install/) and start it, and git
+(`xcode-select --install`). In Terminal, run the same three commands as for Linux. The agents run in a container, which
+has everything they need (claude, gh, git, Node.js, Python, a browser for screenshots). Docker on macOS can't give it the
+Mac's GPU.
 
-```sh
-cp .env.example .env   # set GITHUB_TOKEN: `gh auth token`, or a classic token with the repo and workflow scopes
+**Windows.** Install [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/) (with the WSL 2
+backend) and start it, and [Git for Windows](https://git-scm.com/download/win). In **Git Bash**, run the same three
+commands as for Linux. The agents run in a container, as on macOS. For NVIDIA GPUs, start it with
+`docker compose -f docker-compose.yml -f deploy/compose.gpu.yml --profile agents up -d`. Or, without Git Bash, in
+PowerShell:
+
+```powershell
+git clone https://github.com/Tinfold/ultrakanban.git
+cd ultrakanban
+copy .env.example .env
 docker compose --profile agents up -d --build   # leave out --profile agents for the board alone
-docker compose exec -it agents claude auth login   # log the agents in to Claude once
 ```
 
-Then open the board, and per board set its GitHub repository and switch on **Run the agent on this board** in
-**Board menu → Board settings**.
+Then open <http://localhost:4317/setup>.
 
-Where the agents run:
+### Then, in the board
 
-- **Linux with systemd**: `--agents` installs user services that run them on your machine, with your own `claude` and
-  `gh` logins and full access to it (GPUs included). This needs the [GitHub CLI](https://cli.github.com) (logged in),
-  jq and [Claude Code](https://claude.com/claude-code) (logged in). To use the container below on Linux too, run
-  `scripts/setup.sh --agents=container`.
-- **Windows, macOS, or anywhere else**: in the `agents` container, with its own logins. For NVIDIA GPUs, add
-  `-f docker-compose.yml -f deploy/compose.gpu.yml` to the compose command (Linux, or Windows with WSL 2).
+The **Setup page** (`/setup`, the gear in the header) shows what's left and does it for you:
 
-To update: `git pull`, then run the same command again.
+1. **GitHub.** **Log in to GitHub** under the agents shows a code to enter on github.com. The agents push and open pull
+   requests with that login, and the board gets its token too. For the board alone, paste a token instead (the page
+   links to GitHub's token page with the right scopes ticked).
+2. **Claude.** **Log in to Claude** gives you a sign-in link. Sign in, then paste the code Claude shows back on the
+   page.
+3. **A board.** Create one, open **Board menu → Board settings**, set its GitHub repository (or create one there) and
+   switch on **Run the agent on this board**. The agent then works the board's Todo tickets.
+
+To update: on Linux, the update button in the header (once the agents run). On macOS and Windows, `git pull`, then run
+the same command again.
 
 ## Docs
 
 - [Features](docs/features.md) and keyboard shortcuts
 - [Running the board](docs/running.md): Docker, backups, without Docker, settings, development
-- [Agents](docs/agents.md): the agent API, the agent loop and its settings, the agents container
+- [Agents](docs/agents.md): the agent API, the agent loop and its settings, the agents container, logins
 - [API reference](docs/API.md), also served at `GET /api`
 - [`.claude/skills/ultrakanban/SKILL.md`](.claude/skills/ultrakanban/SKILL.md): the Claude Code skill agents follow
 

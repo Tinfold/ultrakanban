@@ -179,7 +179,7 @@ export function createMergeQueue(
     const reviewColumnId = getBoard(boardId).reviewColumnId
     if (!reviewColumnId) throw badRequest('This board has no review column; choose one in the board settings')
     if (!(await github.auth())) {
-      throw badRequest('Merging needs a GitHub token: set GITHUB_TOKEN or log in with the GitHub CLI (gh auth login)')
+      throw badRequest('Merging needs a GitHub token: add one on the Setup page (/setup), or set GITHUB_TOKEN')
     }
     const tickets = listTickets(boardId, { column: reviewColumnId }).filter(
       (ticket) => ticket.pullRequest && !['merged', 'closed'].includes(ticket.pullRequest.state),

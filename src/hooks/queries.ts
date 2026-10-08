@@ -18,6 +18,7 @@ export const queryKeys = {
   allOverviews: ['overview'] as const,
   appUpdate: ['app-update'] as const,
   claudeUsage: ['claude-usage'] as const,
+  setup: ['setup'] as const,
 }
 
 export const useBoards = () => useQuery({ queryKey: queryKeys.boards, queryFn: api.listBoards })
@@ -87,3 +88,14 @@ export const useAppUpdate = () =>
 /** The supervisor reports Claude usage every few minutes. */
 export const useClaudeUsage = () =>
   useQuery({ queryKey: queryKeys.claudeUsage, queryFn: api.claudeUsage, refetchInterval: 60_000 })
+
+/** Followed closely while a login runs, so the page shows GitHub's code or Claude's link as soon as they are there. */
+export const useSetup = () =>
+  useQuery({
+    queryKey: queryKeys.setup,
+    queryFn: api.setup,
+    refetchInterval: (query) => {
+      const state = query.state.data?.agents.login?.state
+      return state === 'requested' || state === 'waiting' || state === 'checking' ? 2000 : 30_000
+    },
+  })

@@ -3,7 +3,7 @@
 ## Running with Docker
 
 ```sh
-cp .env.example .env          # set GITHUB_TOKEN (get one with: gh auth token)
+cp .env.example .env          # optional: set GITHUB_TOKEN (gh auth token), or add one on the Setup page
 docker compose up -d --build  # http://localhost:4317
 ```
 
@@ -41,15 +41,15 @@ npm run build
 npm start            # http://127.0.0.1:4317 serves the app and the API
 ```
 
-| Variable                  | Default               | Purpose                                                                                                           |
-| ------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `PORT`                    | `4317`                | API / app port                                                                                                    |
-| `HOST`                    | `127.0.0.1`           | Bind address. Use `0.0.0.0` to reach it from your phone on LAN                                                    |
-| `ULTRAKANBAN_DB`          | `data/ultrakanban.db` | SQLite database file (`:memory:` for throwaway)                                                                   |
-| `ULTRAKANBAN_ATTACHMENTS` | next to the database  | Directory for uploaded attachment files                                                                           |
-| `GITHUB_TOKEN`            | `gh auth token`       | Token for checking pull requests (private repos need `repo` read access) and creating repositories (`repo` scope) |
-| `GITHUB_SYNC_INTERVAL`    | `60`                  | Seconds between pull request checks                                                                               |
-| `ULTRAKANBAN_URL`         |                       | Address people open the app at, e.g. `http://kanban.lan:4317`; notifications link to the ticket there             |
+| Variable                  | Default               | Purpose                                                                                                                                                       |
+| ------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                    | `4317`                | API / app port                                                                                                                                                |
+| `HOST`                    | `127.0.0.1`           | Bind address. Use `0.0.0.0` to reach it from your phone on LAN                                                                                                |
+| `ULTRAKANBAN_DB`          | `data/ultrakanban.db` | SQLite database file (`:memory:` for throwaway)                                                                                                               |
+| `ULTRAKANBAN_ATTACHMENTS` | next to the database  | Directory for uploaded attachment files                                                                                                                       |
+| `GITHUB_TOKEN`            | `gh auth token`       | Token for checking pull requests (private repos need `repo` read access) and creating repositories (`repo` scope). One set on the Setup page takes precedence |
+| `GITHUB_SYNC_INTERVAL`    | `60`                  | Seconds between pull request checks                                                                                                                           |
+| `ULTRAKANBAN_URL`         |                       | Address people open the app at, e.g. `http://kanban.lan:4317`; notifications link to the ticket there                                                         |
 
 There is no authentication: only expose it on networks you trust.
 

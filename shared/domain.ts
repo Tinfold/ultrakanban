@@ -800,3 +800,60 @@ export interface ClaudeUsage {
   /** Why the last report has no limits, e.g. no claude login on the host. */
   error: string | null
 }
+
+/** Where the board's GitHub token comes from: set on the Setup page, `GITHUB_TOKEN`, or the GitHub CLI's login. */
+export type GitHubAuthSource = 'board' | 'env' | 'gh'
+
+/** Logins the agent supervisor can run where the agents run, when asked to on the Setup page. */
+export const AGENT_LOGIN_KINDS = ['github', 'claude'] as const
+export type AgentLoginKind = (typeof AGENT_LOGIN_KINDS)[number]
+
+/**
+ * A login the agent supervisor runs for the agents (`gh auth login` or `claude auth login`), asked for on the Setup page:
+ * `requested`, then `waiting` once it shows what to do (GitHub's one-time code, or Claude's sign-in link, whose code is
+ * pasted back on the page), `checking` while it finishes, then `done` or `failed`.
+ */
+export const AGENT_LOGIN_STATES = ['requested', 'waiting', 'checking', 'done', 'failed'] as const
+export type AgentLoginState = (typeof AGENT_LOGIN_STATES)[number]
+
+export interface AgentLogin {
+  kind: AgentLoginKind
+  state: AgentLoginState
+  requestedAt: string
+  /** Where to sign in: github.com/login/device, or Claude's sign-in link. */
+  url: string | null
+  /** GitHub's one-time code, to enter at `url`. */
+  userCode: string | null
+  /** Whether Claude's code was pasted and waits for the supervisor. */
+  codeSent: boolean
+  /** Why it failed, or what it logged in as. */
+  message: string | null
+  updatedAt: string
+}
+
+/** The agent supervisor (`scripts/agent-supervisor.sh`) and the logins the agents have, as it last checked in. */
+export interface AgentHost {
+  /** When it last checked in; null if it never has. */
+  seenAt: string | null
+  /** `machine`: as services on the host itself; `container`: in the agents container. */
+  runsIn: 'machine' | 'container' | null
+  /** The GitHub account gh is logged in as; null if it isn't. */
+  githubLogin: string | null
+  /** The Claude account claude is logged in as (its email, or `token` for `CLAUDE_CODE_OAUTH_TOKEN`); null if it isn't. */
+  claudeAccount: string | null
+  /** git's commit name and email, as `Name <email>`; null when not set, so commits would fail. */
+  gitIdentity: string | null
+  /** The latest login asked for, if any. */
+  login: AgentLogin | null
+}
+
+/** What the Setup page shows: the board's GitHub access and the agents'. */
+export interface SetupStatus {
+  github: {
+    auth: GitHubAuthSource | null
+    /** The account the token belongs to; null without a token, or if GitHub turned it down (`error`). */
+    login: string | null
+    error: string | null
+  }
+  agents: AgentHost
+}

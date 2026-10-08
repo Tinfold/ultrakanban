@@ -9,6 +9,7 @@ import { createAttachmentFiles } from './attachment-files.ts'
 import { createGitHubClient } from './github.ts'
 import { createMergeQueue } from './merge-queue.ts'
 import { createNotifier } from './notifications.ts'
+import { getStoredGitHubToken } from './store/setup.ts'
 import { createPullRequestSync } from './pull-request-sync.ts'
 import { listAttachmentIds } from './store/attachments.ts'
 
@@ -17,7 +18,7 @@ const hostname = process.env.HOST ?? '127.0.0.1'
 const clientDir = 'dist'
 const syncIntervalMs = Number(process.env.GITHUB_SYNC_INTERVAL ?? 60) * 1000
 
-const pullRequests = createPullRequestSync(createGitHubClient())
+const pullRequests = createPullRequestSync(createGitHubClient(getStoredGitHubToken))
 const notifier = createNotifier()
 const mergeQueue = createMergeQueue(pullRequests, { notifier })
 /**

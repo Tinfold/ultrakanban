@@ -1,9 +1,10 @@
-import { ChartColumnIcon } from 'lucide-react'
+import { ChartColumnIcon, SettingsIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Link, useRoute } from 'wouter'
 import { BoardSwitcher } from '@/components/boards/BoardSwitcher'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { useSetup } from '@/hooks/queries'
 import { cn } from '@/lib/utils'
 import { ActorMenu } from './ActorMenu'
 import { ThemeToggle } from './ThemeToggle'
@@ -35,6 +36,28 @@ function OverviewLink() {
   )
 }
 
+/** Marked while the board has no working GitHub token, or the agents are missing a login. */
+function SetupLink() {
+  const [active] = useRoute('/setup')
+  const { data: setup } = useSetup()
+  const agents = setup?.agents
+  const missing =
+    !!setup && (!setup.github.login || (!!agents?.seenAt && (!agents.githubLogin || !agents.claudeAccount)))
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button asChild variant="ghost" size="icon-sm" className={cn('relative', active && 'bg-muted')}>
+          <Link href="/setup" aria-label="Setup" aria-current={active ? 'page' : undefined}>
+            <SettingsIcon />
+            {missing && <span className="absolute top-1 right-1 size-2 rounded-full bg-primary" />}
+          </Link>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{missing ? 'Finish the setup: GitHub and Claude logins' : 'Setup'}</TooltipContent>
+    </Tooltip>
+  )
+}
+
 export function AppHeader({ boardId, children }: { boardId?: string; children?: ReactNode }) {
   return (
     <header className="flex h-12 shrink-0 items-center gap-1 border-b px-2 sm:px-3">
@@ -53,6 +76,7 @@ export function AppHeader({ boardId, children }: { boardId?: string; children?: 
       <div className="ml-auto flex items-center gap-0.5">
         <UpdateMenu />
         <OverviewLink />
+        <SetupLink />
         <ThemeToggle />
         <ActorMenu />
       </div>

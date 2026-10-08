@@ -7,10 +7,9 @@
 #   scripts/setup.sh --agents=container   the agents in the container, on Linux too
 #   scripts/setup.sh --no-docker  without containers: install, build and start it with Node.js 22.13+ in the foreground
 #
-# With docker it creates .env from .env.example. It sets up the logins that are missing, asking for them when run in a
-# terminal: the GitHub token in .env (from gh's login, or one you paste), and for the agents, gh's and claude's logins
-# (on this machine, or in the agents container) and git's commit name and email. It is safe to run again: it keeps an
-# existing .env and the logins, and rebuilds the board.
+# With docker it creates .env from .env.example, with your GitHub token from gh if gh is logged in. The rest of the setup
+# is on the board's Setup page (/setup), which it opens: the board's GitHub token, and the agents' GitHub and Claude
+# logins, wherever they run. It is safe to run again: it keeps an existing .env, and rebuilds the board.
 
 set -euo pipefail
 
@@ -26,7 +25,7 @@ for arg in "$@"; do
     --agents=container) agents=1 container=1 ;;
     --no-docker) docker=0 ;;
     -h | --help)
-      sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -71,7 +70,7 @@ fi
 if ((agents && !container)); then
   need gh 'GitHub CLI, https://cli.github.com, then: gh auth login'
   need jq 'your package manager'
-  need claude 'Claude Code, https://claude.com/claude-code, then log in once by running: claude'
+  need claude 'Claude Code, https://claude.com/claude-code'
 fi
 fail_missing
 
@@ -84,30 +83,10 @@ if ((!docker)); then
   fi
 fi
 
-# Asks only when run in a terminal; otherwise it says what is missing.
-interactive=0
-[[ -t 0 && -t 1 ]] && interactive=1
-
-# The agents on this machine use your own logins: gh's to clone, push and open pull requests, claude's for the runs.
+# The agents on this machine use your own gh and claude logins (the Setup page logs them in if they aren't). They
+# commit with git's name and email; without them every commit fails.
 if ((agents && !container)); then
-  if ! gh auth status >/dev/null 2>&1; then
-    ((interactive)) || {
-      echo "setup: gh is not logged in; run: gh auth login" >&2
-      exit 1
-    }
-    echo "Log in to GitHub (the agents push branches and open pull requests with it):"
-    gh auth login --scopes workflow
-  fi
-  if ! claude auth status >/dev/null 2>&1; then
-    ((interactive)) || {
-      echo "setup: claude is not logged in; run: claude auth login" >&2
-      exit 1
-    }
-    echo "Log in to Claude (the agents' runs use it):"
-    claude auth login
-  fi
-  # Agents commit with git's name and email; without them every commit fails.
-  if [[ -z $(git config --global user.email) ]] &&
+  if [[ -z $(git config --global user.email) ]] && gh auth status >/dev/null 2>&1 &&
     name=$(gh api user --jq '.name // .login') &&
     email=$(gh api user --jq '"\(.id)+\(.login)@users.noreply.github.com"'); then
     git config --global user.name "$name"
@@ -121,7 +100,7 @@ if ((!docker)); then
   npm run build
   # The server finds the GitHub token itself with `gh auth token`, unless GITHUB_TOKEN is set.
   [[ -n ${GITHUB_TOKEN:-} ]] || gh auth token >/dev/null 2>&1 ||
-    echo "Without a GitHub token the board can't follow pull requests: log in with gh auth login, or set GITHUB_TOKEN."
+    echo "The board has no GitHub token yet: add one on its Setup page, /setup, once it runs."
   echo "Starting ultrakanban on http://127.0.0.1:${PORT:-4317} (Ctrl+C stops it; data is kept in data/)"
   exec npm start
 fi
@@ -133,20 +112,12 @@ if [[ ! -f .env ]]; then
   cp .env.example .env
   echo "Created .env."
 fi
-# The board follows pull requests with the GitHub token; in the container the agents also push with it.
-if [[ -z $(env_get GITHUB_TOKEN) ]]; then
-  if command -v gh >/dev/null && token=$(gh auth token 2>/dev/null) && [[ -n $token ]]; then
-    env_set GITHUB_TOKEN "$token"
-    echo "Put your GitHub token from gh in .env."
-  elif ((container && interactive)); then
-    : # logged in to GitHub in the agents container once it runs, below
-  elif ((interactive)); then
-    echo "The board needs a GitHub token to follow pull requests. Create one (classic, with the repo scope) at"
-    echo "  https://github.com/settings/tokens/new?scopes=repo,read:org,workflow&description=ultrakanban"
-    read -rsp "and paste it here, or press Enter to skip: " token || token=
-    echo
-    [[ -z $token ]] || env_set GITHUB_TOKEN "$token"
-  fi
+# The board follows pull requests with the GitHub token; in the container the agents also push with it. Without gh,
+# it is set on the Setup page instead.
+if [[ -z $(env_get GITHUB_TOKEN) ]] && command -v gh >/dev/null && token=$(gh auth token 2>/dev/null) &&
+  [[ -n $token ]]; then
+  env_set GITHUB_TOKEN "$token"
+  echo "Put your GitHub token from gh in .env."
 fi
 port=$(env_get ULTRAKANBAN_PORT)
 port=${port:-4317}
@@ -175,45 +146,18 @@ if ! curl -fs "$url/api" >/dev/null; then
   exit 1
 fi
 echo "ultrakanban is running at $url"
-
-if ((container)); then
-  # The agents container has its own logins, kept in its volume. Without a token in .env, log gh in there and give
-  # its token to the board and the agents through .env.
-  if [[ -z $(env_get GITHUB_TOKEN) ]] && ((interactive)); then
-    echo "Log the agents in to GitHub (they push branches and open pull requests with it; the board follows them)."
-    echo "Open https://github.com/login/device and enter the code below (it can't open a browser from the container):"
-    if "${compose[@]}" --profile agents exec agents gh auth login --hostname github.com --git-protocol https --web --scopes workflow &&
-      token=$("${compose[@]}" --profile agents exec -T agents gh auth token) && [[ -n $token ]]; then
-      env_set GITHUB_TOKEN "$token"
-      "${compose[@]}" --profile agents up -d # restarts the board and the agents with the token
-    fi
-  fi
-  if ! "${compose[@]}" --profile agents exec -T agents test -f /home/node/.claude/.credentials.json 2>/dev/null &&
-    [[ -z $(env_get CLAUDE_CODE_OAUTH_TOKEN) ]] && ((interactive)); then
-    echo "Log the agents in to Claude (open the link, sign in, and paste the code back here):"
-    "${compose[@]}" --profile agents exec agents claude auth login || true
-  fi
-fi
-
-if [[ -z $(env_get GITHUB_TOKEN) ]]; then
-  if ((container)); then
-    echo "Without a GitHub token the board can't follow pull requests, and the agents can't push."
-  else
-    echo "Without a GitHub token the board can't follow pull requests."
-  fi
-  echo "Set GITHUB_TOKEN in .env (gh auth token, or https://github.com/settings/tokens/new?scopes=repo,read:org,workflow),"
-  echo "then run this again."
-fi
+echo
+echo "Finish the setup in the board: $url/setup"
 if ((agents)); then
-  ((container)) || [[ $port == 4317 ]] ||
-    echo "Note: the agent services expect the board on port 4317; set ULTRAKANBAN_PORT=4317 in .env."
-  if ((container)); then
-    "${compose[@]}" --profile agents exec -T agents test -f /home/node/.claude/.credentials.json 2>/dev/null ||
-      [[ -n $(env_get CLAUDE_CODE_OAUTH_TOKEN) ]] ||
-      echo "Log the agents in to Claude once: ${compose[*]} --profile agents exec agents claude auth login"
-  fi
-  echo "To run the agent on a board: Board menu → Board settings, set the GitHub repository and switch on"
-  echo "\"Run the agent on this board\"."
+  echo "It logs the board and the agents in to GitHub and Claude, and shows how to switch the agent on for a board."
 else
-  echo "To have it start at login and run agents on your boards: scripts/setup.sh --agents"
+  echo "It connects the board to GitHub. To have agents work your tickets too: scripts/setup.sh --agents"
+fi
+((!agents || container)) || [[ $port == 4317 ]] ||
+  echo "Note: the agent services expect the board on port 4317; set ULTRAKANBAN_PORT=4317 in .env."
+# Opens the Setup page when there is a desktop to open it on.
+if [[ -t 1 ]]; then
+  for open in xdg-open open wslview start; do
+    command -v "$open" >/dev/null && { "$open" "$url/setup" >/dev/null 2>&1 & } && break
+  done
 fi

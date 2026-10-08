@@ -24,6 +24,6 @@ RUN chmod 755 /opt/ultrakanban-agent/bin/*.sh /opt/ultrakanban-agent/agents-entr
 
 # The node user's home is a volume: claude's login and sessions, gh's login and the boards' clones live there.
 USER node
-ENV HOME=/home/node NO_SYSTEMD=1 KANBAN=http://app:4317
+ENV HOME=/home/node NO_SYSTEMD=1 KANBAN=http://app:4317 ULTRAKANBAN_AGENTS_CONTAINER=1
 WORKDIR /home/node
 ENTRYPOINT ["tini", "--", "/opt/ultrakanban-agent/agents-entrypoint.sh"]

@@ -282,6 +282,28 @@ const MIGRATIONS = [
   );
   INSERT INTO claude_usage (id) VALUES (1);
   `,
+  `
+  -- Setup done in the app (one row): the board's GitHub token, the agent supervisor's last check-in with the agents'
+  -- logins, and the latest login asked of it (see AgentHost).
+  CREATE TABLE setup (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    github_token TEXT,
+    agents_seen_at TEXT,
+    agents_run_in TEXT,
+    agents_github_login TEXT,
+    agents_claude_account TEXT,
+    agents_git_identity TEXT,
+    login_kind TEXT,
+    login_state TEXT,
+    login_requested_at TEXT,
+    login_url TEXT,
+    login_user_code TEXT,
+    login_code TEXT,
+    login_message TEXT,
+    login_updated_at TEXT
+  );
+  INSERT INTO setup (id) VALUES (1);
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'
