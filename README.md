@@ -31,7 +31,8 @@ Where the agents run:
 
 - **Linux with systemd**: `--agents` installs user services that run them on your machine, with your own `claude` and
   `gh` logins and full access to it (GPUs included). This needs the [GitHub CLI](https://cli.github.com) (logged in),
-  jq and [Claude Code](https://claude.com/claude-code) (logged in).
+  jq and [Claude Code](https://claude.com/claude-code) (logged in). To use the container below on Linux too, run
+  `scripts/setup.sh --agents=container`.
 - **Windows, macOS, or anywhere else**: in the `agents` container, with its own logins. For NVIDIA GPUs, add
   `-f docker-compose.yml -f deploy/compose.gpu.yml` to the compose command (Linux, or Windows with WSL 2).
 

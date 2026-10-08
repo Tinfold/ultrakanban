@@ -61,7 +61,8 @@ you pull this checkout's default branch, it installs the new versions, and each 
 next run. Run the script again only when the systemd units in `deploy/` change.
 
 **Windows, macOS, or no systemd: the agents container.** `docker compose --profile agents up -d --build` (what
-`scripts/setup.sh --agents` does where there are no systemd user services) runs the supervisor and its loops in the
+`scripts/setup.sh --agents` does where there are no systemd user services, and `scripts/setup.sh --agents=container`
+does on Linux too) runs the supervisor and its loops in the
 `agents` container ([`deploy/agents.Dockerfile`](../deploy/agents.Dockerfile)), next to the board. It has claude, git,
 gh, jq, Node.js 22, Python 3, a C toolchain, and Playwright with Chromium (`require('playwright')` works from any
 directory) so agents can take screenshots of UI changes; the loops run as the container's own child processes instead of
