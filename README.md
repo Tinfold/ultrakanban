@@ -4,6 +4,26 @@ A fast, keyboard-friendly kanban board for people **and** AI agents. Claude Code
 pull requests and answer review feedback; tickets move to Done when their pull request is merged. Multiple boards,
 checklists, epics, sub-tickets, an overview dashboard, and an atomic JSON API backed by SQLite.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/board-dark.png">
+  <img alt="A board with tickets in Backlog, Todo, In progress, Review and Done; agents are working two of them" src="docs/screenshots/board-light.png">
+</picture>
+
+## Screenshots
+
+It follows your system's light or dark mode, or pick one with the toggle in the header.
+
+|              | Light                                                   | Dark                                                  |
+| ------------ | ------------------------------------------------------- | ----------------------------------------------------- |
+| **Board**    | ![Board, light](docs/screenshots/board-light.png)       | ![Board, dark](docs/screenshots/board-dark.png)       |
+| **Ticket**   | ![Ticket, light](docs/screenshots/ticket-light.png)     | ![Ticket, dark](docs/screenshots/ticket-dark.png)     |
+| **Overview** | ![Overview, light](docs/screenshots/overview-light.png) | ![Overview, dark](docs/screenshots/overview-dark.png) |
+
+The board shows each ticket's agent, plan size, checklist, pull request and its checks, token cost, and what a running
+agent is doing right now. A ticket holds its description, the agent's plan, comments and the full history. The overview
+adds up the work across all boards: Claude plan usage, cycle time, review wait, time worked and tokens per agent and
+model.
+
 ## Install
 
 You need a [GitHub](https://github.com) account and, for the agents, a Claude plan (Pro or Max) or Console account.
