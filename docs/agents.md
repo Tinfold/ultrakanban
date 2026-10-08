@@ -60,6 +60,10 @@ scripts and the skill to `~/.local/share/ultrakanban-agent`, and the supervisor 
 you pull this checkout's default branch, it installs the new versions, and each agent loop switches to them before its
 next run. Run the script again only when the systemd units in `deploy/` change.
 
+The agents use your own logins on the machine: gh's (`gh auth login`), claude's (`claude auth login`), and git's commit
+name and email. `scripts/setup.sh --agents` checks them before it installs the services, logs you in to what is
+missing, and sets git's name and email from your GitHub account if you have none.
+
 **Windows, macOS, or no systemd: the agents container.** `docker compose --profile agents up -d --build` (what
 `scripts/setup.sh --agents` does where there are no systemd user services, and `scripts/setup.sh --agents=container`
 does on Linux too) runs the supervisor and its loops in the
@@ -67,12 +71,16 @@ does on Linux too) runs the supervisor and its loops in the
 gh, jq, Node.js 22, Python 3, a C toolchain, and Playwright with Chromium (`require('playwright')` works from any
 directory) so agents can take screenshots of UI changes; the loops run as the container's own child processes instead of
 systemd units, and its home directory (claude's and gh's logins, the boards' clones) is the `ultrakanban-agent-home`
-volume. Set it up once:
+volume. Set it up once (`scripts/setup.sh` does this, asking for the logins that are missing):
 
 - `GITHUB_TOKEN` in `.env` is its GitHub login (`GH_TOKEN`): it needs write access to the boards' repositories, as
-  agents push branches and open pull requests with it. Or log in inside it: `docker compose exec -it agents gh auth login`.
-- Log in to Claude once: `docker compose exec -it agents claude`, then `/login` and `/exit`. Or put a token from
-  `claude setup-token` in `.env` as `CLAUDE_CODE_OAUTH_TOKEN`.
+  agents push branches and open pull requests with it. `gh auth token` gives yours where gh is logged in; or create a
+  [classic token](https://github.com/settings/tokens/new?scopes=repo,read:org,workflow&description=ultrakanban) with the
+  `repo`, `read:org` and `workflow` scopes. Without gh on the machine, setup.sh logs gh in inside the container
+  (`gh auth login`, with a code you enter on github.com) and puts its token in `.env`. The container commits as that
+  GitHub user.
+- Log in to Claude once: `docker compose exec -it agents claude auth login` (open the link it prints, then paste the
+  code back). Or put a token from `claude setup-token` in `.env` as `CLAUDE_CODE_OAUTH_TOKEN`.
 - GPUs: add [`deploy/compose.gpu.yml`](../deploy/compose.gpu.yml)
   (`docker compose -f docker-compose.yml -f deploy/compose.gpu.yml --profile agents up -d`) to give it the NVIDIA GPUs,
   on Linux with the NVIDIA Container Toolkit or on Windows with Docker Desktop's WSL 2 backend. Docker on macOS can't

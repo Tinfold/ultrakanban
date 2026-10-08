@@ -16,12 +16,15 @@ scripts/setup.sh           # the board, at http://localhost:4317
 scripts/setup.sh --agents  # the board and the agents
 ```
 
+The script asks for the logins that are missing: GitHub (your `gh` login, or a token it tells you how to create) and,
+for the agents, Claude. Run it again any time to add one you skipped.
+
 On Windows, run these in Git Bash or WSL. Or skip the script, on any system:
 
 ```sh
-cp .env.example .env   # set GITHUB_TOKEN: a GitHub token that can push to your repositories (gh auth token)
+cp .env.example .env   # set GITHUB_TOKEN: `gh auth token`, or a classic token with the repo and workflow scopes
 docker compose --profile agents up -d --build   # leave out --profile agents for the board alone
-docker compose exec -it agents claude           # log the agents in to Claude once: /login, then /exit
+docker compose exec -it agents claude auth login   # log the agents in to Claude once
 ```
 
 Then open the board, and per board set its GitHub repository and switch on **Run the agent on this board** in
