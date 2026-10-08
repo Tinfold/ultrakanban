@@ -66,9 +66,12 @@ git -C "$dir/repo" worktree prune
 # Give the agent the ultrakanban skill in each checkout, unless the repository has its own copy. It stays out of
 # commits (info/exclude is shared by the clone and its worktrees).
 skill=.claude/skills/ultrakanban/SKILL.md
-if [[ -f $here/../skill/SKILL.md ]] && ! git -C "$dir/repo" ls-files --error-unmatch "$skill" >/dev/null 2>&1; then
+installed_skill=$here/../skill/SKILL.md
+# Run from a checkout (scripts/agent-supervisor.sh, without systemd) rather than installed: the checkout's copy.
+[[ -f $installed_skill ]] || installed_skill=$here/../$skill
+if [[ -f $installed_skill ]] && ! git -C "$dir/repo" ls-files --error-unmatch "$skill" >/dev/null 2>&1; then
   for checkout in "${checkouts[@]}"; do
-    mkdir -p "$checkout/${skill%/*}" && cp "$here/../skill/SKILL.md" "$checkout/$skill"
+    mkdir -p "$checkout/${skill%/*}" && cp "$installed_skill" "$checkout/$skill"
   done
   grep -qxF "/$skill" "$dir/repo/.git/info/exclude" 2>/dev/null || echo "/$skill" >>"$dir/repo/.git/info/exclude"
 fi
@@ -76,7 +79,7 @@ fi
 echo "working board $BOARD on $repo as $agent/$model/$effort, $concurrency ticket(s) at a time"
 export KANBAN BOARD AGENT=$agent MODEL=$model EFFORT=$effort STATE_DIR=$dir/state AGENT_LOOP_CLEAN=1 \
   CLAIM_LIMIT=$concurrency \
-  WATCH_FILES="$here/agent-loop.sh:$(printf '%s:' "$here"/agent-loop/*.sh)$here/agent-board.sh:$here/../skill/SKILL.md"
+  WATCH_FILES="$here/agent-loop.sh:$(printf '%s:' "$here"/agent-loop/*.sh)$here/agent-board.sh:$installed_skill"
 # agent-board.sh as it is now, to tell when it is updated.
 board_script=$(stat -c '%i %Y %s' "$here/agent-board.sh" 2>/dev/null)
 pids=()

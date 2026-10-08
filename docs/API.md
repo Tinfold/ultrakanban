@@ -78,7 +78,8 @@ Boards without a review/done column (see board settings) have no pull request re
 ## Pull request workflow
 
 - The server checks linked pull requests on GitHub every minute (and right after one is linked), authenticated with
-  `GITHUB_TOKEN`/`GH_TOKEN` or the `gh` CLI login. `GET /api/github` returns `{ "auth": "env" | "gh" | null }`.
+  the token set on the Setup page (see [Setup](#setup)), `GITHUB_TOKEN`/`GH_TOKEN` or the `gh` CLI login, in that order.
+  `GET /api/github` returns `{ "auth": "board" | "env" | "gh" | null }`.
 - When a pull request is merged, its ticket moves to the done column (actor `github`). Closed pull requests are noted
   in the activity log; the ticket stays where it is.
 - Moving a ticket into the done column without a merged pull request fails with `409 pull_request_not_merged`,
@@ -287,7 +288,7 @@ request down (e.g. the name is taken, or the token can't create repositories the
 Administration write), and `read:org` plus access to the organization to create one in an organization.
 
 `agentEnabled` can only be switched on once `githubRepo` is set (`400` otherwise). It is read by
-`scripts/agent-supervisor.sh`, which runs on the host and keeps one agent loop per enabled board; see the README.
+`scripts/agent-supervisor.sh`, which runs on the host and keeps one agent loop per enabled board; see `docs/agents.md`.
 The loop runs Claude Code with `agentModel` and `agentEffort` and claims tickets as
 `<agentName>/<agentModel>/<agentEffort>`, e.g. `claude/opus/medium` with nothing set. A ticket's own `agentModel`
 and `agentEffort` override the board's for that ticket: the loop runs it with them and under that name.
@@ -647,6 +648,53 @@ login (from Claude's usage endpoint, what `/usage` in claude shows). `GET /syste
 
 The supervisor reports with `POST /system/claude-usage` and `{ plan?, usage?, error? }`: `usage` is the usage
 endpoint's answer as it is (the board picks the limits out of it), `error` says why it couldn't get one.
+
+## Setup
+
+What the Setup page (`/setup`) shows and does: the board's GitHub token, and the agents' logins, which the agent
+supervisor runs where the agents run. `GET /system/setup` returns:
+
+```ts
+{
+  github: {
+    auth: 'board' | 'env' | 'gh' | null // the token set here, GITHUB_TOKEN, or the gh CLI's login, in that order
+    login: string | null // the account it belongs to
+    error: string | null // e.g. GitHub turned the token down
+  }
+  agents: {
+    seenAt: string | null // when the supervisor last checked in; null if it never has
+    runsIn: 'machine' | 'container' | null
+    githubLogin: string | null // gh's account
+    claudeAccount: string | null // claude's account email, "token" for CLAUDE_CODE_OAUTH_TOKEN
+    gitIdentity: string | null // git's commit name and email
+    login: {
+      kind: 'github' | 'claude'
+      state: 'requested' | 'waiting' | 'checking' | 'done' | 'failed'
+      requestedAt: string
+      url: string | null // github.com/login/device, or Claude's sign-in link
+      userCode: string | null // GitHub's one-time code
+      codeSent: boolean // Claude's code was pasted and waits for the supervisor
+      message: string | null // why it failed, or who it logged in as
+      updatedAt: string
+    } | null
+  }
+}
+```
+
+`PUT /system/github-token` with `{ token }` checks the token with GitHub (`400 github_error` when GitHub turns it
+down), keeps it in the database and uses it from then on; the API never sends it back. `DELETE /system/github-token`
+removes it. Both answer with the setup.
+
+`POST /system/agents/login` (202) with `{ kind: "github" | "claude" }` asks the supervisor to log the agents in
+(`409 login_in_progress` while one runs; a login stops after 15 minutes). `POST /system/agents/login/code` with
+`{ code }` passes the code from Claude's sign-in page to it (`409 login_not_waiting` unless a Claude login waits for
+one). `DELETE /system/agents/login` cancels it.
+
+The supervisor checks in with `POST /system/agents` and `{ runsIn, githubLogin?, claudeAccount?, gitIdentity? }`,
+reads the login with `GET /system/agents/login` (with the pasted `code`), and reports on it with
+`POST /system/agents/login/status` and `{ state, url?, userCode?, message? }`: `waiting` takes the request and says
+what to show, `checking` takes the code, `done` and `failed` end it (`409 login_not_requested` when there is no login
+running, e.g. it was cancelled).
 
 ## Live updates
 

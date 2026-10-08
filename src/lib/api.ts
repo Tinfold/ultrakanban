@@ -1,5 +1,7 @@
 import type {
   Activity,
+  AgentHost,
+  AgentLoginKind,
   AgentSuggestion,
   AppUpdate,
   ApiErrorBody,
@@ -14,6 +16,7 @@ import type {
   MergeRun,
   Overview,
   OverviewRange,
+  SetupStatus,
   Tag,
   Ticket,
 } from '@shared/domain'
@@ -120,7 +123,7 @@ export const api = {
   mergeTicket: (ticketId: string, method: MergeMethod) =>
     request<Ticket>('POST', `/tickets/${ticketId}/merge`, { method }),
   fixConflicts: (boardId: string) => request<{ tickets: Ticket[] }>('POST', `/boards/${boardId}/fix-conflicts`),
-  githubStatus: () => request<{ auth: 'env' | 'gh' | null }>('GET', '/github'),
+  githubStatus: () => request<{ auth: SetupStatus['github']['auth'] }>('GET', '/github'),
   listAttachments: (ticketId: string) => request<Attachment[]>('GET', `/tickets/${ticketId}/attachments`),
   uploadAttachment: (ticketId: string, file: File) => {
     const form = new FormData()
@@ -141,6 +144,12 @@ export const api = {
   claudeUsage: () => request<ClaudeUsage>('GET', '/system/claude-usage'),
   requestAppUpdate: () => request<AppUpdate>('POST', '/system/update'),
   cancelAppUpdate: () => request<AppUpdate>('DELETE', '/system/update'),
+  setup: () => request<SetupStatus>('GET', '/system/setup'),
+  setGitHubToken: (token: string) => request<SetupStatus>('PUT', '/system/github-token', { token }),
+  removeGitHubToken: () => request<SetupStatus>('DELETE', '/system/github-token'),
+  requestAgentLogin: (kind: AgentLoginKind) => request<AgentHost>('POST', '/system/agents/login', { kind }),
+  cancelAgentLogin: () => request<AgentHost>('DELETE', '/system/agents/login'),
+  sendAgentLoginCode: (code: string) => request<AgentHost>('POST', '/system/agents/login/code', { code }),
 }
 
 export const errorMessage = (error: unknown) => (error instanceof Error ? error.message : 'Something went wrong')

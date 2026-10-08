@@ -1,0 +1,13 @@
+# Gives the agents container the machine's NVIDIA GPUs (Linux with the NVIDIA Container Toolkit, or Windows with Docker
+# Desktop's WSL 2 backend). Docker Desktop on macOS can't pass a GPU to containers: run the agents on the Mac itself
+# for that (see docs/agents.md). Use it with:
+#   docker compose -f docker-compose.yml -f deploy/compose.gpu.yml --profile agents up -d
+services:
+  agents:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

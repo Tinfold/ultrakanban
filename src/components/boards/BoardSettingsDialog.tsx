@@ -1,5 +1,6 @@
 import { CircleAlertIcon, CircleCheckIcon, PlusIcon } from 'lucide-react'
 import { type FormEvent, useState } from 'react'
+import { Link } from 'wouter'
 import { useBoardContext } from '@/components/board/board-context'
 import { CreateGitHubRepoDialog } from '@/components/boards/CreateGitHubRepoDialog'
 import { ColorDot } from '@/components/common/TagChip'
@@ -65,7 +66,8 @@ function GitHubStatus() {
     return (
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <CircleCheckIcon className="size-3.5 text-emerald-600 dark:text-emerald-400" />
-        Checking pull requests on GitHub using {data.auth === 'gh' ? 'your gh CLI login' : 'GITHUB_TOKEN'}.
+        Checking pull requests on GitHub using{' '}
+        {data.auth === 'gh' ? 'your gh CLI login' : data.auth === 'board' ? 'the token from Setup' : 'GITHUB_TOKEN'}.
       </p>
     )
   }
@@ -73,8 +75,11 @@ function GitHubStatus() {
     <p className="flex gap-1.5 text-xs text-muted-foreground">
       <CircleAlertIcon className="mt-px size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
       <span>
-        Not signed in to GitHub, so only public repositories can be checked. Set <code>GITHUB_TOKEN</code> or run{' '}
-        <code>gh auth login</code>, then restart the server.
+        Not signed in to GitHub, so only public repositories can be checked.{' '}
+        <Link href="/setup" className="text-foreground underline underline-offset-2">
+          Add a token in Setup
+        </Link>
+        .
       </span>
     </p>
   )

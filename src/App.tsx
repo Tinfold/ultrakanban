@@ -7,6 +7,7 @@ import { useLiveUpdates } from '@/hooks/use-live-updates'
 import { BoardPage } from '@/pages/BoardPage'
 import { HomePage } from '@/pages/HomePage'
 import { OverviewPage } from '@/pages/OverviewPage'
+import { SetupPage } from '@/pages/SetupPage'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: true } },
@@ -19,6 +20,7 @@ function Routes() {
       <Switch>
         <Route path="/" component={HomePage} />
         <Route path="/overview" component={OverviewPage} />
+        <Route path="/setup" component={SetupPage} />
         <Route path="/b/:boardId">{({ boardId }) => <BoardPage key={boardId} boardId={boardId} />}</Route>
         <Route>
           <HomePage />

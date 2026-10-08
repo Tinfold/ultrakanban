@@ -45,7 +45,7 @@ export function createApp(services: AppServices) {
     .route('/attachments', attachmentRoutes(attachmentFiles))
     .route('/events', eventRoutes)
     .route('/overview', overviewRoutes)
-    .route('/system', systemRoutes)
+    .route('/system', systemRoutes(services))
     .all('*', (c) => c.json(errorBody('not_found', `No route for ${c.req.method} ${c.req.path}`), 404))
 
   return new Hono().route('/api', api).onError((error, c) => {

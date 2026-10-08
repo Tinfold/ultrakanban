@@ -12,8 +12,8 @@ Kanban board with an HTTP API for coding agents. Hono + SQLite server, React + V
 - `src/pages`, `src/components/<area>`, `src/lib` UI; `src/components/ui` are shadcn components
 - `scripts/agent-loop.sh` the agent loop's settings and main loop; the rest of it is in `scripts/agent-loop/`
   (`triage` jq, `board` helpers, `ci`, `checkout`, `run` for claude runs and the prompt, `tickets` for claiming and
-  feedback). `agent-board.sh` and `agent-supervisor.sh` run the loops as services.
-- `docs/API.md` API reference (34 KB: grep for the section you need), `README.md` setup and agent loop docs
+  feedback). `agent-board.sh` and `agent-supervisor.sh` run the loops as services. `setup.sh` sets up a fresh clone.
+- `docs/API.md` API reference (34 KB: grep for the section you need), `README.md` install, `docs/agents.md` agent loop docs, `docs/running.md` running the board
 - `.claude/skills/ultrakanban/SKILL.md` the skill agents follow
 
 ## Checks

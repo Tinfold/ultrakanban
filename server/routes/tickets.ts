@@ -53,7 +53,7 @@ async function commentOnPullRequest(github: GitHubClient, ticketId: string, body
     throw new HttpError(
       400,
       'github_unauthenticated',
-      'Not signed in to GitHub. Set GITHUB_TOKEN or run gh auth login, then restart the server',
+      'Not signed in to GitHub. Add a GitHub token on the Setup page (/setup), or set GITHUB_TOKEN',
     )
   }
   try {

@@ -9,6 +9,7 @@ import { createMergeQueue } from './merge-queue.ts'
 import { createNotifier, type Notification } from './notifications.ts'
 import { type GitHubAuth, GitHubError, type GitHubPullRequest, type NewRepository } from './github.ts'
 import { createPullRequestSync } from './pull-request-sync.ts'
+import { getStoredGitHubToken } from './store/setup.ts'
 import type { PullRequestStatus } from './store/tickets.ts'
 
 /**
@@ -37,7 +38,16 @@ export const pull = (repo: string, number: number) => {
 }
 export const attachmentDir = mkdtempSync(join(tmpdir(), 'ultrakanban-attachments-'))
 const pullRequests = createPullRequestSync({
-  auth: async () => github.auth,
+  auth: async () => (getStoredGitHubToken() ? 'board' : github.auth),
+  account: async () =>
+    github.auth || getStoredGitHubToken()
+      ? { login: 'octocat', error: null }
+      : { login: null, error: 'No GitHub token' },
+  async verifyToken(token) {
+    if (token === 'bad') throw new GitHubError(401, 'Bad credentials')
+    return 'octocat'
+  },
+  resetAuth: () => {},
   fetchPullRequestStatus: async (url) => pullRequestStatuses.get(url) ?? { state: 'open', title: 'Some PR' },
   createRepository: async (input) => {
     const repo = `${input.owner ?? 'octocat'}/${input.name}`

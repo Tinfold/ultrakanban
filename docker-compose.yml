@@ -3,7 +3,7 @@ services:
     build: .
     restart: always
     environment:
-      # Checks pull requests on GitHub. Get one with: gh auth token
+      # Checks pull requests on GitHub. Optional: the Setup page (/setup) takes a token too. Get one with: gh auth token
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_SYNC_INTERVAL: ${GITHUB_SYNC_INTERVAL:-60}
     volumes:
@@ -24,5 +24,26 @@ services:
     depends_on:
       - app
 
+  # The agents, in a container (Windows, macOS, or Linux without systemd); only with --profile agents. On Linux the
+  # systemd user services (scripts/setup.sh --agents) run them on the machine itself instead. GPUs: deploy/compose.gpu.yml
+  agents:
+    profiles: [agents]
+    build:
+      context: .
+      dockerfile: deploy/agents.Dockerfile
+    restart: always
+    environment:
+      # gh and git push with it, so it needs write access to the boards' repositories. Or log the agents in to GitHub on
+      # the Setup page (/setup)
+      GH_TOKEN: ${GITHUB_TOKEN:-}
+      # Optional: a token from `claude setup-token`, instead of logging the agents in to Claude on the Setup page
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+    volumes:
+      # Home directory: claude's and gh's logins, and the clones the agents work in
+      - ultrakanban-agent-home:/home/node
+    depends_on:
+      - app
+
 volumes:
   ultrakanban-data:
+  ultrakanban-agent-home:
