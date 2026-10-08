@@ -59,15 +59,23 @@ export function formatUsage(usage: TicketUsage) {
 
 /**
  * Readable model name, e.g. `Opus 5.5` for `claude-opus-5-5`, `Haiku 4.5` for `claude-haiku-4-5-20251001` and `Opus`
- * for the `opus` alias. Names it doesn't recognise are shown as they are.
+ * for the `opus` alias; for agents on other models, `GPT-5.1 Codex` for `gpt-5.1-codex` and `Gemini 2.5 Pro` for
+ * `gemini-2.5-pro`. Names it doesn't recognise are shown as they are.
  */
 export function formatModel(model: string) {
   const capitalized = (word: string) => word.charAt(0).toUpperCase() + word.slice(1)
-  const match = /^claude-([a-z]+)-(\d+)(?:-(\d))?(?:-\d{8})?(\[1m\])?$/i.exec(model)
-  if (match) {
-    const [, family, major, minor, longContext] = match
+  const claude = /^claude-([a-z]+)-(\d+)(?:-(\d))?(?:-\d{8})?(\[1m\])?$/i.exec(model)
+  if (claude) {
+    const [, family, major, minor, longContext] = claude
     return `${capitalized(family)} ${major}${minor ? `.${minor}` : ''}${longContext ? ' (1M)' : ''}`
   }
+  const other = /^(gpt|gemini)-(\d[\w.]*)((?:-[a-z]+)*)$/i.exec(model)
+  if (other) {
+    const [, family, version, variant] = other
+    const name = family.toLowerCase() === 'gpt' ? `GPT-${version}` : `Gemini ${version}`
+    return [name, ...variant.split('-').filter(Boolean).map(capitalized)].join(' ')
+  }
+  if (model.toLowerCase() === 'gpt') return 'GPT'
   return /^[a-z]+$/i.test(model) ? capitalized(model) : model
 }
 

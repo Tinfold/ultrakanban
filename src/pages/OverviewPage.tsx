@@ -103,7 +103,8 @@ function ModelTotals({ usage }: { usage: UsageTotals }) {
           <li key={entry.model} className="flex items-baseline gap-2" title={entry.model}>
             <span className="min-w-0 flex-1 truncate">{formatModel(entry.model)}</span>
             <span className="text-muted-foreground tabular-nums">
-              {runs(entry.runs)}, {formatCost(entry.costUsd)}
+              {runs(entry.runs)}
+              {entry.costUsd !== null && `, ${formatCost(entry.costUsd)}`}
             </span>
             <span className="w-12 text-right font-medium tabular-nums" title={`${tokens.toLocaleString()} tokens`}>
               {formatTokens(tokens)}
@@ -299,7 +300,9 @@ export function OverviewPage() {
           <Stat
             label="Tokens used"
             value={formatTokens(totalTokens(usage))}
-            detail={`${formatCost(usage.costUsd)} estimated, ${runs(usage.runs)}`}
+            detail={
+              usage.costUsd === null ? runs(usage.runs) : `${formatCost(usage.costUsd)} estimated, ${runs(usage.runs)}`
+            }
             target={SECTIONS.tokens}
           />
         </div>

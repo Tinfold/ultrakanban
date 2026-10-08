@@ -41,6 +41,23 @@ its comments, attach screenshots, submit the pull request, and answer review fee
 Also: claim/release specific tickets, move to a column/position, comment, edit with optimistic concurrency
 (`ifVersion`), filter tickets, and subscribe to `GET /api/events`.
 
+### Agents other than Claude Code
+
+Codex, Gemini CLI, opencode or aider on a local model, or any other agent that can send HTTP requests works the board
+the same way: paste it the instructions from **Board menu → Agent API**, or point it at `GET /api` (`SKILL.md` is plain
+markdown and works as its instructions too). It names itself the same way, `<agent>/<model>/<effort>`, with its own
+effort levels, or `default` for a model that has none:
+
+- `codex/gpt-5.1-codex/medium`
+- `gemini/gemini-2.5-pro/default`
+- `opencode/qwen3-coder:30b/default`, or `opencode/openrouter/qwen/qwen3-coder/default`: the model is everything
+  between the first and the last `/`
+
+The overview then counts its work and tokens under that model. It can report the tokens of its runs with
+`POST /tickets/:id/usage` (see [Token usage](API.md#token-usage)), without `costUsd` when it doesn't know the cost:
+the overview then shows its tokens but no cost, rather than $0. Model and effort suggestions for new tickets come only
+from the board's own agent's runs, so a model only another agent can run is never suggested to it.
+
 ## Running agents unattended
 
 Don't leave one Claude Code session looping on the board for days: the Claude Code process grows in memory (and
@@ -275,7 +292,8 @@ property, either way. It needs Docker or Podman on the host (Podman, rootless or
 with `DOCKER=podman`); the default image, `ultrakanban-agent` (Node.js, Claude Code, git, gh, jq), is built the first
 time a run needs it. A repository that needs more to build and test (another language, a database) needs an image of its
 own with Claude Code, git and gh in it: set `DOCKER_IMAGE` for the loop, and `DOCKER_ARGS` for limits such as `--memory
-8g --cpus 4`. A gh login kept in the machine's keyring reaches the container as `GH_TOKEN`.
+8g --cpus 4`. A gh login kept in the machine's keyring reaches the container as `GH_TOKEN`, and the `ANTHROPIC_*`
+variables (see [Other models](#other-models)) reach it too.
 
 To run the loop by hand instead, start it in a dedicated clone of the repository:
 
@@ -291,3 +309,37 @@ A reset keeps build output (ignored files such as `target/` or `node_modules/`) 
 checkout's ignored files pass `MAX_BUILD_GB` (default 20): then the loop removes them all before the next run. Each
 board's clone and worktree has its own, so a Rust board with several parallel runs could otherwise fill the disk.
 `MAX_BUILD_GB=0` keeps them.
+
+### Other models
+
+The board's agent runs Claude Code, and Claude Code can run a local model or another provider's through an endpoint
+that speaks Anthropic's API: [Ollama](https://docs.ollama.com/integrations/claude-code) (local or cloud models),
+LiteLLM, OpenRouter and other gateways. Point Claude Code at it where the agents run, with `ANTHROPIC_BASE_URL` and
+its token in `ANTHROPIC_AUTH_TOKEN`:
+
+- On the machine, in `~/.claude/settings.json` (your own Claude Code sessions there read it too):
+
+  ```json
+  {
+    "env": { "ANTHROPIC_BASE_URL": "http://localhost:11434", "ANTHROPIC_AUTH_TOKEN": "ollama", "ANTHROPIC_API_KEY": "" }
+  }
+  ```
+
+  Or for the agents only, in their services: run
+  `systemctl --user edit ultrakanban-agent.service ultrakanban-agent@.service` and add
+  `Environment=ANTHROPIC_BASE_URL=http://localhost:11434` and `Environment=ANTHROPIC_AUTH_TOKEN=ollama` under
+  `[Service]`.
+
+- In the agents container: `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` in `.env`, then
+  `docker compose --profile agents up -d`. On Docker Desktop, Ollama on the machine is at
+  `http://host.docker.internal:11434`.
+
+Then set the board's **Model** in Board settings to one the endpoint serves, e.g. `qwen3-coder:30b` from Ollama or
+`openai/gpt-5` from OpenRouter, and its runs claim tickets as `claude/qwen3-coder:30b/medium`. A ticket's own model
+has to be one the endpoint serves too (the ticket templates leave their Claude models out on such a board). The effort
+level is sent as for Claude; what it does depends on the endpoint and the model. Local models need tool calling and a
+long context window (Ollama recommends 64k tokens or more).
+
+Claude Code prices models it doesn't know as if they were Opus. The loop leaves those prices out, so the board shows
+such runs' tokens but no cost. The Setup page counts the endpoint's token as the agents' Claude login. The overview's
+Claude usage bars still need a claude.ai login, so with only an endpoint they say there is none.

@@ -264,12 +264,13 @@ describe('overview', () => {
         costUsd: 1,
         runs: 1,
       },
+      // Its runs reported no cost for it.
       'claude-haiku-4-5': {
         inputTokens: 5,
         outputTokens: 6,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
-        costUsd: 0,
+        costUsd: null,
         runs: 1,
       },
       opus: { inputTokens: 1, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.5, runs: 1 },
@@ -279,6 +280,31 @@ describe('overview', () => {
       [['claude-opus-5-5', 'claude-haiku-4-5'], ['opus']],
     )
     assert.equal(overview.totals.usage.models.opus?.runs, 1)
+  })
+
+  test("runs of agents on other models count as the model in the agent's name, however it is written", async () => {
+    const ticket = await addTicket({ title: 'A' })
+    const names = {
+      // Codex's own effort level.
+      'codex/gpt-5-codex/minimal': 'gpt-5-codex',
+      // A model name with a provider in it, and `default` for a model without effort levels.
+      'opencode/openrouter/qwen/qwen3-coder/default': 'openrouter/qwen/qwen3-coder',
+      // An Ollama tag.
+      'local-agent/qwen3-coder:30b/default': 'qwen3-coder:30b',
+      // No effort at all.
+      'gemini/gemini-2.5-pro': 'gemini-2.5-pro',
+    }
+    for (const agent of Object.keys(names)) {
+      // Local models cost nothing, so they report no cost.
+      await call('POST', `/tickets/${ticket.id}/usage`, { agent, inputTokens: 1, outputTokens: 2 })
+    }
+
+    const { body: overview } = await call<Overview>('GET', '/overview')
+    for (const [agent, model] of Object.entries(names)) {
+      const usage = overview.agents.find((entry) => entry.name === agent)?.usage
+      assert.deepEqual(Object.keys(usage?.models ?? {}), [model], agent)
+      assert.equal(usage?.costUsd, null)
+    }
   })
 
   test('agents report runs that were not on a ticket to the board', async () => {

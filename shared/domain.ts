@@ -13,8 +13,15 @@ export function colorForName(name: string): Color {
 export const AGENT_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 export type AgentEffort = (typeof AGENT_EFFORTS)[number]
 
-/** Model aliases offered for a ticket; boards and tickets can also name a model in full, e.g. claude-opus-5-5. */
+/**
+ * Model aliases offered for a ticket; boards and tickets can also name a model in full, e.g. claude-opus-5-5, or one
+ * that an Anthropic-compatible endpoint serves the agent instead of Claude, e.g. qwen3-coder:30b (see docs/agents.md).
+ */
 export const AGENT_MODELS = ['fable', 'opus', 'sonnet', 'haiku'] as const
+
+/** Whether a model is one of Claude's: an alias (`AGENT_MODELS`) or a full name such as claude-opus-5-5. */
+export const isClaudeModel = (model: string) =>
+  (AGENT_MODELS as readonly string[]).includes(model) || /^claude-/i.test(model)
 
 /** What a board's agent runs as when the board doesn't say (see scripts/agent-board.sh). */
 export const AGENT_DEFAULTS = { name: 'claude', model: 'opus', effort: 'medium', concurrency: 1 } as const
@@ -111,23 +118,35 @@ export function agentWorkerName(board: Pick<BoardSummary, 'agentName' | 'agentMo
 }
 
 /**
- * The model a run under an `<agent>/<model>/<effort>` name (see `agentWorkerName`) runs, e.g. `opus`
- * for `claude/opus/high`; null for other names.
+ * The parts of an `<agent>/<model>/<effort>` name (see `agentWorkerName`): the agent first, the effort last and the
+ * model everything in between, so model names with slashes work too (`opencode/openrouter/qwen/qwen3-coder/high`).
+ * The effort is whatever the agent calls it: agents other than Claude Code have their own levels (`minimal`) or
+ * `default` for models without any. An `<agent>/<model>` name has no effort. Null for other names, e.g. a person's.
  */
-export function workerModel(agent: string) {
-  const parts = agent.split('/')
-  return parts.length === 3 && parts[1] ? parts[1] : null
+export function parseWorkerName(name: string): { agent: string; model: string; effort: string | null } | null {
+  const parts = name.split('/')
+  if (parts.length < 2 || parts.some((part) => !part)) return null
+  if (parts.length === 2) return { agent: parts[0], model: parts[1], effort: null }
+  return { agent: parts[0], model: parts.slice(1, -1).join('/'), effort: parts[parts.length - 1] }
 }
 
 /**
- * The model and effort a run under an `<agent>/<model>/<effort>` name (see `agentWorkerName`) works at, e.g.
- * `{ model: 'opus', effort: 'high' }` for `claude/opus/high`; null for other names.
+ * The model a run under an `<agent>/<model>/<effort>` name (see `parseWorkerName`) runs, e.g. `opus` for
+ * `claude/opus/high` or `gpt-5-codex` for `codex/gpt-5-codex/minimal`; null for other names.
+ */
+export function workerModel(agent: string) {
+  return parseWorkerName(agent)?.model ?? null
+}
+
+/**
+ * The model and effort a run under an `<agent>/<model>/<effort>` name (see `parseWorkerName`) works at, e.g.
+ * `{ model: 'opus', effort: 'high' }` for `claude/opus/high`; null for other names and for efforts the board's agent
+ * doesn't have (`AGENT_EFFORTS`).
  */
 export function workerSetting(agent: string): { model: string; effort: AgentEffort } | null {
-  const parts = agent.split('/')
-  const [, model, effort] = parts
-  const isEffort = (AGENT_EFFORTS as readonly string[]).includes(effort)
-  return parts.length === 3 && model && isEffort ? { model, effort: effort as AgentEffort } : null
+  const worker = parseWorkerName(agent)
+  const isEffort = (AGENT_EFFORTS as readonly string[]).includes(worker?.effort ?? '')
+  return worker && isEffort ? { model: worker.model, effort: worker.effort as AgentEffort } : null
 }
 
 export const PULL_REQUEST_STATES = ['unknown', 'open', 'draft', 'merged', 'closed'] as const
@@ -262,7 +281,10 @@ export interface BoardSummary {
   agentEnabled: boolean
   /** Name of the board's agent (its controller); `claude` when not set. Its workers are named by `agentWorkerName`. */
   agentName: string | null
-  /** Claude model the agent runs, as an alias or a full model name; `opus` when not set. */
+  /**
+   * Model the agent runs Claude Code with: a Claude alias or full model name, or another model that an
+   * Anthropic-compatible endpoint serves (see docs/agents.md); `opus` when not set.
+   */
   agentModel: string | null
   /** Effort level the agent runs at; `medium` when not set. */
   agentEffort: AgentEffort | null
@@ -358,7 +380,7 @@ export interface Ticket {
   dueDate: string | null
   /** Effort level the board's agent works this ticket at; the board's `agentEffort` when not set. */
   agentEffort: AgentEffort | null
-  /** Claude model the board's agent works this ticket with; the board's `agentModel` when not set. */
+  /** Model the board's agent works this ticket with; the board's `agentModel` when not set. */
   agentModel: string | null
   /** Whether the board's agent works this ticket in a Docker container; the board's `agentDocker` when not set. */
   agentDocker: boolean | null
@@ -528,8 +550,11 @@ export interface TokenUsage extends TokenCounts {
 
 /** Token counts added up over several runs. */
 export interface UsageCounts extends TokenCounts {
-  /** Estimated cost in US dollars of the runs that reported one. */
-  costUsd: number
+  /**
+   * Estimated cost in US dollars of the runs that reported one; null when none did, e.g. an agent on a local model or
+   * one that doesn't know its cost.
+   */
+  costUsd: number | null
   runs: number
 }
 
@@ -544,7 +569,7 @@ const noCounts = (): UsageCounts => ({
   outputTokens: 0,
   cacheReadTokens: 0,
   cacheWriteTokens: 0,
-  costUsd: 0,
+  costUsd: null,
   runs: 0,
 })
 
@@ -555,7 +580,7 @@ function addCounts(totals: UsageCounts, counts: TokenCounts & { costUsd: number 
   totals.outputTokens += counts.outputTokens
   totals.cacheReadTokens += counts.cacheReadTokens
   totals.cacheWriteTokens += counts.cacheWriteTokens
-  totals.costUsd += counts.costUsd ?? 0
+  if (counts.costUsd !== null) totals.costUsd = (totals.costUsd ?? 0) + counts.costUsd
   totals.runs += runs
 }
 

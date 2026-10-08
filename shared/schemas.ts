@@ -39,10 +39,12 @@ const agentName = z
   .trim()
   .regex(/^[\w.-]{1,64}$/, 'Use letters, digits, ".", "_" and "-" only')
   .nullable()
+/** A Claude alias or model name, or another endpoint's: Ollama's have tags (`qwen3-coder:30b`), some a provider. */
 const agentModel = z
   .string()
   .trim()
-  .regex(/^[\w.[\]-]{1,100}$/, 'Use a model alias or name, e.g. opus or claude-opus-5-5')
+  .max(100)
+  .regex(/^[\w.:[\]-]+(\/[\w.:[\]-]+)*$/, 'Use a model alias or name, e.g. opus, claude-opus-5-5 or qwen3-coder:30b')
   .nullable()
 const agentEffort = z.enum(AGENT_EFFORTS).nullable()
 const agentConcurrency = z.int().min(1).max(AGENT_MAX_CONCURRENCY).nullable()

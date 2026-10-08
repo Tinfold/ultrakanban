@@ -2,9 +2,11 @@
 # Part of agent-loop.sh, which sources it; the settings it uses are described there.
 
 # The tokens a run used, from claude's JSON output (every model it called, subagents included), in all and per model,
-# as the body of POST /tickets/:id/usage.
+# as the body of POST /tickets/:id/usage. Claude prices models it doesn't know (another provider's, or a local one,
+# through ANTHROPIC_BASE_URL) as if they were Opus and says so with costBasis "unknown": those costs are left out.
 read -r -d '' USAGE <<'JQ'
 def total($field): [.[] | .[$field] // 0] | add // 0;
+def cost: if .costBasis == "unknown" then null else .costUSD end;
 select(.type == "result")
 | (if (.modelUsage // {}) != {} then [.modelUsage[]] else [.usage // {} | {
     inputTokens: .input_tokens, outputTokens: .output_tokens,
@@ -13,10 +15,12 @@ select(.type == "result")
 | {agent: $agent, inputTokens: ($models | total("inputTokens")), outputTokens: ($models | total("outputTokens")),
    cacheReadTokens: ($models | total("cacheReadInputTokens")),
    cacheWriteTokens: ($models | total("cacheCreationInputTokens")),
-   costUsd: .total_cost_usd, durationMs: .duration_ms,
+   costUsd: (if any(.modelUsage // {} | .[]; .costBasis == "unknown") then [.modelUsage[] | cost // empty] | add
+     else .total_cost_usd end),
+   durationMs: .duration_ms,
    models: [.modelUsage // {} | to_entries[] | {model: .key, inputTokens: (.value.inputTokens // 0),
      outputTokens: (.value.outputTokens // 0), cacheReadTokens: (.value.cacheReadInputTokens // 0),
-     cacheWriteTokens: (.value.cacheCreationInputTokens // 0), costUsd: .value.costUSD}]}
+     cacheWriteTokens: (.value.cacheCreationInputTokens // 0), costUsd: (.value | cost)}]}
 JQ
 
 # When Claude usage resets, from claude's limit message: "... resets 2:50pm (America/New_York)", "... resets Oct 3,
@@ -168,7 +172,9 @@ use_docker() {
   fi
   [[ -n ${GH_TOKEN:-} ]] || GH_TOKEN=$(gh auth token 2>/dev/null) || GH_TOKEN=
   [[ -n $GH_TOKEN ]] && export GH_TOKEN && docker_args+=(--env GH_TOKEN)
-  [[ -n ${ANTHROPIC_API_KEY:-} ]] && docker_args+=(--env ANTHROPIC_API_KEY)
+  # Claude's API key, and the endpoint that serves another provider's or a local model and its token
+  # (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN), when they are set.
+  while read -r name; do docker_args+=(--env "$name"); done < <(compgen -e | grep '^ANTHROPIC_')
   read -r -a extra <<<"${DOCKER_ARGS:-}"
   docker_args+=(${extra[@]+"${extra[@]}"} "$DOCKER_IMAGE")
 }
