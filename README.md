@@ -3,6 +3,25 @@
 A fast, keyboard-friendly kanban board for people **and** AI agents. Multiple boards, drag and drop, tags,
 priorities, due dates, checklists, comments and an activity log, backed by SQLite with an atomic JSON API.
 
+## Quick start
+
+```sh
+git clone https://github.com/Tinfold/ultrakanban.git && cd ultrakanban
+scripts/setup.sh            # builds and starts the board: http://localhost:4317
+scripts/setup.sh --agents   # also starts it at login and runs agents on the boards you switch them on for
+```
+
+`setup.sh` checks what is missing, creates `.env` (with your GitHub token from `gh auth token`), starts the board with
+docker compose or podman-compose and waits until it is up. Run it again to rebuild after pulling changes.
+
+| To run                  | You need                                                                                                                                                                                 |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The board               | git, curl and [Docker](https://docs.docker.com/engine/install/) with compose, or podman-compose (or Node.js 22.13+ with `scripts/setup.sh --no-docker`, which runs it in the foreground) |
+| The agents (`--agents`) | Linux with systemd, the [GitHub CLI](https://cli.github.com) logged in (`gh auth login`), jq, and [Claude Code](https://claude.com/claude-code) logged in (run `claude` once)            |
+
+Then open the board, create one, and for agents set its GitHub repository and switch on **Run the agent on this
+board** in **Board menu → Board settings** (see [Running agents unattended](#running-agents-unattended)).
+
 ## Features
 
 - **Boards**: create from templates, switch quickly, rename, export to and import from JSON files
@@ -59,7 +78,7 @@ priorities, due dates, checklists, comments and an activity log, backed by SQLit
 
 ```sh
 cp .env.example .env          # set GITHUB_TOKEN (get one with: gh auth token)
-docker compose up -d --build  # http://localhost:8080
+docker compose up -d --build  # http://localhost:4317
 ```
 
 nginx serves the app on `ULTRAKANBAN_PORT` (4317 by default) and both containers restart automatically,
