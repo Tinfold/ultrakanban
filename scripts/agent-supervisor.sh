@@ -256,7 +256,7 @@ login_report() {
 # gives claude the code pasted back on the page, and reports how it went. Stops when the login is cancelled or after
 # 15 minutes, when the code or link has expired.
 run_login() {
-  local kind=$1 requested=$2 dir pid fd url user_code code login message status deadline=$((SECONDS + 900)) shown= over=
+  local kind=$1 requested=$2 dir pid fd url user_code code login message status deadline=$((SECONDS + 900)) shown= over= url_seen=
   echo "logging the agents in to $kind, as asked on the Setup page"
   dir=$(mktemp -d) && mkfifo "$dir/in" || {
     login_report '{"state":"failed","message":"Could not start the login."}' >/dev/null
@@ -290,9 +290,23 @@ run_login() {
     fi
     if [[ -z $shown ]]; then
       if [[ $kind == github ]]; then
-        user_code=$(sed -n 's/.*one-time code: *\([A-Z0-9-]*\).*/\1/p' "$dir/out" | head -n 1)
+        # "! First copy your one-time code: ABCD-1234" (older gh) or "! One-time code (ABCD-1234) copied to clipboard".
+        user_code=$(grep -i 'one-time code' "$dir/out" | grep -oE '[A-Z0-9]{4}-[A-Z0-9]{4}' | head -n 1)
         url=$(grep -o 'https://github.com/login/device' "$dir/out" | head -n 1)
-        [[ -n $user_code ]] || url=
+        if [[ -n $url && -z $user_code ]]; then
+          # The code may be a moment behind the link. If gh's wording is one we don't know, show what it said.
+          url=
+          : "${url_seen:=$SECONDS}"
+          if ((SECONDS - url_seen >= 6)); then
+            kill "$pid" 2>/dev/null
+            message=$(sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' "$dir/out" | grep -v '^[[:space:]]*$' | head -c 3000)
+            echo "the github login did not show a code I could read: $message"
+            login_report "$(jq -nc --arg message "Could not read the one-time code from gh. Start the login again. gh said: $message" \
+              '{state: "failed", message: $message}')" >/dev/null
+            over=1
+            break
+          fi
+        fi
       else
         url=$(grep -o 'https://[^ ]*oauth/authorize[^ ]*' "$dir/out" | head -n 1)
       fi
