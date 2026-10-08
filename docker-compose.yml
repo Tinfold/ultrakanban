@@ -13,14 +13,13 @@ services:
       - '4317'
 
   nginx:
-    image: nginx:1.29-alpine
+    # nginx with deploy/nginx.conf
+    build:
+      context: deploy
+      dockerfile: nginx.Dockerfile
     restart: always
     ports:
       - '${ULTRAKANBAN_PORT:-4317}:80'
-    volumes:
-      # `z` relabels the file for containers; required where SELinux is enforcing (Fedora, RHEL).
-      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro,z
-      - ./deploy/40-resolver.sh:/docker-entrypoint.d/40-resolver.sh:ro,z
     depends_on:
       - app
 
@@ -41,6 +40,24 @@ services:
     volumes:
       # Home directory: claude's and gh's logins, and the clones the agents work in
       - ultrakanban-agent-home:/home/node
+    depends_on:
+      - app
+
+  # Updates ultrakanban from the app's update button (deploy/updater.sh) where no agent supervisor on the machine does:
+  # Windows, macOS, Linux without systemd. Only with --profile updater, which scripts/setup.sh adds there.
+  updater:
+    profiles: [updater]
+    build:
+      context: deploy
+      dockerfile: updater.Dockerfile
+    restart: always
+    environment:
+      KANBAN: http://app:4317
+    volumes:
+      # The checkout it pulls and rebuilds the board from
+      - .:/repo
+      # Docker, to rebuild and restart the board's containers
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - app
 

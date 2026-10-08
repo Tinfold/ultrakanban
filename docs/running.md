@@ -13,7 +13,7 @@ including after a reboot. The database and attachments live in the `ultrakanban-
 ```sh
 docker compose logs -f app                            # logs
 docker compose cp app:/app/data ./backup             # back up the database and attachments
-docker compose down && docker compose up -d --build  # update after pulling changes
+docker compose down && docker compose up -d --build  # update after pulling changes (or the update button, below)
 
 # Move an existing local board into the container
 docker compose stop app
@@ -21,6 +21,11 @@ docker compose cp ./data/ultrakanban.db app:/app/data/
 docker compose cp ./data/attachments app:/app/data/
 docker compose start app
 ```
+
+The update button in the header pulls this checkout and rebuilds the board for you once something acts on it: the
+agent services on Linux, or elsewhere the updater container, `docker compose --profile updater up -d --build` (it gets
+the Docker socket; see [Agents](agents.md#running-agents-unattended)). Changes to `deploy/nginx.conf` take effect after
+`docker compose up -d --build` too, since it is built into the nginx image.
 
 There is no authentication, so only publish it on a network you trust. To put it on the internet, terminate
 TLS in front of nginx (or add a `listen 443 ssl` server block with your certificates in `deploy/nginx.conf`).
