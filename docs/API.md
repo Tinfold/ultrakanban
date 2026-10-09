@@ -687,6 +687,7 @@ supervisor runs where the agents run. `GET /system/setup` returns:
       updatedAt: string
     } | null
   }
+  serverTime: string // the server's time: the page judges seenAt by it, as the browser's clock can be off from it
 }
 ```
 

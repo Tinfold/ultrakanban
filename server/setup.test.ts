@@ -38,8 +38,10 @@ describe('Setup', () => {
       gitIdentity: 'Octo Cat <octocat@example.com>',
     })
     assert.equal(reported.status, 200)
-    const { agents } = await setup()
+    const { agents, serverTime } = await setup()
     assert.ok(agents.seenAt)
+    // The page judges the check-in by the server's clock, which can be off from the browser's.
+    assert.ok(Date.parse(serverTime) >= Date.parse(agents.seenAt))
     assert.deepEqual(
       [agents.runsIn, agents.githubLogin, agents.claudeAccount, agents.gitIdentity, agents.login],
       ['machine', 'octocat', 'me@example.com', 'Octo Cat <octocat@example.com>', null],

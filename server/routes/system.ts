@@ -10,7 +10,7 @@ import {
   setGitHubTokenSchema,
 } from '../../shared/schemas.ts'
 import type { AppServices } from '../app.ts'
-import { transaction } from '../db.ts'
+import { now, transaction } from '../db.ts'
 import { gitHubFailure } from '../errors.ts'
 import { actorOf, readJson } from '../http.ts'
 import { cancelAppUpdate, getAppUpdate, reportAppUpdate, requestAppUpdate } from '../store/app-update.ts'
@@ -34,6 +34,7 @@ export const systemRoutes = ({ pullRequests: { github } }: AppServices) => {
   const setupStatus = async (): Promise<SetupStatus> => ({
     github: { auth: await github.auth(), ...(await github.account()) },
     agents: getAgentHost(),
+    serverTime: now(),
   })
 
   return (

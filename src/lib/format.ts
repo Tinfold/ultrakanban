@@ -1,4 +1,4 @@
-import { differenceInCalendarDays, format, formatDistanceToNowStrict, isThisYear, parseISO } from 'date-fns'
+import { differenceInCalendarDays, format, formatDistanceStrict, isThisYear, parseISO } from 'date-fns'
 import type { TicketUsage } from '@shared/domain'
 
 export const toISODate = (date: Date) => format(date, 'yyyy-MM-dd')
@@ -19,7 +19,9 @@ export function dueState(value: string): 'overdue' | 'soon' | 'later' {
   return days < 0 ? 'overdue' : days <= 2 ? 'soon' : 'later'
 }
 
-export const formatRelative = (iso: string) => formatDistanceToNowStrict(parseISO(iso), { addSuffix: true })
+/** E.g. `5 minutes ago`, from now or from `now` (e.g. the server's time, when it matters that its clock is off). */
+export const formatRelative = (iso: string, now = Date.now()) =>
+  formatDistanceStrict(parseISO(iso), now, { addSuffix: true })
 
 export const formatDateTime = (iso: string) => format(parseISO(iso), 'MMM d, yyyy, HH:mm')
 
