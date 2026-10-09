@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils'
 
 /** GitHub's page for a classic token, with the scopes the board and the agents need ticked. */
 const TOKEN_URL = 'https://github.com/settings/tokens/new?scopes=repo,read:org,workflow&description=ultrakanban'
+const GH_INSTALL_URL = 'https://github.com/cli/cli/blob/trunk/docs/install_linux.md'
 
 /** The supervisor checks in every 30 seconds; after this long without it, it isn't running. */
 const AGENTS_OFFLINE_MS = 3 * 60_000
@@ -264,7 +265,20 @@ function Waiting({ children }: { children: ReactNode }) {
 function StartAgents() {
   return (
     <div className="grid gap-2 text-xs text-muted-foreground">
-      <p>Start them from the folder you cloned ultrakanban into. On Linux, as services on this machine:</p>
+      <p>
+        Start them from the folder you cloned ultrakanban into. On Linux, as services on this machine, which need Claude
+        Code (the <code>claude</code> command), the{' '}
+        <a
+          href={GH_INSTALL_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="text-foreground underline underline-offset-2"
+        >
+          GitHub CLI
+        </a>{' '}
+        (<code>gh</code>, from your package manager) and jq installed:
+      </p>
+      <Command>npm install -g @anthropic-ai/claude-code</Command>
       <Command>scripts/setup.sh --agents</Command>
       <p>On Windows and macOS (or Linux, if you’d rather), in a container:</p>
       <Command>docker compose --profile agents up -d --build</Command>

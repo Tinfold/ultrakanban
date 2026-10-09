@@ -77,6 +77,10 @@ scripts and the skill to `~/.local/share/ultrakanban-agent`, and the supervisor 
 you pull this checkout's default branch, it installs the new versions, and each agent loop switches to them before its
 next run. Run the script again only when the systemd units in `deploy/` change.
 
+The services run the tools installed on the machine, so install them first: Claude Code (the `claude` command,
+`npm install -g @anthropic-ai/claude-code`), the GitHub CLI (`gh`, which they push, open pull requests and read reviews
+with; install it [from its package repository](https://github.com/cli/cli/blob/trunk/docs/install_linux.md)), jq and git. `scripts/setup.sh --agents` checks for
+them.
 The agents use your own logins on the machine: gh's (`gh auth login`), claude's (`claude auth login`), and git's commit
 name and email. The board's **Setup page** (`/setup`, the gear in the header) shows which of them the agents have, and
 logs them in for you (see [Logins from the Setup page](#logins-from-the-setup-page)); `scripts/setup.sh --agents` sets
