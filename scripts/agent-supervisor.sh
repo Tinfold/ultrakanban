@@ -258,7 +258,7 @@ login_report() {
 # gives claude the code pasted back on the page, and reports how it went. Stops when the login is cancelled or after
 # 15 minutes, when the code or link has expired.
 run_login() {
-  local kind=$1 requested=$2 dir pid fd url user_code code login message status deadline=$((SECONDS + 900)) shown= over=
+  local kind=$1 requested=$2 dir pid fd url user_code code login message= status deadline=$((SECONDS + 900)) shown= over=
   echo "logging the agents in to $kind, as asked on the Setup page"
   if [[ $kind == github ]] && ! command -v gh >/dev/null; then
     message="gh isn't installed where the agents run. Install the GitHub CLI (https://github.com/cli/cli/blob/trunk/docs/install_linux.md), then log in again."
