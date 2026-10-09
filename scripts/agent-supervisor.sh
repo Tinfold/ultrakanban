@@ -224,12 +224,14 @@ report_agents() {
     name=$(git config --global user.name)
     email=$(git config --global user.email)
     [[ -n $name && -n $email ]] && identity="$name <$email>"
+    # `if` needs its `else`: jq 1.6 (the agents container's, Debian's and Ubuntu 22.04's) doesn't compile one without.
     agents_fields=$(jq -nc --arg runsIn "$runs_in" --arg github "$github" --arg claude "$claude" --arg git "$identity" '
-      def orNull: if . == "" then null end;
+      def orNull: if . == "" then null else . end;
       {runsIn: $runsIn, githubLogin: ($github | orNull), claudeAccount: ($claude | orNull), gitIdentity: ($git | orNull)}')
   fi
   state=$(curl -sf -X POST "$KANBAN/api/system/agents" -H 'Content-Type: application/json' \
-    -H 'X-Actor: agent-supervisor' -d "$agents_fields" | jq -r '.login.state // empty' 2>/dev/null)
+    -H 'X-Actor: agent-supervisor' -d "$agents_fields" | jq -r '.login.state // empty' 2>/dev/null) ||
+    echo "couldn't check in with $KANBAN for its Setup page"
   [[ $state == requested ]] && start_login
 }
 
