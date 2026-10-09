@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
-import { describe, test } from 'node:test'
+import { describe, mock, test } from 'node:test'
 import type { AgentHost, SetupStatus } from '../shared/domain.ts'
-import type { SupervisorAgentLogin } from './store/setup.ts'
+import { AGENT_LOGIN_TIMEOUT_MS, type SupervisorAgentLogin } from './store/setup.ts'
 import { call, github } from './test-app.ts'
 
 describe('Setup', () => {
@@ -86,5 +86,40 @@ describe('Setup', () => {
     assert.equal((await call<AgentHost>('DELETE', '/system/agents/login')).body.login, null)
     assert.equal((await report({ state: 'done' })).status, 409)
     assert.equal((await call('GET', '/system/agents/login')).body, null)
+  })
+
+  test('a login that runs out of time shows as failed, so the page stops waiting for it', async () => {
+    await call('DELETE', '/system/agents/login')
+    await call('POST', '/system/agents/login', { kind: 'github' })
+    await report({ state: 'waiting', url: 'https://github.com/login/device', userCode: 'B8BA-9179' })
+
+    mock.timers.enable({ apis: ['Date'], now: Date.now() + AGENT_LOGIN_TIMEOUT_MS })
+    try {
+      const login = (await setup()).agents.login!
+      assert.equal(login.state, 'failed')
+      assert.match(login.message!, /didn’t finish within 15 minutes/)
+      // The supervisor sees it too, and stops its command; a last report is turned down.
+      assert.equal((await call<SupervisorAgentLogin>('GET', '/system/agents/login')).body.state, 'failed')
+      assert.equal((await report({ state: 'done', message: 'Logged in to GitHub as octocat.' })).status, 409)
+      // Another login can start.
+      const next = await call<AgentHost>('POST', '/system/agents/login', { kind: 'github' })
+      assert.equal(next.status, 202)
+      assert.equal(next.body.login!.state, 'requested')
+    } finally {
+      mock.timers.reset()
+    }
+  })
+
+  test('a login the supervisor never starts shows as failed after a while', async () => {
+    await call('DELETE', '/system/agents/login')
+    await call('POST', '/system/agents/login', { kind: 'claude' })
+    mock.timers.enable({ apis: ['Date'], now: Date.now() + AGENT_LOGIN_TIMEOUT_MS })
+    try {
+      const login = (await setup()).agents.login!
+      assert.equal(login.state, 'failed')
+      assert.match(login.message!, /didn’t start the login/)
+    } finally {
+      mock.timers.reset()
+    }
   })
 })
