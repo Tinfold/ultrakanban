@@ -72,7 +72,7 @@ else
   need npm 'comes with Node.js'
 fi
 if ((agents && !container)); then
-  need gh 'GitHub CLI, https://cli.github.com, then: gh auth login'
+  need gh 'GitHub CLI, https://github.com/cli/cli/blob/trunk/docs/install_linux.md'
   need jq 'your package manager'
   need claude 'Claude Code, https://claude.com/claude-code'
 fi

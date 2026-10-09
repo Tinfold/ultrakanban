@@ -259,7 +259,7 @@ run_login() {
   local kind=$1 requested=$2 dir pid fd url user_code code login message status deadline=$((SECONDS + 900)) shown= over=
   echo "logging the agents in to $kind, as asked on the Setup page"
   if [[ $kind == github ]] && ! command -v gh >/dev/null; then
-    message="gh isn't installed where the agents run. Install the GitHub CLI (https://cli.github.com), then log in again."
+    message="gh isn't installed where the agents run. Install the GitHub CLI (https://github.com/cli/cli/blob/trunk/docs/install_linux.md), then log in again."
   elif [[ $kind == claude ]] && ! command -v claude >/dev/null; then
     message="Claude Code isn't installed where the agents run. Install it (npm install -g @anthropic-ai/claude-code), then log in again."
   fi
