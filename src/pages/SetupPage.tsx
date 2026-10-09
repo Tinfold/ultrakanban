@@ -275,7 +275,7 @@ function StartAgents() {
 
 export function SetupPage() {
   const queryClient = useQueryClient()
-  const { data: status, error } = useSetup()
+  const { data: status, error, dataUpdatedAt } = useSetup()
   const { data: boards } = useBoards()
   const now = useNow(10_000)
 
@@ -294,7 +294,10 @@ export function SetupPage() {
     content = <p className="text-sm text-muted-foreground">Couldn’t load the setup: {error.message}</p>
   } else if (status) {
     const { github, agents } = status
-    const online = !!agents.seenAt && now - Date.parse(agents.seenAt) < AGENTS_OFFLINE_MS
+    // The server's time now: it stamped the check-in, and its clock can be off from this browser's (Docker Desktop's
+    // VM's drifts, e.g. after the machine sleeps). `now` ticks every 10 seconds, so it can be older than the status.
+    const serverNow = Math.max(now, dataUpdatedAt) + Date.parse(status.serverTime) - dataUpdatedAt
+    const online = !!agents.seenAt && serverNow - Date.parse(agents.seenAt) < AGENTS_OFFLINE_MS
     const where = agents.runsIn === 'container' ? 'in the agents container' : 'on this machine'
     const later = online ? 'todo' : 'later'
     const boardWithAgent = boards?.find((board) => board.agentEnabled && board.githubRepo)
@@ -334,9 +337,9 @@ export function SetupPage() {
           title="Start the agents"
           status={
             online
-              ? `Running ${where}; checked in ${formatRelative(agents.seenAt!)}.`
+              ? `Running ${where}; checked in ${formatRelative(agents.seenAt!, serverNow)}.`
               : agents.seenAt
-                ? `They last checked in ${formatRelative(agents.seenAt)}, ${where}. Start them again:`
+                ? `They last checked in ${formatRelative(agents.seenAt, serverNow)}, ${where}. Start them again:`
                 : 'The agents work tickets on boards that have them switched on. They aren’t running yet.'
           }
         >

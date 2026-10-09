@@ -881,4 +881,9 @@ export interface SetupStatus {
     error: string | null
   }
   agents: AgentHost
+  /**
+   * The server's time when it answered: the page judges the agents' check-in by it, since the server's clock can be off
+   * from the browser's (Docker Desktop's VM's drifts, e.g. after the machine sleeps).
+   */
+  serverTime: string
 }
