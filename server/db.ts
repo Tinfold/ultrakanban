@@ -304,6 +304,9 @@ const MIGRATIONS = [
   );
   INSERT INTO setup (id) VALUES (1);
   `,
+  `
+  ALTER TABLE boards ADD COLUMN delete_merged_branches INTEGER NOT NULL DEFAULT 0;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

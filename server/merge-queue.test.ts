@@ -5,8 +5,10 @@ import { type GitHubPullRequest } from './github.ts'
 import {
   addTicket,
   boardId,
+  branches,
   call,
   containing,
+  deletedBranches,
   merges,
   mergeQueue,
   pull,
@@ -58,8 +60,9 @@ describe('merging all reviewed pull requests', () => {
       doneColumn: 'Done',
     })
     useBoard(body.id)
-    for (const map of [pulls, pullRequestStatuses, containing]) map.clear()
+    for (const map of [pulls, pullRequestStatuses, containing, branches]) map.clear()
     merges.length = 0
+    deletedBranches.length = 0
     setAfterMerge(() => {})
   })
 
@@ -235,5 +238,74 @@ describe('merging all reviewed pull requests', () => {
     // Nothing ready is left, so it starts no run.
     assert.equal(await mergeQueue.autoMerge(boardId), null)
     assert.equal((await call<MergeRun>('GET', `/boards/${boardId}/merge-run`)).body.id, run.id)
+  })
+
+  describe('deleting branches after merge', () => {
+    /** Adds a ticket in review whose branch exists on the fake GitHub at the pull request's head. */
+    async function withBranch(number: number, pullRequest: Parameters<typeof inReview>[1] = {}) {
+      const id = await inReview(number, pullRequest)
+      const { head, headSha } = pull(REPO, number)
+      branches.set(`${REPO}:${head}`, headSha)
+      return id
+    }
+
+    beforeEach(() => call('PATCH', `/boards/${boardId}`, { deleteMergedBranches: true }))
+
+    test('deletes merged branches, moving the pull requests based on them to their base first', async () => {
+      await withBranch(1, { base: 'branch-2' })
+      await withBranch(2)
+      await withBranch(3, { base: 'branch-2', draft: true })
+
+      const run = await runToEnd()
+
+      assert.deepEqual(
+        run.steps.map((step) => [step.number, step.status]),
+        [
+          [2, 'merged'],
+          [1, 'merged'],
+          [3, 'skipped'],
+        ],
+      )
+      assert.deepEqual(deletedBranches, ['acme/app:branch-2', 'acme/app:branch-1'])
+      assert.equal(pull(REPO, 3).base, 'main')
+      assert.equal(pull(REPO, 3).state, 'open')
+      assert.deepEqual([...branches.keys()], ['acme/app:branch-3'])
+    })
+
+    test('deletes the branch of a pull request merged on GitHub', async () => {
+      const ticket = await withBranch(1)
+      Object.assign(pull(REPO, 1), { merged: true, state: 'closed' })
+      pullRequestStatuses.set(url(1), { state: 'merged', title: 'PR 1' })
+
+      await call('POST', `/tickets/${ticket}/pull-request/sync`)
+      await call('POST', `/tickets/${ticket}/pull-request/sync`)
+
+      assert.deepEqual(deletedBranches, ['acme/app:branch-1'])
+    })
+
+    test('keeps branches in forks, the default branch and branches with newer commits', async () => {
+      await withBranch(1, { headRepo: 'someone/app' })
+      await withBranch(2, { head: 'main', base: 'release' })
+      await withBranch(3)
+      branches.set(`${REPO}:branch-3`, 'sha-newer')
+
+      const run = await runToEnd()
+
+      assert.deepEqual(
+        run.steps.map((step) => step.status),
+        ['merged', 'merged', 'merged'],
+      )
+      assert.deepEqual(deletedBranches, [])
+    })
+
+    test('keeps branches on boards without the setting', async () => {
+      await call('PATCH', `/boards/${boardId}`, { deleteMergedBranches: false })
+      await withBranch(1)
+
+      await runToEnd()
+
+      assert.deepEqual(merges, ['acme/app#1:merge'])
+      assert.deepEqual(deletedBranches, [])
+    })
   })
 })

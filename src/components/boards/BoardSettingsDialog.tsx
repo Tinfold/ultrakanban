@@ -139,6 +139,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
       agentAllSkills: data.get('agentAllSkills') === 'on',
       agentDocker: data.get('agentDocker') === 'on',
       autoMerge: data.get('autoMerge') === 'on',
+      deleteMergedBranches: data.get('deleteMergedBranches') === 'on',
       archiveDoneDays: archiveDays >= 1 ? Math.round(archiveDays) : null,
       approvalSize: approvalSize === NONE ? null : (approvalSize as TicketSize),
       notifyUrl: text('notifyUrl'),
@@ -219,6 +220,22 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
             Merges pull requests in the review column once they have no conflicts, every check has passed and every
             checklist item of their ticket is checked, the way Merge all would. Checks when pull requests are synced
             with GitHub.
+          </p>
+        </div>
+        <div className="grid gap-1">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              name="deleteMergedBranches"
+              defaultChecked={detail.board.deleteMergedBranches}
+              className="size-4 accent-primary"
+            />
+            Delete branches after merge
+          </label>
+          <p className="pl-6 text-xs text-muted-foreground">
+            Deletes a pull request's branch on GitHub once it is merged, however it was merged. Pull requests based on
+            the branch move to its base first. Keeps branches in forks, the default branch and branches with commits
+            pushed after the merge.
           </p>
         </div>
         <GitHubStatus />
