@@ -76,7 +76,8 @@ update_scripts() {
   echo "updated$updated to $branch at ${commit:0:7} in $checkout"
   if [[ $updated == *agent-supervisor.sh* ]]; then
     echo "restarting with the new agent-supervisor.sh"
-    exec "$self"
+    # A login running in the background carries on: the new one looks after it.
+    ULTRAKANBAN_LOGIN_PID=$login_pid exec "$self"
   fi
 }
 
@@ -205,10 +206,13 @@ runs_in=machine
 [[ -z ${ULTRAKANBAN_AGENTS_CONTAINER:-} ]] || runs_in=container
 last_agents=
 agents_fields=
-login_pid=
+# The login running in the background, if any (see run_login); kept across a restart with a new agent-supervisor.sh.
+login_pid=${ULTRAKANBAN_LOGIN_PID:-}
+unset ULTRAKANBAN_LOGIN_PID
 # Checks in with where the agents run and which logins they have, for the board's Setup page (see
-# reportAgentHostSchema), and starts a login the page asked for. The logins are looked at every CLAUDE_USAGE_SECONDS,
-# and after a login.
+# reportAgentHostSchema), and starts a login the page asked for, or ends one the page waits for that isn't running here
+# (from before the agents restarted, say), which nothing would finish otherwise. The logins are looked at every
+# CLAUDE_USAGE_SECONDS, and after a login.
 report_agents() {
   local github claude name email identity= state
   if [[ -z $last_agents ]] || ((SECONDS - last_agents >= CLAUDE_USAGE_SECONDS)); then
@@ -232,7 +236,12 @@ report_agents() {
   state=$(curl -sf -X POST "$KANBAN/api/system/agents" -H 'Content-Type: application/json' \
     -H 'X-Actor: agent-supervisor' -d "$agents_fields" | jq -r '.login.state // empty' 2>/dev/null) ||
     echo "couldn't check in with $KANBAN for its Setup page"
-  [[ $state == requested ]] && start_login
+  if [[ $state == requested ]]; then
+    start_login
+  elif [[ $state == @(waiting|checking) ]] && ! { [[ -n $login_pid ]] && kill -0 "$login_pid" 2>/dev/null; }; then
+    echo "ending the login the Setup page waits for: it isn't running here any more"
+    login_report '{"state":"failed","message":"The login stopped before it finished, e.g. because the agents restarted. Log in again."}' >/dev/null
+  fi
 }
 
 # Starts the login asked for, unless one is running already. It runs in the background, so the loops are looked after
@@ -295,7 +304,7 @@ run_login() {
     login=$(curl -sf "$KANBAN/api/system/agents/login")
     if [[ -n $login && ($(jq -r '.requestedAt // empty' <<<"$login") != "$requested" ||
       $(jq -r '.state // empty' <<<"$login") == @(done|failed)) ]]; then
-      echo "the $kind login was cancelled"
+      echo "the $kind login was cancelled or ran out of time"
       kill "$pid" 2>/dev/null
       over=1
       break
@@ -335,7 +344,8 @@ run_login() {
   if ((status != 0)); then
     echo "the $kind login failed: $message"
     login_report "$(jq -nc --arg message "${message:-It stopped without saying why.}" \
-      '{state: "failed", message: $message}')" >/dev/null
+      '{state: "failed", message: $message}')" >/dev/null ||
+      echo "couldn't tell $KANBAN how the login ended"
     return
   fi
 
@@ -348,7 +358,8 @@ run_login() {
     message="Logged in to Claude${login:+ as $login}."
   fi
   echo "$message"
-  login_report "$(jq -nc --arg message "$message" '{state: "done", message: $message}')" >/dev/null
+  login_report "$(jq -nc --arg message "$message" '{state: "done", message: $message}')" >/dev/null ||
+    echo "couldn't tell $KANBAN how the login ended"
 }
 
 # After logging in to GitHub: git pushes with gh's login and commits as that GitHub user (unless git has a name and

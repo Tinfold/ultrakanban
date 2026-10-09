@@ -10,8 +10,8 @@
 #
 #   agent-board.sh <board id>
 #
-# Settings: KANBAN (default http://localhost:4317) and ULTRAKANBAN_AGENT_HOME (default
-# $XDG_DATA_HOME/ultrakanban-agent). The board's clone, worktrees and loop state live in
+# Settings: KANBAN (default http://localhost:4317), IDLE_SECONDS (default 60, see agent-loop.sh) and
+# ULTRAKANBAN_AGENT_HOME (default $XDG_DATA_HOME/ultrakanban-agent). The board's clone, worktrees and loop state live in
 # $ULTRAKANBAN_AGENT_HOME/boards/<board>.
 
 set -uo pipefail
@@ -77,6 +77,9 @@ if [[ -f $installed_skill ]] && ! git -C "$dir/repo" ls-files --error-unmatch "$
 fi
 
 echo "working board $BOARD on $repo as $agent/$model/$effort, $concurrency ticket(s) at a time"
+# The loops check the board and GitHub every minute when there is nothing to do, rather than agent-loop.sh's 5 minutes,
+# so a ticket added to an idle board is picked up soon.
+export IDLE_SECONDS=${IDLE_SECONDS:-60}
 export KANBAN BOARD AGENT=$agent MODEL=$model EFFORT=$effort STATE_DIR=$dir/state AGENT_LOOP_CLEAN=1 \
   CLAIM_LIMIT=$concurrency \
   WATCH_FILES="$here/agent-loop.sh:$(printf '%s:' "$here"/agent-loop/*.sh)$here/agent-board.sh:$installed_skill"

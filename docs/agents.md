@@ -141,8 +141,10 @@ Setup page shows them, and **Log in to GitHub** or **Log in to Claude** there as
 - Claude: the page shows Claude's sign-in link and a box for the code Claude shows after you sign in; the supervisor
   passes it to `claude auth login`.
 
-A login that isn't finished in 15 minutes stops, as its code expires. The board's own GitHub token can also be pasted
-there; it is kept in the board's database, takes precedence over `GITHUB_TOKEN` and gh, and the API never sends it back.
+A login that isn't finished in 15 minutes stops, as its code expires, and the page says so; so does one the agents
+stopped running, e.g. because their container restarted. Log in again then. The board's own GitHub token can also
+be pasted there; it is kept in the board's database, takes precedence over `GITHUB_TOKEN` and gh, and the API never
+sends it back.
 
 **Updating from the app.** Once the supervisor runs, the header shows an update button, with the version the board runs
 and how many commits it is behind origin (fetched every 15 minutes). **Update & restart** asks the supervisor to

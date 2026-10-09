@@ -8,8 +8,6 @@ StartLimitIntervalSec=0
 
 [Service]
 Environment=KANBAN=http://localhost:4317
-# Seconds between checks of the board and GitHub when there is nothing to do.
-Environment=IDLE_SECONDS=60
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=%h/.local/share/ultrakanban-agent/bin/agent-board.sh %i
 # Restart a loop that dies, waiting longer after each failure (30 s up to 15 min).

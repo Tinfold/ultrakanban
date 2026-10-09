@@ -701,15 +701,16 @@ down), keeps it in the database and uses it from then on; the API never sends it
 removes it. Both answer with the setup.
 
 `POST /system/agents/login` (202) with `{ kind: "github" | "claude" }` asks the supervisor to log the agents in
-(`409 login_in_progress` while one runs; a login stops after 15 minutes). `POST /system/agents/login/code` with
-`{ code }` passes the code from Claude's sign-in page to it (`409 login_not_waiting` unless a Claude login waits for
-one). `DELETE /system/agents/login` cancels it.
+(`409 login_in_progress` while one runs; a login stops after 15 minutes, counted from this request, and then shows as
+`failed`). `POST /system/agents/login/code` with `{ code }` passes the code from Claude's sign-in page to it
+(`409 login_not_waiting` unless a Claude login waits for one). `DELETE /system/agents/login` cancels it.
 
 The supervisor checks in with `POST /system/agents` and `{ runsIn, githubLogin?, claudeAccount?, gitIdentity? }`,
 reads the login with `GET /system/agents/login` (with the pasted `code`), and reports on it with
 `POST /system/agents/login/status` and `{ state, url?, userCode?, message? }`: `waiting` takes the request and says
 what to show, `checking` takes the code, `done` and `failed` end it (`409 login_not_requested` when there is no login
-running, e.g. it was cancelled).
+running, e.g. it was cancelled or ran out of time). A supervisor that checks in while a login is `waiting` or `checking`
+but runs none (it restarted) reports it `failed`.
 
 ## Live updates
 
