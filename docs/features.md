@@ -27,6 +27,8 @@
 - **Quick merge**: merge a single ticket's pull request from its card in the review column
 - **Auto-merge**: optionally, per board, merge pull requests in review by themselves once they have no conflicts,
   every check has passed and every checklist item of their ticket is checked
+- **Delete branches after merge**: optionally, per board, delete a pull request's branch on GitHub once it is merged,
+  moving the pull requests stacked on it to its base first
 - **Notifications**: optionally, per board, send an ntfy, Discord or webhook message when a ticket needs you: an agent
   asks a question, CI needs someone, a plan waits for approval, a question is answered or a pull request is ready to merge
 - **Archiving**: optionally, per board, hide tickets that have been done for a number of days, so the done column and

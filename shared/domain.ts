@@ -308,6 +308,12 @@ export interface BoardSummary {
    */
   autoMerge: boolean
   /**
+   * Whether the server deletes a pull request's branch on GitHub once the pull request is merged, after moving the open
+   * pull requests based on it to the merged one's base. Branches in forks, the default branch and branches that got
+   * new commits after the merge are kept.
+   */
+  deleteMergedBranches: boolean
+  /**
    * Days a ticket stays in the done column before it is archived: left out of the board (`GET /boards/:id`) unless
    * asked for, but still found by the ticket list and search. Never archived when not set.
    */

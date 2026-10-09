@@ -27,6 +27,7 @@ export type BoardPatch = Partial<
     | 'agentAllSkills'
     | 'agentDocker'
     | 'autoMerge'
+    | 'deleteMergedBranches'
     | 'archiveDoneDays'
     | 'approvalSize'
     | 'notifyUrl'
