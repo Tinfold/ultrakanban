@@ -145,13 +145,25 @@ describe('overview', () => {
     assert.deepEqual([agent?.status, agent?.agentOf], ['idle', [boardId]])
     assert.ok(!idle.agents.some((entry) => entry.name === 'idle-agent' || entry.name === 'idle-agent/opus/max'))
 
-    // A ticket's own model and effort run under their own worker name, which still counts as the board's host agent.
+    // Another board whose agent has the same name shares its worker names.
+    const { body: other } = await call<{ id: string }>('POST', '/boards', { name: 'Other', columns: ['Todo', 'Done'] })
+    await call('PATCH', `/boards/${other.id}`, {
+      githubRepo: 'acme/other',
+      agentEnabled: true,
+      agentName: 'idle-agent',
+    })
+    await call('POST', `/boards/${other.id}/tickets`, { title: 'B', agentModel: 'sonnet' })
+
+    // A ticket's own model and effort run under their own worker name, which still counts as the board's host agent,
+    // but only of the boards it works on.
     await addTicket({ title: 'A', agentModel: 'sonnet' })
     await call('POST', `/boards/${boardId}/tickets/claim-next`, { agent: 'idle-agent/sonnet/max', column: 'Todo' })
     const { body: working } = await call<Overview>('GET', '/overview')
     const variant = working.agents.find((entry) => entry.name === 'idle-agent/sonnet/max')
     assert.deepEqual([variant?.status, variant?.agentOf], ['working', [boardId]])
-    await call('PATCH', `/boards/${boardId}`, { agentEnabled: false })
+    const worker = working.agents.find((entry) => entry.name === 'idle-agent/opus/medium')
+    assert.deepEqual(worker?.agentOf.sort(), [boardId, other.id].sort())
+    for (const id of [boardId, other.id]) await call('PATCH', `/boards/${id}`, { agentEnabled: false })
   })
 
   test('agents report the tokens their runs use, and the overview adds them up', async () => {
