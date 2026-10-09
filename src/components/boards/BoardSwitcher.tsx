@@ -33,7 +33,7 @@ export function BoardSwitcher({ currentBoardId }: { currentBoardId?: string }) {
     <>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <Button variant="ghost" className="min-w-0 gap-1.5 px-2 font-semibold" aria-label="Switch board">
+          <Button variant="ghost" className="min-w-0 shrink gap-1.5 px-2 font-semibold" aria-label="Switch board">
             <span className="truncate">{current?.name ?? 'Boards'}</span>
             <ChevronsUpDownIcon className="text-muted-foreground" />
           </Button>
