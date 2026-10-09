@@ -264,7 +264,11 @@ function Waiting({ children }: { children: ReactNode }) {
 function StartAgents() {
   return (
     <div className="grid gap-2 text-xs text-muted-foreground">
-      <p>Start them from the folder you cloned ultrakanban into. On Linux, as services on this machine:</p>
+      <p>
+        Start them from the folder you cloned ultrakanban into. On Linux, as services on this machine, which need Claude
+        Code (the <code>claude</code> command), gh and jq installed:
+      </p>
+      <Command>npm install -g @anthropic-ai/claude-code</Command>
       <Command>scripts/setup.sh --agents</Command>
       <p>On Windows and macOS (or Linux, if you’d rather), in a container:</p>
       <Command>docker compose --profile agents up -d --build</Command>

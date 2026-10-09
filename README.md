@@ -28,12 +28,15 @@ model.
 ## Install
 
 You need a [GitHub](https://github.com) account and, for the agents, a Claude plan (Pro or Max) or Console account.
-Install the tools for your system, then run the setup script from a terminal. It starts the board at
-<http://localhost:4317> and opens its Setup page, where you do the rest.
+The agents are [Claude Code](https://claude.com/claude-code), the `claude` command line tool: each run is a
+`claude -p`, so it has to be installed where they run. The agents container (macOS, Windows) comes with it; on Linux,
+where they run on your machine, you install it. Install the tools for your system, then run the setup script from a
+terminal. It starts the board at <http://localhost:4317> and opens its Setup page, where you do the rest.
 
 **Linux.** Install git and [Docker Engine](https://docs.docker.com/engine/install/) with the compose plugin (or
-podman-compose). For the agents, also the [GitHub CLI](https://cli.github.com), jq and
-[Claude Code](https://claude.com/claude-code).
+podman-compose). For the agents, also the [GitHub CLI](https://cli.github.com), jq and the Claude Code CLI
+(`npm install -g @anthropic-ai/claude-code`); `claude --version` should then work in a new terminal.
+`scripts/setup.sh --agents` stops and says what's missing.
 
 ```sh
 git clone https://github.com/Tinfold/ultrakanban.git

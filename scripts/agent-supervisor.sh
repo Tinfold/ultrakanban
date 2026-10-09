@@ -258,6 +258,16 @@ login_report() {
 run_login() {
   local kind=$1 requested=$2 dir pid fd url user_code code login message status deadline=$((SECONDS + 900)) shown= over=
   echo "logging the agents in to $kind, as asked on the Setup page"
+  if [[ $kind == github ]] && ! command -v gh >/dev/null; then
+    message="gh isn't installed where the agents run. Install the GitHub CLI (https://cli.github.com), then log in again."
+  elif [[ $kind == claude ]] && ! command -v claude >/dev/null; then
+    message="Claude Code isn't installed where the agents run. Install it (npm install -g @anthropic-ai/claude-code), then log in again."
+  fi
+  if [[ -n $message ]]; then
+    echo "the $kind login failed: $message"
+    login_report "$(jq -nc --arg message "$message" '{state: "failed", message: $message}')" >/dev/null
+    return
+  fi
   dir=$(mktemp -d) && mkfifo "$dir/in" || {
     login_report '{"state":"failed","message":"Could not start the login."}' >/dev/null
     return
