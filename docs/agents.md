@@ -176,6 +176,25 @@ systemd-logind inhibitor lock, so the machine doesn't suspend or go idle (`INHIB
 (`OOMPolicy=continue`) instead of systemd stopping the whole loop. The units change only when you run
 `scripts/install-services.sh` again.
 
+**Memory, swap and CPU.** The agents mustn't starve the rest of the machine either. Every board's loop, and every run
+and build it starts, goes in one systemd slice, [`app-ultrakanban.slice`](../deploy/app-ultrakanban.slice). Over 60% of
+the machine's memory (`MemoryHigh`), the kernel takes memory back from the agents and slows them down, instead of
+pushing your other programs out to swap. At 75% (`MemoryMax`) it kills one of their processes, never one outside. A run
+killed this way fails, says so on its ticket, and is retried like any failed run. Together the agents fill at most 2 GB
+of swap (`MemorySwapMax`) and run at most 8192 processes (`TasksMax`). They also share one CPU share, as much as any
+other app, however many boards and parallel runs there are. To change the limits, run
+`systemctl --user edit app-ultrakanban.slice`, e.g. `MemoryMax=50%`. The change takes effect at once and is kept when
+you install again. `systemctl --user status app-ultrakanban.slice` shows what the agents use now. Runs in Docker (see
+below) are outside the slice: limit them with `DOCKER_ARGS`.
+
+Runs also clean up after themselves. Agents like to put clones, builds and test output in `/tmp`, which is often held
+in memory (tmpfs) and never emptied, so it ends up in swap for good. Each run gets a scratch directory on disk instead,
+as `TMPDIR`, under the loop's state directory (`boards/<board>/state/tmp/<ticket>`), and its prompt asks it to use that
+directory. The directory is removed when the ticket's run finishes, and kept when the run stops partway and will be
+resumed. Directories no run has used for 3 days are removed too. Every run's processes carry an `ULTRAKANBAN_RUN`
+marker in their environment. When the run ends, the loop stops whatever still has the marker, such as a dev server
+started in the background, so nothing it started keeps holding memory.
+
 **Parallel runs.** By default a board's agent runs one `claude -p` at a time. The board's **Parallel runs** setting
 (`agentConcurrency`, up to 8) lets it work that many tickets at once: the unit then runs that many loops, the first in
 the clone and each other one in its own git worktree of it (`boards/<board>/worktrees/<n>`), so their branches and
