@@ -17,6 +17,7 @@ cancel() {
   fi
   note "$id" "Pull request $pr_url was closed without merging, so the ticket moved to $CANCELLED_COLUMN."
   rm -f "$(state_file "$id")"
+  remove_scratch "$id"
   log "ticket #$number ($id): $pr_url was closed without merging; moved it to $CANCELLED_COLUMN"
 }
 
@@ -30,6 +31,7 @@ requeue() {
     return 1
   fi
   rm -f "$(state_file "$id")"
+  remove_scratch "$id"
   if [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]]; then git update-ref -d "refs/ultrakanban/work/$id" 2>/dev/null; fi
   if [[ ${column,,} == "${TODO_COLUMN,,}" ]]; then
     note "$id" "The ticket is back in $column, so the agent released it. It will be claimed again from there like \
@@ -80,7 +82,9 @@ handle_feedback() {
     [[ -e $file && $file != */claim.lock ]] || continue
     id=${file##*/}
     id=${id%.*}
-    [[ $'\n'$tickets == *$'\n'"$id"$'\t'* ]] || rm -f "$file"
+    [[ $'\n'$tickets == *$'\n'"$id"$'\t'* ]] && continue
+    rm -f "$file"
+    if [[ $file == *.json ]]; then remove_scratch "$id"; fi
   done
   if [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]]; then
     for id in $(git for-each-ref --format='%(refname:lstrip=3)' refs/ultrakanban/work/); do

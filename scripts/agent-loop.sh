@@ -58,6 +58,10 @@
 # directly on the machine (see use_docker in agent-loop/run.sh): a run then only sees its checkout and the agent's
 # Claude, GitHub and git settings, not the rest of the machine. Everything else, the checkout included, is the same.
 #
+# Runs clean up after themselves, so nothing they leave holds memory or swap for good: each run's TMPDIR is a scratch
+# directory of its ticket's on disk (STATE_DIR/tmp/<ticket>), removed once a run on the ticket finishes, and when a run
+# ends the loop stops whatever it left running (see stop_leftovers in agent-loop/run.sh).
+#
 # Each run's token usage (from claude's JSON output) is reported to the board with POST /tickets/:id/usage, so the
 # overview can show how many tokens each agent uses. A run stopped by the timeout reports nothing.
 #
