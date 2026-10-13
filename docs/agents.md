@@ -73,9 +73,10 @@ scripts/install-services.sh
 
 It installs and enables two systemd user services that start at login: `ultrakanban` (the board, as in
 [Running with Docker](running.md#running-with-docker)) and `ultrakanban-agent`, the agent supervisor. It copies the agent
-scripts and the skill to `~/.local/share/ultrakanban-agent`, and the supervisor keeps those copies up to date: when
-you pull this checkout's default branch, it installs the new versions, and each agent loop switches to them before its
-next run. Run the script again only when the systemd units in `deploy/` change.
+scripts and the skill to `~/.local/share/ultrakanban-agent`, and the supervisor keeps those copies, and the agents'
+systemd units, up to date: when you pull this checkout's default branch, it installs the new versions, and each agent
+loop switches to them before its next run (restarting its unit once its runs are over, when the unit changed). Run the
+script again only when `deploy/ultrakanban.service` changes.
 
 The services run the tools installed on the machine, so install them first: Claude Code (the `claude` command,
 `npm install -g @anthropic-ai/claude-code`), the GitHub CLI (`gh`, which they push, open pull requests and read reviews
@@ -173,8 +174,7 @@ Nothing should pause or slow the agents down halfway through a run. While a run 
 systemd-logind inhibitor lock, so the machine doesn't suspend or go idle (`INHIBIT_SLEEP=0` turns this off; see
 `systemd-inhibit --list`). The agent units keep normal CPU and IO priority (`Nice=0`, `CPUWeight=100`,
 `IOWeight=100`), and when the kernel kills a run for lack of memory, the loop carries on and retries it
-(`OOMPolicy=continue`) instead of systemd stopping the whole loop. The units change only when you run
-`scripts/install-services.sh` again.
+(`OOMPolicy=continue`) instead of systemd stopping the whole loop.
 
 **Memory, swap and CPU.** The agents mustn't starve the rest of the machine either. Every board's loop, and every run
 and build it starts, goes in one systemd slice, [`app-ultrakanban.slice`](../deploy/app-ultrakanban.slice). Over 60% of
