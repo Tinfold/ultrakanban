@@ -159,6 +159,12 @@ the week, and any per-model weekly limit, as `/usage` in claude shows them) ever
 with the claude login in `~/.claude/.credentials.json` (or `$CLAUDE_CONFIG_DIR`), and the overview shows it as bars of
 the usage left and when each resets. The board itself can't read it: it runs in a container, without your login.
 
+**Disk usage.** Every 30 minutes (`DISK_USAGE_SECONDS`) the supervisor also measures, at low priority and in the
+background, how much disk space each board's agent folder (`~/.local/share/ultrakanban-agent/boards/<board>`) takes:
+its clone, the worktrees of its parallel runs, and the rest (loop state and the runs' scratch files). The overview's
+Boards table shows it per board with the board's attachments (the breakdown is in the cell's tooltip), and the total
+above it, with the space folders of deleted boards still take.
+
 Then, per board, open **Board menu → Board settings**, set the **GitHub repository** (`owner/name`, or **New** to
 create one on GitHub with the server's login and link it) and switch on
 **Run the agent on this board** (or `PATCH /api/boards/:id` with `githubRepo` and `agentEnabled`). The supervisor

@@ -43,6 +43,22 @@ const compactNumber = new Intl.NumberFormat(undefined, { notation: 'compact', ma
 /** Compact token count, e.g. `950`, `12.3K`, `4.5M`. */
 export const formatTokens = (count: number) => compactNumber.format(count)
 
+const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+const wholeNumber = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0, useGrouping: false })
+const oneDecimal = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1, useGrouping: false })
+
+/** Disk space in steps of 1024, as `du -h` counts: `950 B`, `4.5 MB`, `44 GB` (a decimal only below 10). */
+export function formatBytes(bytes: number) {
+  let unit = 0
+  let value = bytes
+  // From 1023.5 on, the value would read 1024 rounded.
+  while (value >= 1023.5 && unit < BYTE_UNITS.length - 1) {
+    value /= 1024
+    unit++
+  }
+  return `${(unit && value < 9.95 ? oneDecimal : wholeNumber).format(value)} ${BYTE_UNITS[unit]}`
+}
+
 const dollars = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' })
 
 /** US dollars to the cent, e.g. `$12.34`; amounts below a cent read `<$0.01`. */

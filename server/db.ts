@@ -307,6 +307,17 @@ const MIGRATIONS = [
   `
   ALTER TABLE boards ADD COLUMN delete_merged_branches INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  -- Disk space of each board's agent folder where the agents run, as the agent supervisor last measured it (see
+  -- AgentDiskUsage). Keyed by the folder's name, a board id, which may be of a board deleted since.
+  CREATE TABLE agent_disk_usage (
+    board_id TEXT PRIMARY KEY,
+    repo INTEGER NOT NULL,
+    worktrees INTEGER NOT NULL,
+    state INTEGER NOT NULL,
+    measured_at TEXT NOT NULL
+  );
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

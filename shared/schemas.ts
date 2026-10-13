@@ -303,6 +303,15 @@ export const reportClaudeUsageSchema = z.object({
   error: z.string().trim().max(4000).nullable().optional(),
 })
 
+const bytes = z.number().int().nonnegative()
+
+/** The agent supervisor reporting the disk space of each board's agent folder, in bytes (see `AgentDiskUsage`). */
+export const reportDiskUsageSchema = z.object({
+  boards: z
+    .array(z.object({ boardId: z.string().trim().min(1).max(100), repo: bytes, worktrees: bytes, state: bytes }))
+    .max(10_000),
+})
+
 /** The agent supervisor checking in, and reporting on an update it is doing. */
 export const reportAppUpdateSchema = z.object({
   state: z.enum(['running', 'done', 'failed']).optional(),
@@ -467,6 +476,7 @@ export type ReleaseIdleInput = z.input<typeof releaseIdleSchema>
 export type SubmitForReviewInput = z.input<typeof submitForReviewSchema>
 export type ReportAppUpdateInput = z.input<typeof reportAppUpdateSchema>
 export type ReportClaudeUsageInput = z.input<typeof reportClaudeUsageSchema>
+export type ReportDiskUsageInput = z.input<typeof reportDiskUsageSchema>
 export type ReportAgentHostInput = z.input<typeof reportAgentHostSchema>
 export type ReportAgentLoginInput = z.input<typeof reportAgentLoginSchema>
 export type PostPlanInput = z.input<typeof postPlanSchema>

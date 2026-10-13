@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import { formatModel } from './format.ts'
+import { formatBytes, formatModel } from './format.ts'
 
 describe('formatModel', () => {
   test('reads Claude, GPT and Gemini model names, and shows others as they are', () => {
@@ -23,5 +23,22 @@ describe('formatModel', () => {
       o3: 'o3',
     }
     for (const [model, name] of Object.entries(names)) assert.equal(formatModel(model), name, model)
+  })
+})
+
+describe('formatBytes', () => {
+  test('counts in steps of 1024, with a decimal only below 10', () => {
+    const sizes: [number, string][] = [
+      [0, '0 B'],
+      [950, '950 B'],
+      [1023, '1023 B'],
+      [1024, '1 KB'],
+      [4.5 * 1024 ** 2, '4.5 MB'],
+      [9.96 * 1024 ** 2, '10 MB'],
+      [1023.7 * 1024, '1 MB'],
+      [44.4 * 1024 ** 3, '44 GB'],
+      [3 * 1024 ** 4, '3 TB'],
+    ]
+    for (const [bytes, text] of sizes) assert.equal(formatBytes(bytes), text, `${bytes} bytes`)
   })
 })

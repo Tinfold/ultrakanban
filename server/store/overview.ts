@@ -28,6 +28,7 @@ import {
 import { sql } from '../db.ts'
 import { type ActivityRow, toActivity } from './activity.ts'
 import { listBoards } from './boards.ts'
+import { agentDiskUsage, attachmentBytes } from './disk-usage.ts'
 import { type TagRow, toTag } from './tags.ts'
 import { WAITING_SINCE } from './tickets.ts'
 import { queryUsage } from './usage.ts'
@@ -387,6 +388,8 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
       (a, b) => statusRank[a.status] - statusRank[b.status] || b.workedMs - a.workedMs || a.name.localeCompare(b.name),
     )
 
+  const agentDisk = agentDiskUsage()
+  const attachmentsOn = attachmentBytes()
   const overviewBoards = boards.map((board): OverviewBoard => {
     const counts = boardCounts.get(board.id) ?? { open: 0, working: 0, review: 0 }
     return {
@@ -399,8 +402,10 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
       events: eventsOn.get(board.id) ?? 0,
       tokens: tokensOn.get(board.id) ?? 0,
       lastActivityAt: boardLastActivity.get(board.id) ?? null,
+      disk: { attachments: attachmentsOn.get(board.id) ?? 0, agent: agentDisk.get(board.id) ?? null },
     }
   })
+  const deletedBoards = [...agentDisk].filter(([id]) => !boardNames.has(id)).map(([, disk]) => disk)
 
   const recent = sql
     .all<ActivityRow & { number: number; title: string; board_id: string; board_name: string }>(
@@ -433,6 +438,13 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
     agents,
     hiddenAgents,
     boards: overviewBoards,
+    disk: {
+      measuredAt: [...agentDisk.values()].reduce<string | null>(
+        (latest, disk) => (latest === null || disk.measuredAt > latest ? disk.measuredAt : latest),
+        null,
+      ),
+      deletedBoards: sum(deletedBoards.map((disk) => disk.repo + disk.worktrees + disk.state)),
+    },
     events,
     sessions: clipped,
     completions: completions.sort((a, b) => a.at.localeCompare(b.at)),

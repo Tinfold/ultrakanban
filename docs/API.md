@@ -572,7 +572,24 @@ interface Overview {
     usage: UsageTotals // tokens its runs used within the range
   }[]
   hiddenAgents: string[] // names cleared from `agents` (see below)
-  boards: { id; name; agentEnabled; agentName; open; working; review; completed; events; tokens; lastActivityAt }[]
+  boards: {
+    id
+    name
+    agentEnabled
+    agentName
+    open
+    working
+    review
+    completed
+    events
+    tokens
+    lastActivityAt
+    // Bytes of its attachments, and of its agent's folder as the agent supervisor last measured it (null if it hasn't):
+    // the clone, the worktrees of parallel runs, and the rest (loop state, runs' scratch files)
+    disk: { attachments: number; agent: { repo; worktrees; state; measuredAt: string } | null }
+  }[]
+  // When the supervisor last measured the agent folders, and the bytes the folders of deleted boards take
+  disk: { measuredAt: string | null; deletedBoards: number }
   events: { at: string; kind: 'created' | 'completed' | 'comment' | 'update'; actor: string; boardId: string }[]
   sessions: { agent; ticketId; boardId; start: string; end: string | null }[] // clipped to the range
   completions: { ticketId; boardId; at: string; cycleMs: number | null; reviewMs: number | null }[] // oldest first
@@ -662,6 +679,12 @@ login (from Claude's usage endpoint, what `/usage` in claude shows). `GET /syste
 
 The supervisor reports with `POST /system/claude-usage` and `{ plan?, usage?, error? }`: `usage` is the usage
 endpoint's answer as it is (the board picks the limits out of it), `error` says why it couldn't get one.
+
+## Disk usage
+
+The agent supervisor measures the disk space of each board's agent folder where the agents run and reports it (204)
+with `POST /system/disk-usage` and `{ boards: { boardId, repo, worktrees, state }[] }`, in bytes. Each report replaces
+the last one. The overview shows it (see `disk` above).
 
 ## Setup
 
