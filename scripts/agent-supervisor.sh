@@ -11,10 +11,11 @@
 # as its child processes instead: it restarts one that dies (waiting 30 s, doubling up to 15 min) and stops them all
 # when it stops. Their logs go to its own output, each line marked with the board.
 #
-# It also keeps the installed scripts and skill up to date. install-services.sh notes the checkout it installed them
-# from and that checkout's default branch commit, in AGENT_HOME/installed-from. When that branch moves (you pull),
-# this script copies the branch's versions over the installed ones: each agent loop starts again with them before its
-# next run (see agent-board.sh), and this script restarts itself. Other branches checked out there change nothing.
+# It also keeps the installed scripts, skill and systemd units up to date. install-services.sh notes the checkout it
+# installed them from and that checkout's default branch commit, in AGENT_HOME/installed-from. When that branch moves
+# (you pull), this script copies the branch's versions over the installed ones: each agent loop starts again with them
+# before its next run (see agent-board.sh), and this script restarts itself. Other branches checked out there change
+# nothing.
 #
 # And it updates ultrakanban itself when someone asks for it in the app (the update button in the header): it pulls
 # that checkout's default branch, rebuilds and restarts the board (ultrakanban.service's compose project), and reports
@@ -43,10 +44,18 @@ INSTALLED=(bin/agent-loop.sh:scripts/agent-loop.sh bin/agent-board.sh:scripts/ag
 for part in triage board ci checkout run tickets; do
   INSTALLED+=("bin/agent-loop/$part.sh:scripts/agent-loop/$part.sh")
 done
+# The systemd units install-services.sh installed from deploy/, kept up to date the same way. Not ultrakanban.service,
+# which it fills in for this machine.
+UNIT_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
+UNITS=(ultrakanban-agent.service ultrakanban-agent@.service app-ultrakanban.slice)
 
-# Copies the installed files from the checkout's default branch when it has moved since they were installed.
+# Copies the installed files, and the systemd units when they are installed, from the checkout's default branch when it
+# has moved since they were installed. A changed slice takes effect at once. Each agent loop's unit restarts itself with
+# a changed ultrakanban-agent@.service between runs (see agent-board.sh); a changed ultrakanban-agent.service takes
+# effect the next time it starts, as restarting it would stop every run.
 update_scripts() {
-  local checkout installed branch commit entry target tmp updated= missing=
+  local checkout installed branch commit entry target tmp unit updated= units= missing= unit_dir=
+  [[ -n $systemd && -f $UNIT_DIR/ultrakanban-agent.service ]] && unit_dir=$UNIT_DIR
   { read -r checkout && read -r installed; } 2>/dev/null <"$AGENT_HOME/installed-from" || return 0
   branch=$(git -C "$checkout" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null) || branch=origin/main
   branch=${branch#origin/}
@@ -56,6 +65,9 @@ update_scripts() {
   if [[ $commit == "$installed" ]]; then
     for entry in "${INSTALLED[@]}"; do
       [[ -f $AGENT_HOME/${entry%%:*} ]] || missing=1
+    done
+    for unit in ${unit_dir:+"${UNITS[@]}"}; do
+      [[ -f $unit_dir/$unit ]] || missing=1
     done
     [[ -n $missing ]] || return 0
   fi
@@ -71,6 +83,20 @@ update_scripts() {
       rm -f "$tmp"
     fi
   done
+  for unit in ${unit_dir:+"${UNITS[@]}"}; do
+    target=$unit_dir/$unit
+    tmp=$(mktemp "$target.XXXXXX") || continue
+    if git -C "$checkout" show "$commit:deploy/$unit" >"$tmp" 2>/dev/null && ! cmp -s "$tmp" "$target" &&
+      chmod 644 "$tmp" && mv -f "$tmp" "$target"; then
+      units+=" $unit"
+    else
+      rm -f "$tmp"
+    fi
+  done
+  if [[ -n $units ]]; then
+    systemctl --user daemon-reload
+    updated+=$units
+  fi
   printf '%s\n%s\n' "$checkout" "$commit" >"$AGENT_HOME/installed-from"
   [[ -n $updated ]] || return 0
   echo "updated$updated to $branch at ${commit:0:7} in $checkout"
