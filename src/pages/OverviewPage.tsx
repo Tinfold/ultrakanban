@@ -2,7 +2,15 @@ import { useQueryClient } from '@tanstack/react-query'
 import { format } from 'date-fns'
 import { type ReactNode, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { mergeUsage, noUsage, OVERVIEW_RANGES, type OverviewRange, totalTokens, type UsageTotals } from '@shared/domain'
+import {
+  mergeUsage,
+  noUsage,
+  type Overview,
+  OVERVIEW_RANGES,
+  type OverviewRange,
+  totalTokens,
+  type UsageTotals,
+} from '@shared/domain'
 import { AppHeader } from '@/components/app/AppHeader'
 import { AgentList } from '@/components/overview/AgentList'
 import { BoardTable } from '@/components/overview/BoardTable'
@@ -17,9 +25,10 @@ import { queryKeys, useClaudeUsage, useOverview } from '@/hooks/queries'
 import { useNow } from '@/hooks/use-now'
 import { useStoredState } from '@/hooks/use-stored-state'
 import { api, errorMessage } from '@/lib/api'
-import { formatCost, formatDuration, formatModel, formatTokens } from '@/lib/format'
+import { formatBytes, formatCost, formatDateTime, formatDuration, formatModel, formatTokens } from '@/lib/format'
 import {
   dailyActivity,
+  diskBytes,
   median,
   modelSeries,
   modelsByTokens,
@@ -172,6 +181,24 @@ function Section({ id, title, actions, children, className }: SectionProps) {
       </div>
       {children}
     </section>
+  )
+}
+
+/** The disk space all boards take, and the agent folders of deleted boards that are left. */
+function DiskTotal({ overview: { boards, disk } }: { overview: Overview }) {
+  const total = boards.reduce((sum, board) => sum + diskBytes(board.disk), 0)
+  return (
+    <p
+      className="text-xs text-muted-foreground"
+      title={
+        disk.measuredAt
+          ? `Agent folders measured ${formatDateTime(disk.measuredAt)}`
+          : 'The agent supervisor (scripts/install-services.sh) measures the agent folders where the agents run.'
+      }
+    >
+      <span className="font-medium text-foreground tabular-nums">{formatBytes(total)}</span> on disk
+      {disk.deletedBoards > 0 && `, ${formatBytes(disk.deletedBoards)} more in folders of deleted boards`}
+    </p>
   )
 }
 
@@ -402,7 +429,7 @@ export function OverviewPage() {
                 onHide={(names) => changeHidden(api.hideAgents(names))}
               />
             </Section>
-            <Section id={SECTIONS.boards} title="Boards">
+            <Section id={SECTIONS.boards} title="Boards" actions={<DiskTotal overview={overview} />}>
               <BoardTable boards={overview.boards} />
             </Section>
             <Section

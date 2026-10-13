@@ -689,6 +689,26 @@ export interface OverviewBoard {
   /** Tokens agents used on its tickets within the range. */
   tokens: number
   lastActivityAt: string | null
+  disk: BoardDiskUsage
+}
+
+/** Disk space a board's agent takes where the agents run, in bytes, as the agent supervisor last measured it. */
+export interface AgentDiskUsage {
+  /** The board's clone. */
+  repo: number
+  /** The git worktrees of its parallel runs. */
+  worktrees: number
+  /** The rest: the agent loop's state and the runs' scratch files. */
+  state: number
+  measuredAt: string
+}
+
+/** Disk space a board takes, in bytes. */
+export interface BoardDiskUsage {
+  /** Its tickets' attachments, on the board's server. */
+  attachments: number
+  /** Its agent's folder where the agents run; null if the agent supervisor hasn't measured one. */
+  agent: AgentDiskUsage | null
 }
 
 /** How an activity entry counts in the overview's timeline. */
@@ -772,6 +792,12 @@ export interface Overview {
   /** Agents cleared from the overview that haven't done anything since; they aren't in `agents`. */
   hiddenAgents: string[]
   boards: OverviewBoard[]
+  disk: {
+    /** When the agent supervisor last measured the agents' folders; null if it never has. */
+    measuredAt: string | null
+    /** Bytes in the agents' folders of boards that no longer exist. */
+    deletedBoards: number
+  }
   /** Every activity entry within the range, oldest first. */
   events: OverviewEvent[]
   sessions: WorkSession[]

@@ -25,8 +25,11 @@
 # And every CLAUDE_USAGE_SECONDS it reads how much of the Claude plan's usage limits is used, with your claude login (as
 # /usage in claude does), and reports it to the board for the overview. The board can't: it runs in a container.
 #
+# And every DISK_USAGE_SECONDS it measures the disk space each board's agent folder takes (its clone, worktrees and loop
+# state, in AGENT_HOME/boards/<board>), and reports it to the board for the overview.
+#
 # Settings: KANBAN (default http://localhost:4317), POLL_SECONDS (default 30), UPDATE_FETCH_SECONDS (default 900),
-# CLAUDE_USAGE_SECONDS (default 300), NO_SYSTEMD and ULTRAKANBAN_AGENT_HOME.
+# CLAUDE_USAGE_SECONDS (default 300), DISK_USAGE_SECONDS (default 1800), NO_SYSTEMD and ULTRAKANBAN_AGENT_HOME.
 
 set -uo pipefail
 
@@ -34,6 +37,7 @@ KANBAN=${KANBAN:-http://localhost:4317}
 POLL_SECONDS=${POLL_SECONDS:-30}
 UPDATE_FETCH_SECONDS=${UPDATE_FETCH_SECONDS:-900}
 CLAUDE_USAGE_SECONDS=${CLAUDE_USAGE_SECONDS:-300}
+DISK_USAGE_SECONDS=${DISK_USAGE_SECONDS:-1800}
 AGENT_HOME=${ULTRAKANBAN_AGENT_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/ultrakanban-agent}
 self=$(readlink -f "$0")
 systemd=1
@@ -226,6 +230,34 @@ report_claude_usage() {
   fi
   curl -sf -X POST "$KANBAN/api/system/claude-usage" -H 'Content-Type: application/json' \
     -H 'X-Actor: agent-supervisor' -d "$body" >/dev/null || echo "couldn't report Claude usage to $KANBAN"
+}
+
+last_disk=
+disk_pid=
+# Reports the disk space of each board's agent folder to the board (see reportDiskUsageSchema), every
+# DISK_USAGE_SECONDS: its clone, its worktrees for parallel runs, and the rest (the loop's state and the runs' scratch
+# files). It measures in the background, at low priority, as a few hundred GB of checkouts take a while to go through.
+report_disk_usage() {
+  [[ -z $last_disk ]] || ((SECONDS - last_disk >= DISK_USAGE_SECONDS)) || return 0
+  [[ -n $disk_pid ]] && kill -0 "$disk_pid" 2>/dev/null && return 0
+  last_disk=$SECONDS
+  (
+    low=(nice -n 19)
+    # Idle I/O priority where there is one and it is allowed.
+    ionice -c 3 true 2>/dev/null && low+=(ionice -c 3)
+    for dir in "$AGENT_HOME"/boards/*/; do
+      dir=${dir%/}
+      [[ -d $dir ]] || continue
+      # One pass: the folder's top-level entries and the folder itself, in KiB.
+      "${low[@]}" du -k -d 1 "$dir" 2>/dev/null | awk -F '\t' -v dir="$dir" -v board="${dir##*/}" '
+        $2 == dir "/repo" { repo = $1 } $2 == dir "/worktrees" { worktrees = $1 } $2 == dir { total = $1 }
+        END { if (total != "") printf "%s\t%.0f\t%.0f\t%.0f\n", board, repo * 1024, worktrees * 1024, (total - repo - worktrees) * 1024 }'
+    done | jq -Rnc '{boards: [inputs | split("\t") | {boardId: .[0], repo: (.[1] | tonumber),
+      worktrees: (.[2] | tonumber), state: (.[3] | tonumber)}]}' |
+      curl -sf -X POST "$KANBAN/api/system/disk-usage" -H 'Content-Type: application/json' \
+        -H 'X-Actor: agent-supervisor' -d @- >/dev/null || echo "couldn't report the agents' disk usage to $KANBAN"
+  ) &
+  disk_pid=$!
 }
 
 runs_in=machine
@@ -535,12 +567,13 @@ stop_all() {
   for id in "${!pids[@]}"; do loop_stop "$id"; done
 }
 
-trap 'kill $! ${login_pid:-} 2>/dev/null; stop_all; exit 0' INT TERM
+trap 'kill $! ${login_pid:-} ${disk_pid:-} 2>/dev/null; stop_all; exit 0' INT TERM
 
 echo "watching $KANBAN for boards with the agent switched on${systemd:+ (loops run as systemd user units)}"
 while true; do
   check_in
   report_claude_usage
+  report_disk_usage
   report_agents
   update_scripts
   reconcile
