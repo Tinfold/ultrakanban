@@ -1,5 +1,5 @@
 import type { AppUpdate, AppUpdateState } from '../../shared/domain.ts'
-import type { ReportAppUpdateInput } from '../../shared/schemas.ts'
+import type { ReportAppUpdateInput, RequestAppUpdateInput } from '../../shared/schemas.ts'
 import { now, sql } from '../db.ts'
 import { conflict } from '../errors.ts'
 
@@ -12,6 +12,9 @@ interface AppUpdateRow {
   updater_seen_at: string | null
   version: string | null
   behind: number | null
+  ahead: number | null
+  commit_sha: string | null
+  merge: number
 }
 
 const toAppUpdate = (row: AppUpdateRow): AppUpdate => ({
@@ -23,20 +26,25 @@ const toAppUpdate = (row: AppUpdateRow): AppUpdate => ({
   updaterSeenAt: row.updater_seen_at,
   version: row.version,
   behind: row.behind,
+  ahead: row.ahead,
+  commit: row.commit_sha,
+  runningCommit: process.env.ULTRAKANBAN_COMMIT || null,
+  merge: !!row.merge,
 })
 
 export const getAppUpdate = () => toAppUpdate(sql.get<AppUpdateRow>('SELECT * FROM app_update WHERE id = 1')!)
 
 /** Asks the agent supervisor to update and restart ultrakanban; one update at a time. */
-export function requestAppUpdate(actor: string): AppUpdate {
+export function requestAppUpdate(actor: string, input: RequestAppUpdateInput = {}): AppUpdate {
   const { state } = getAppUpdate()
   if (state === 'requested' || state === 'running') {
     throw conflict('update_in_progress', 'An update has already been asked for')
   }
   sql.run(
-    "UPDATE app_update SET state = 'requested', requested_at = ?, requested_by = ?, message = NULL WHERE id = 1",
+    "UPDATE app_update SET state = 'requested', requested_at = ?, requested_by = ?, message = NULL, merge = ? WHERE id = 1",
     now(),
     actor,
+    input.merge ? 1 : 0,
   )
   return getAppUpdate()
 }
@@ -50,7 +58,8 @@ export function cancelAppUpdate(): AppUpdate {
 }
 
 /**
- * The supervisor checking in, with the checkout's version and how far behind it is, and reporting on an update:
+ * The supervisor checking in, with the checkout's version and how far behind and ahead of origin it is, and reporting
+ * on an update:
  * `running` takes a request (409 `update_not_requested` when there is none, e.g. it was withdrawn meanwhile),
  * `done` and `failed` finish one.
  */
@@ -68,7 +77,8 @@ export function reportAppUpdate(input: ReportAppUpdateInput): AppUpdate {
     message = input.message ?? null
   }
   sql.run(
-    `UPDATE app_update SET state = ?, finished_at = ?, message = ?, updater_seen_at = ?, version = ?, behind = ?
+    `UPDATE app_update SET state = ?, finished_at = ?, message = ?, updater_seen_at = ?, version = ?, behind = ?,
+       ahead = ?, commit_sha = ?
      WHERE id = 1`,
     state,
     finishedAt,
@@ -76,6 +86,8 @@ export function reportAppUpdate(input: ReportAppUpdateInput): AppUpdate {
     time,
     input.version === undefined ? current.version : input.version,
     input.behind === undefined ? current.behind : input.behind,
+    input.ahead === undefined ? current.ahead : input.ahead,
+    input.commit === undefined ? current.commit : input.commit,
   )
   return getAppUpdate()
 }

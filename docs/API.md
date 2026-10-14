@@ -28,9 +28,15 @@ Unknown tag names are created automatically when creating or updating tickets.
 effort level. Use the name you were given if there is one; otherwise build it this way and never invent a new one,
 so the board and its history show which model and effort did each piece of work. The board's own agent names its
 runs like this from the board settings (`agentWorkerName` in `shared/domain.ts`).
+Agents other than Claude Code do the same, with their own effort levels (`codex/gpt-5.1-codex/minimal`) or `default`
+for a model that has none (`gemini/gemini-2.5-pro/default`). The model is everything between the first and the last
+`/`, so it can have slashes of its own (`opencode/openrouter/qwen/qwen3-coder/default`) and Ollama tags
+(`opencode/qwen3-coder:30b/default`).
 
 1. `GET /api/boards` and pick a board. `GET /api/boards/:boardId` shows its columns, tags, tickets and workflow
-   (`board.reviewColumnId`, `board.doneColumnId`).
+   (`board.reviewColumnId`, `board.doneColumnId`). Read `board.description`: it says what the board is for and holds
+   conventions for every ticket on it, which agents follow unless a ticket says otherwise. The agent loop puts it in
+   each run's prompt.
 2. Claim work atomically: `POST /api/boards/:boardId/tickets/claim-next` with
    `{ "agent": "claude/claude-opus-5-5/high", "column": "Todo", "moveTo": "In progress" }`.
    Only one agent can ever win a given ticket. Repeat on `404 no_ticket_available` later.
@@ -122,6 +128,10 @@ app), or one ticket's (the merge button on its card). Agents should not: merging
   to merge and no other run is going.
 - Merged tickets move to the done column right away. Merging needs a GitHub token with write access (`400` without
   one).
+- **Deleting branches:** with the board's `deleteMergedBranches` on, the server deletes a pull request's branch on
+  GitHub once it finds the pull request merged, whether the board merged it or someone did on GitHub. It first moves
+  the open pull requests based on that branch to the merged pull request's base, so they stay open. It keeps the
+  branch when it is in a fork, is the repository's default branch, or points at a commit other than the merged head.
 
 ```ts
 interface MergePlan {
@@ -257,9 +267,11 @@ interface BoardSummary {
   agentAllSkills: boolean // its runs load every skill, not only the ultrakanban skill
   agentDocker: boolean // its runs go in Docker containers rather than directly on the machine
   autoMerge: boolean // the server merges pull requests in review once they are ready (see Pull request workflow)
+  deleteMergedBranches: boolean // the server deletes pull requests' branches once they are merged (see Pull request workflow)
   archiveDoneDays: number | null // days in the done column after which tickets are archived, 1-3650 (never when null)
   approvalSize: 'S' | 'M' | 'L' | null // smallest estimate at which the agent waits for approval of its plan (never when null)
   notifyUrl: string | null // where to notify people when a ticket needs them: ntfy, Discord or webhook URL (see Boards)
+  agentCleanupRequestedAt: string | null // when someone last asked its agent to clear its build output (see Disk usage)
   ticketCount: number
   createdAt: string
   updatedAt: string
@@ -268,16 +280,16 @@ interface BoardSummary {
 
 ## Boards
 
-| Method | Path                           | Body / query                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Returns                                                   |
-| ------ | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| GET    | `/boards`                      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | `BoardSummary[]` (most recently updated first)            |
-| POST   | `/boards`                      | `{ name, description?, columns?: string[], reviewColumn?: ref, doneColumn?: ref, githubRepo?, agentEnabled?, agentName?, agentModel?, agentEffort?, agentConcurrency?, agentBacklog?, agentAllSkills?, agentDocker?, autoMerge?, archiveDoneDays?, notifyUrl?, approvalSize? }`                                                                                                                                                                                      | `BoardSummary`                                            |
-| GET    | `/boards/:boardId`             | `?archived=true`                                                                                                                                                                                                                                                                                                                                                                                                                                                     | `{ board, columns, tags, epics, tickets, archivedCount }` |
-| PATCH  | `/boards/:boardId`             | `{ name?, description?, reviewColumn?: ref \| null, doneColumn?: ref \| null, githubRepo?: string \| null, agentEnabled?: boolean, agentName?: string \| null, agentModel?: string \| null, agentEffort?: string \| null, agentConcurrency?: number \| null, agentBacklog?: boolean, agentAllSkills?: boolean, agentDocker?: boolean, autoMerge?: boolean, archiveDoneDays?: number \| null, notifyUrl?: string \| null, approvalSize?: 'S' \| 'M' \| 'L' \| null }` | `BoardSummary`                                            |
-| POST   | `/boards/:boardId/github-repo` | `{ name, owner?, description?, private?: boolean }`                                                                                                                                                                                                                                                                                                                                                                                                                  | `BoardSummary` (201)                                      |
-| DELETE | `/boards/:boardId`             |                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | `204`                                                     |
-| GET    | `/boards/:boardId/export`      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | portable board JSON                                       |
-| POST   | `/boards/import`               | portable board JSON                                                                                                                                                                                                                                                                                                                                                                                                                                                  | `BoardSummary`                                            |
+| Method | Path                           | Body / query                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Returns                                                   |
+| ------ | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| GET    | `/boards`                      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | `BoardSummary[]` (most recently updated first)            |
+| POST   | `/boards`                      | `{ name, description?, columns?: string[], reviewColumn?: ref, doneColumn?: ref, githubRepo?, agentEnabled?, agentName?, agentModel?, agentEffort?, agentConcurrency?, agentBacklog?, agentAllSkills?, agentDocker?, autoMerge?, deleteMergedBranches?, archiveDoneDays?, notifyUrl?, approvalSize? }`                                                                                                                                                                                               | `BoardSummary`                                            |
+| GET    | `/boards/:boardId`             | `?archived=true`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | `{ board, columns, tags, epics, tickets, archivedCount }` |
+| PATCH  | `/boards/:boardId`             | `{ name?, description?, reviewColumn?: ref \| null, doneColumn?: ref \| null, githubRepo?: string \| null, agentEnabled?: boolean, agentName?: string \| null, agentModel?: string \| null, agentEffort?: string \| null, agentConcurrency?: number \| null, agentBacklog?: boolean, agentAllSkills?: boolean, agentDocker?: boolean, autoMerge?: boolean, deleteMergedBranches?: boolean, archiveDoneDays?: number \| null, notifyUrl?: string \| null, approvalSize?: 'S' \| 'M' \| 'L' \| null }` | `BoardSummary`                                            |
+| POST   | `/boards/:boardId/github-repo` | `{ name, owner?, description?, private?: boolean }`                                                                                                                                                                                                                                                                                                                                                                                                                                                  | `BoardSummary` (201)                                      |
+| DELETE | `/boards/:boardId`             |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | `204`                                                     |
+| GET    | `/boards/:boardId/export`      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | portable board JSON                                       |
+| POST   | `/boards/import`               | portable board JSON                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | `BoardSummary`                                            |
 
 `POST /boards/:boardId/github-repo` creates a repository on GitHub with the server's login and sets it as the board's
 `githubRepo`. It is created under `owner` (a user or organization; the signed-in user when omitted), private unless
@@ -438,7 +450,9 @@ the same, with `ticketId: null`. Every ticket carries its runs' totals in `usage
 
 A run can also say how its tokens split between the models it called (`models`, one entry per model, from
 `claude -p`'s `modelUsage`; the agent loop sends it), so the overview can show token usage by model. The overview
-counts a run that doesn't as one of the model in its agent's name (`opus` for `claude/opus/high`), or of `unknown`.
+counts a run that doesn't as one of the model in its agent's name (`opus` for `claude/opus/high`, `gpt-5.1-codex`
+for `codex/gpt-5.1-codex/minimal`), or of `unknown`. `costUsd` is optional: leave it out when the agent doesn't know
+its cost (local models cost nothing), and the totals show no cost rather than $0 until a run reports one.
 
 | Method | Path                       | Body                                                                                                                                                                                               | Returns                                              |
 | ------ | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
@@ -474,7 +488,9 @@ when unknown).
 
 - **Past tickets** count once they are decided: finished (in the done column or with a merged pull request), or given
   up on (in the cancelled column, or with their pull request closed unmerged). Each counts at the setting of the
-  `<agent>/<model>/<effort>` name whose runs used the most tokens on it, with the cost of all its runs.
+  `<agent>/<model>/<effort>` name whose runs used the most tokens on it, with the cost of all its runs. Only tickets
+  the board's own agent did most of (names starting with its `agentName`, `claude` by default) count: the suggestion
+  sets the model and effort it works the ticket at, and another agent's (Codex on GPT, say) aren't any it can run.
 - **Similar** means sharing tags (45%) or title words (45%, stop words left out); a similar number of checklist steps
   adds up to 10% but isn't enough alone. The 20 most similar count, each weighted by its similarity.
 - **The suggestion** is the cheapest setting (by cost, or by tokens when runs reported no cost) whose weighted success
@@ -559,7 +575,24 @@ interface Overview {
     usage: UsageTotals // tokens its runs used within the range
   }[]
   hiddenAgents: string[] // names cleared from `agents` (see below)
-  boards: { id; name; agentEnabled; agentName; open; working; review; completed; events; tokens; lastActivityAt }[]
+  boards: {
+    id
+    name
+    agentEnabled
+    agentName
+    open
+    working
+    review
+    completed
+    events
+    tokens
+    lastActivityAt
+    // Bytes of its attachments, and of its agent's folder as the agent supervisor last measured it (null if it hasn't):
+    // the clone, the worktrees of parallel runs, and the rest (loop state, runs' scratch files)
+    disk: { attachments: number; agent: { repo; worktrees; state; measuredAt: string } | null }
+  }[]
+  // When the supervisor last measured the agent folders, and the bytes the folders of deleted boards take
+  disk: { measuredAt: string | null; deletedBoards: number }
   events: { at: string; kind: 'created' | 'completed' | 'comment' | 'update'; actor: string; boardId: string }[]
   sessions: { agent; ticketId; boardId; start: string; end: string | null }[] // clipped to the range
   completions: { ticketId; boardId; at: string; cycleMs: number | null; reviewMs: number | null }[] // oldest first
@@ -583,7 +616,7 @@ interface Overview {
   recent: (Activity & { ticket: { number; title; boardId; boardName } })[] // latest 30, newest first
 }
 
-// Token usage added up over runs; costUsd sums the runs that reported a cost.
+// Token usage added up over runs; costUsd sums the runs that reported a cost (null when none did).
 interface UsageTotals {
   inputTokens
   outputTokens
@@ -622,14 +655,20 @@ The app can't update itself from its container; the updater does it when asked: 
   updaterSeenAt: string | null // when the supervisor last checked in; null if it never has
   version: string | null // the checkout's commit, as "<short sha> <subject>"
   behind: number | null // commits its default branch is behind origin, as of the supervisor's last fetch
+  ahead: number | null // its commits that aren't on origin: only a merge updates over them
+  commit: string | null // the checkout's full commit sha
+  runningCommit: string | null // the commit the running board was built from (ULTRAKANBAN_COMMIT); null if unknown
+  merge: boolean // whether the requested (or last) update merges origin with git pull --no-ff
 }
 ```
 
 `POST /system/update` (202) asks for an update: the supervisor pulls its checkout's default branch, rebuilds and
-restarts the board, and reports how it went. `409 update_in_progress` while one is requested or running.
+restarts the board, and reports how it went. It only fast-forwards, unless the body is `{ "merge": true }`: then it
+merges origin into the branch with `git pull --no-ff`, keeping the checkout's own commits. Once the board answers
+again, the supervisor checks it runs the commit it built (`runningCommit`), and fails the update if not. `409 update_in_progress` while one is requested or running.
 `DELETE /system/update` withdraws a request the supervisor hasn't taken yet (`409 update_running` once it has).
 
-The supervisor reports with `POST /system/update/status` and `{ state?, message?, version?, behind? }`: without
+The supervisor reports with `POST /system/update/status` and `{ state?, message?, version?, behind?, ahead?, commit? }`: without
 `state` it only checks in; `running` takes the request (`409 update_not_requested` if there is none), `done` and
 `failed` finish it.
 
@@ -649,6 +688,38 @@ login (from Claude's usage endpoint, what `/usage` in claude shows). `GET /syste
 
 The supervisor reports with `POST /system/claude-usage` and `{ plan?, usage?, error? }`: `usage` is the usage
 endpoint's answer as it is (the board picks the limits out of it), `error` says why it couldn't get one.
+
+## Disk usage
+
+The agent supervisor measures the disk space of each board's agent folder where the agents run and reports it (204)
+with `POST /system/disk-usage` and `{ boards: { boardId, repo, worktrees, state }[] }`, in bytes. Each report replaces
+the last one. The overview shows it (see `disk` above).
+
+A board's **Disk usage** dialog (in its menu) shows what it is made of and frees some:
+
+| Method | Path                                   | Body                 | Returns                       |
+| ------ | -------------------------------------- | -------------------- | ----------------------------- |
+| GET    | `/boards/:boardId/disk-usage`          |                      | `BoardDiskBreakdown`          |
+| POST   | `/boards/:boardId/attachments/cleanup` | `{ olderThanDays? }` | `{ count, bytes }` it deleted |
+| POST   | `/boards/:boardId/agent-cleanup`       |                      | `BoardSummary`                |
+
+```ts
+interface BoardDiskBreakdown {
+  attachments: {
+    images: { count: number; bytes: number } // screenshots: PNG, JPEG, GIF, WebP
+    videos: { count: number; bytes: number } // screen recordings: MP4, WebM
+    finished: { count: number; bytes: number } // those of finished tickets, which the cleanup deletes
+    tickets: { ticketId: string; number: number; title: string; finished: boolean; count: number; bytes: number }[] // the 10 largest
+  }
+  agent: AgentDiskUsage | null // its agent folder (see `disk` in the overview)
+}
+```
+
+A finished ticket is one in the board's done column (its last column if it has none) or its Cancelled column.
+`attachments/cleanup` deletes the attachments of finished tickets, with `olderThanDays` (1-3650) only those uploaded
+more than that many days ago, files included. `agent-cleanup` sets the board's `agentCleanupRequestedAt` and wakes its
+agent: each of its loops then removes its checkout's ignored files (build output such as `node_modules/` or
+`target/`) before its next run, right away when idle, never during a run (see `MAX_BUILD_GB` in docs/agents.md).
 
 ## Setup
 
@@ -679,6 +750,7 @@ supervisor runs where the agents run. `GET /system/setup` returns:
       updatedAt: string
     } | null
   }
+  serverTime: string // the server's time: the page judges seenAt by it, as the browser's clock can be off from it
 }
 ```
 
@@ -687,15 +759,41 @@ down), keeps it in the database and uses it from then on; the API never sends it
 removes it. Both answer with the setup.
 
 `POST /system/agents/login` (202) with `{ kind: "github" | "claude" }` asks the supervisor to log the agents in
-(`409 login_in_progress` while one runs; a login stops after 15 minutes). `POST /system/agents/login/code` with
-`{ code }` passes the code from Claude's sign-in page to it (`409 login_not_waiting` unless a Claude login waits for
-one). `DELETE /system/agents/login` cancels it.
+(`409 login_in_progress` while one runs; a login stops after 15 minutes, counted from this request, and then shows as
+`failed`). `POST /system/agents/login/code` with `{ code }` passes the code from Claude's sign-in page to it
+(`409 login_not_waiting` unless a Claude login waits for one). `DELETE /system/agents/login` cancels it.
 
 The supervisor checks in with `POST /system/agents` and `{ runsIn, githubLogin?, claudeAccount?, gitIdentity? }`,
 reads the login with `GET /system/agents/login` (with the pasted `code`), and reports on it with
 `POST /system/agents/login/status` and `{ state, url?, userCode?, message? }`: `waiting` takes the request and says
 what to show, `checking` takes the code, `done` and `failed` end it (`409 login_not_requested` when there is no login
-running, e.g. it was cancelled).
+running, e.g. it was cancelled or ran out of time). A supervisor that checks in while a login is `waiting` or `checking`
+but runs none (it restarted) reports it `failed`.
+
+## Switching the agents off and on
+
+Every board's agents at once, from the button left of the update button in the header. Switched off, the agent
+supervisor stops every board's loop and removes the containers their runs used, and starts none; switched on again, it
+starts the loop of every board whose agent is on, as before. The boards' own agent settings stay as they are.
+`GET /system/agents/services` returns:
+
+```ts
+{
+  paused: boolean // switched off
+  changedAt: string | null, changedBy: string | null // when it was last switched, and by whom
+  wanted: string[] // the boards whose agent is on (with a repository): each should have a loop running unless paused
+  running: string[] // the boards whose loop the supervisor last found running
+  reportedAt: string | null // when the supervisor last reported them; null if it never has
+  handledAt: string | null // the changedAt it had seen to then: until it equals changedAt, the switch is on its way
+  serverTime: string // the server's time, to judge reportedAt by: the browser's clock can be off from it
+}
+```
+
+`PUT /system/agents/services` with `{ paused }` switches them off or on; the supervisor sees to it within a few
+seconds. `{ paused: false }` while they are on starts the loops that aren't running now, rather than after the
+supervisor's wait between retries. When the supervisor can't read the switch, it goes by its last answer. It reports
+the running loops after each poll with `POST /system/agents/services/status` and `{ running: string[], handledAt? }`,
+the `changedAt` it saw to.
 
 ## Live updates
 

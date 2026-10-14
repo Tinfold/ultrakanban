@@ -4,7 +4,7 @@
 # are no systemd user services: Windows and macOS with Docker Desktop, Linux without systemd. It does what the
 # supervisor's check_in and update_board do (scripts/agent-supervisor.sh): every POLL_SECONDS it checks in with the
 # checkout's version and how many commits it is behind origin (fetched every UPDATE_FETCH_SECONDS), and when an update
-# has been asked for it pulls the checkout's default branch, then rebuilds and restarts the compose project's running
+# has been asked for it pulls the checkout's default branch (merging origin with --no-ff when asked to), then rebuilds and restarts the compose project's running
 # containers with the compose files they were started with (e.g. deploy/compose.gpu.yml), and reports how it went.
 #
 # The checkout is mounted at /repo and the Docker socket at /var/run/docker.sock. It runs from the checkout and starts
@@ -30,12 +30,15 @@ report() {
     -H 'X-Actor: updater' -d "$1"
 }
 
-# The checkout's version and how far its default branch is behind origin, as report fields.
+# The checkout's version and commit, and how far its default branch is behind and ahead of origin, as report fields.
 checkout_state() {
-  local branch=$1 behind
+  local branch=$1 behind ahead
   behind=$(git rev-list --count "$branch..origin/$branch" 2>/dev/null) || behind=null
+  ahead=$(git rev-list --count "origin/$branch..$branch" 2>/dev/null) || ahead=null
   jq -nc --arg version "$(git log -1 --format='%h %s' 2>/dev/null)" --argjson behind "$behind" \
-    '{version: (if $version == "" then null else $version end), behind: $behind}'
+    --argjson ahead "$ahead" --arg commit "$(git rev-parse HEAD 2>/dev/null)" \
+    '{version: (if $version == "" then null else $version end), behind: $behind, ahead: $ahead,
+      commit: (if $commit == "" then null else $commit end)}'
 }
 
 last_fetch=
@@ -55,7 +58,7 @@ check_in() {
     report '{"state":"failed","message":"The updater stopped during the update. Ask for it again."}' >/dev/null
   fi
   interrupted=
-  [[ $(jq -r .state <<<"$status") == requested ]] && update_board "$branch"
+  [[ $(jq -r .state <<<"$status") == requested ]] && update_board "$branch" "$(jq -r .merge <<<"$status")"
 }
 
 # The docker compose command for this container's project: its name, the checkout, and the compose files it was started
@@ -86,9 +89,11 @@ compose_command() {
   done
 }
 
-# Pulls the checkout's default branch, then rebuilds and restarts the board on it.
+# Pulls the checkout's default branch (merging origin into it with --no-ff when merge is true), then rebuilds and
+# restarts the board on it: `update_board <branch> <merge>`.
 update_board() {
-  local branch=$1 current output error project service compose services waited=0
+  local branch=$1 merge=$2 current output error project service compose services running commit waited=0
+  local pull=(--ff-only) identity=()
   update_failed() {
     echo "update failed: $1"
     report "$(jq -nc --arg message "$1" --argjson fields "$(checkout_state "$branch")" \
@@ -107,8 +112,17 @@ update_board() {
     update_failed "The checkout has local changes. Commit or stash them to update."
     return
   fi
-  if ! output=$(as_owner timeout 300 git -C "$REPO" pull --ff-only --quiet origin "$branch" 2>&1); then
-    update_failed "git pull failed: $(tail -c 1500 <<<"$output")"
+  if [[ $merge == true ]]; then
+    pull=(--no-ff --no-edit)
+    # The merge commit needs an author; git runs with HOME=/tmp here, so only the checkout's own config has one.
+    git config user.email >/dev/null ||
+      identity=(-c user.name=ultrakanban-updater -c user.email=updater@ultrakanban.invalid)
+  fi
+  if ! output=$(as_owner timeout 300 git ${identity[@]+"${identity[@]}"} -C "$REPO" pull "${pull[@]}" --quiet \
+    origin "$branch" 2>&1); then
+    [[ $merge == true ]] && git merge --abort 2>/dev/null
+    update_failed "git pull ${pull[*]} failed: $(tail -c 1500 <<<"$output")$([[ $merge == true ]] ||
+      echo " If $branch has commits of its own, update with a merge instead.")"
     return
   fi
   last_fetch=$SECONDS
@@ -121,15 +135,23 @@ update_board() {
   mapfile -t services < <(docker ps --filter "label=com.docker.compose.project=$project" \
     --format '{{.Label "com.docker.compose.service"}}' | grep -vxF "$service" | sort -u)
   echo "rebuilding and restarting ${services[*]}"
-  if ! output=$("${compose[@]}" up -d --build "${services[@]}" 2>&1); then
+  # ULTRAKANBAN_COMMIT: the commit the app is built from, so the app and this script can tell it runs this one.
+  commit=$(git rev-parse HEAD)
+  if ! output=$(ULTRAKANBAN_COMMIT=$commit "${compose[@]}" up -d --build "${services[@]}" 2>&1); then
     update_failed "Rebuilding the board failed: $(tail -c 1500 <<<"$output")"
     return
   fi
   # The app restarts with the new build; wait for it to answer again, so the report gets through.
-  until curl -sf "$KANBAN/api/system/update" >/dev/null || ((waited >= 300)); do
+  until running=$(curl -sf "$KANBAN/api/system/update") || ((waited >= 300)); do
     sleep 5
     ((waited += 5))
   done
+  running=$(jq -r '.runningCommit // empty' <<<"$running" 2>/dev/null)
+  if [[ -n $running && $running != "$commit" ]]; then
+    update_failed "Rebuilt the board on ${commit:0:7}, but it still runs ${running:0:7}. Restart it yourself with \
+docker compose up -d --force-recreate."
+    return
+  fi
   echo "updated ultrakanban to $(git log -1 --format='%h %s')"
   report "$(jq -nc --arg message "Updated to $(git log -1 --format='%h %s')" \
     --argjson fields "$(checkout_state "$branch")" '$fields + {state: "done", message: $message}')" \

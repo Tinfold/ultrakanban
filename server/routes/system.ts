@@ -6,15 +6,21 @@ import {
   reportAgentLoginSchema,
   reportAppUpdateSchema,
   reportClaudeUsageSchema,
+  reportAgentServicesSchema,
+  reportDiskUsageSchema,
+  requestAppUpdateSchema,
   requestAgentLoginSchema,
+  setAgentServicesSchema,
   setGitHubTokenSchema,
 } from '../../shared/schemas.ts'
 import type { AppServices } from '../app.ts'
-import { transaction } from '../db.ts'
-import { gitHubFailure } from '../errors.ts'
+import { now, transaction } from '../db.ts'
+import { badRequest, gitHubFailure } from '../errors.ts'
 import { actorOf, readJson } from '../http.ts'
+import { getAgentServices, reportAgentServices, setAgentsPaused } from '../store/agent-services.ts'
 import { cancelAppUpdate, getAppUpdate, reportAppUpdate, requestAppUpdate } from '../store/app-update.ts'
 import { getClaudeUsage, reportClaudeUsage } from '../store/claude-usage.ts'
+import { reportDiskUsage } from '../store/disk-usage.ts'
 import {
   cancelAgentLogin,
   getAgentHost,
@@ -28,23 +34,35 @@ import {
 
 /**
  * What the agent supervisor does on the host: updating and restarting ultrakanban itself (see `AppUpdate`), reading
- * how much Claude usage is left (see `ClaudeUsage`), and the agents' logins (see `AgentHost`); and the Setup page.
+ * how much Claude usage is left (see `ClaudeUsage`), the disk space of the boards' agents (see `AgentDiskUsage`), and
+ * the agents' logins (see `AgentHost`), and switching every board's agents off and on (see `AgentServices`); and the
+ * Setup page.
  */
 export const systemRoutes = ({ pullRequests: { github } }: AppServices) => {
   const setupStatus = async (): Promise<SetupStatus> => ({
     github: { auth: await github.auth(), ...(await github.account()) },
     agents: getAgentHost(),
+    serverTime: now(),
   })
 
   return (
     new Hono()
       .get('/update', (c) => c.json(getAppUpdate()))
-      .post('/update', (c) =>
-        c.json(
-          transaction(() => requestAppUpdate(actorOf(c))),
+      .post('/update', async (c) => {
+        // The body is optional: no body asks for a plain fast-forward update.
+        const text = await c.req.text()
+        let body: unknown = {}
+        try {
+          if (text.trim()) body = JSON.parse(text)
+        } catch {
+          throw badRequest('Request body must be valid JSON')
+        }
+        const input = requestAppUpdateSchema.parse(body)
+        return c.json(
+          transaction(() => requestAppUpdate(actorOf(c), input)),
           202,
-        ),
-      )
+        )
+      })
       .delete('/update', (c) => c.json(transaction(() => cancelAppUpdate())))
       .post('/update/status', async (c) => {
         const input = await readJson(c, reportAppUpdateSchema)
@@ -54,6 +72,11 @@ export const systemRoutes = ({ pullRequests: { github } }: AppServices) => {
       .post('/claude-usage', async (c) => {
         const input = await readJson(c, reportClaudeUsageSchema)
         return c.json(transaction(() => reportClaudeUsage(input)))
+      })
+      .post('/disk-usage', async (c) => {
+        const input = await readJson(c, reportDiskUsageSchema)
+        transaction(() => reportDiskUsage(input))
+        return c.body(null, 204)
       })
 
       .get('/setup', async (c) => c.json(await setupStatus()))
@@ -95,6 +118,17 @@ export const systemRoutes = ({ pullRequests: { github } }: AppServices) => {
       .post('/agents/login/status', async (c) => {
         const input = await readJson(c, reportAgentLoginSchema)
         return c.json(transaction(() => reportAgentLogin(input)))
+      })
+
+      .get('/agents/services', (c) => c.json(getAgentServices()))
+      .put('/agents/services', async (c) => {
+        const { paused } = await readJson(c, setAgentServicesSchema)
+        return c.json(transaction(() => setAgentsPaused(paused, actorOf(c))))
+      })
+      // For the supervisor: the boards whose loop runs, after it started and stopped loops.
+      .post('/agents/services/status', async (c) => {
+        const input = await readJson(c, reportAgentServicesSchema)
+        return c.json(transaction(() => reportAgentServices(input)))
       })
   )
 }

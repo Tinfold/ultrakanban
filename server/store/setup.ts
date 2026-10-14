@@ -28,9 +28,16 @@ const getRow = () => sql.get<SetupRow>('SELECT * FROM setup WHERE id = 1')!
 /** The supervisor's view of a login: with the code pasted for Claude, which only it reads. */
 export type SupervisorAgentLogin = AgentLogin & { code: string | null }
 
+const running = (state: AgentLoginState) => state === 'requested' || state === 'waiting' || state === 'checking'
+
+/**
+ * A login still running after AGENT_LOGIN_TIMEOUT_MS shows as failed: its code or link has expired, and the supervisor
+ * gives up on it, or stopped running it (it restarted), or never picked it up. Its last report would be turned down, so
+ * otherwise the Setup page would wait for it forever. The supervisor sees it failed and stops its command.
+ */
 function toLogin(row: SetupRow): AgentLogin | null {
   if (!row.login_kind || !row.login_state) return null
-  return {
+  const login: AgentLogin = {
     kind: row.login_kind,
     state: row.login_state,
     requestedAt: row.login_requested_at!,
@@ -40,12 +47,15 @@ function toLogin(row: SetupRow): AgentLogin | null {
     message: row.login_message,
     updatedAt: row.login_updated_at!,
   }
+  if (!running(login.state) || Date.now() - Date.parse(login.requestedAt) < AGENT_LOGIN_TIMEOUT_MS) return login
+  const message =
+    login.state === 'requested'
+      ? 'The agents didn’t start the login within 15 minutes. Check that they run, then log in again.'
+      : 'The login didn’t finish within 15 minutes. Log in again.'
+  return { ...login, state: 'failed', message }
 }
 
-const active = (login: AgentLogin | null, time = Date.now()) =>
-  !!login &&
-  (login.state === 'requested' || login.state === 'waiting' || login.state === 'checking') &&
-  time - Date.parse(login.requestedAt) < AGENT_LOGIN_TIMEOUT_MS
+const active = (login: AgentLogin | null) => !!login && running(login.state)
 
 export function getAgentLogin(): SupervisorAgentLogin | null {
   const row = getRow()

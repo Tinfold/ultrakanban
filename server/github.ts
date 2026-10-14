@@ -31,6 +31,8 @@ export interface GitHubPullRequest {
   mergeableState: string
   base: string
   head: string
+  /** Repository the head branch is in, as owner/name: another one for a fork, `null` once the fork is deleted. */
+  headRepo: string | null
   headSha: string
 }
 
@@ -57,6 +59,12 @@ export interface GitHubClient {
   mergePullRequest: (repo: string, number: number, options: { method: MergeMethod; sha: string }) => Promise<void>
   /** Changes the branch the pull request merges into. */
   setPullRequestBase: (repo: string, number: number, base: string) => Promise<void>
+  /** Numbers of the open pull requests that merge into `base`. */
+  listPullRequestsInto: (repo: string, base: string) => Promise<number[]>
+  defaultBranch: (repo: string) => Promise<string>
+  /** The commit the branch points at; `null` when there is no such branch. */
+  branchSha: (repo: string, branch: string) => Promise<string | null>
+  deleteBranch: (repo: string, branch: string) => Promise<void>
   /** Posts a comment on the pull request's conversation; returns the comment's URL. */
   commentOnPullRequest: (repo: string, number: number, body: string) => Promise<string>
 }
@@ -93,8 +101,11 @@ interface PullRequestResponse {
   mergeable: boolean | null
   mergeable_state: string
   base: { ref: string }
-  head: { ref: string; sha: string }
+  head: { ref: string; sha: string; repo: { full_name: string } | null }
 }
+
+/** A branch name for a path, keeping its slashes. */
+const branchPath = (branch: string) => branch.split('/').map(encodeURIComponent).join('/')
 
 const REPO_MERGE_SETTINGS: Record<MergeMethod, string> = {
   merge: 'allow_merge_commit',
@@ -133,6 +144,7 @@ export function createGitHubClient(storedToken: () => string | null = () => null
       const message = [data?.message ?? `GitHub responded ${response.status}`, ...reasons.filter(Boolean)].join(': ')
       throw new GitHubError(response.status, `${message} (${method} ${path})`)
     }
+    if (response.status === 204) return undefined as T
     return (await response.json()) as T
   }
 
@@ -168,6 +180,7 @@ export function createGitHubClient(storedToken: () => string | null = () => null
       mergeableState: data.mergeable_state,
       base: data.base.ref,
       head: data.head.ref,
+      headRepo: data.head.repo?.full_name ?? null,
       headSha: data.head.sha,
     }
   }
@@ -243,6 +256,38 @@ export function createGitHubClient(storedToken: () => string | null = () => null
 
     async setPullRequestBase(repo, number, base) {
       await request('PATCH', `/repos/${repo}/pulls/${number}`, { base })
+    },
+
+    async listPullRequestsInto(repo, base) {
+      const numbers: number[] = []
+      for (let page = 1; page <= 3; page++) {
+        const batch = await request<{ number: number }[]>(
+          'GET',
+          `/repos/${repo}/pulls?state=open&base=${encodeURIComponent(base)}&per_page=100&page=${page}`,
+        )
+        numbers.push(...batch.map((pullRequest) => pullRequest.number))
+        if (batch.length < 100) break
+      }
+      return numbers
+    },
+
+    defaultBranch: async (repo) => (await request<{ default_branch: string }>('GET', `/repos/${repo}`)).default_branch,
+
+    async branchSha(repo, branch) {
+      try {
+        const ref = await request<{ object: { sha: string } }>(
+          'GET',
+          `/repos/${repo}/git/ref/heads/${branchPath(branch)}`,
+        )
+        return ref.object.sha
+      } catch (error) {
+        if (error instanceof GitHubError && error.status === 404) return null
+        throw error
+      }
+    },
+
+    async deleteBranch(repo, branch) {
+      await request('DELETE', `/repos/${repo}/git/refs/heads/${branchPath(branch)}`)
     },
 
     async commentOnPullRequest(repo, number, body) {

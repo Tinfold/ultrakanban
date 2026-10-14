@@ -28,6 +28,7 @@ import {
 import { sql } from '../db.ts'
 import { type ActivityRow, toActivity } from './activity.ts'
 import { listBoards } from './boards.ts'
+import { agentDiskUsage, attachmentBytes } from './disk-usage.ts'
 import { type TagRow, toTag } from './tags.ts'
 import { WAITING_SINCE } from './tickets.ts'
 import { queryUsage } from './usage.ts'
@@ -318,8 +319,17 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
       .map((row) => [row.board_id, row.at]),
   )
 
+  // Boards each name worked on within the range, or holds a ticket on.
+  const workedOn = new Map<string, Set<string>>()
+  const addWorkedOn = (agent: string, boardId: string) =>
+    workedOn.set(agent, (workedOn.get(agent) ?? new Set()).add(boardId))
+  for (const session of clipped) addWorkedOn(session.agent, session.boardId)
+  for (const run of usage) addWorkedOn(run.agent, run.boardId)
+  for (const [agent, held] of holdings) for (const ticket of held) addWorkedOn(agent, ticket.boardId)
+
   // A board's host agent runs as its worker name, or as that name with a ticket's own model and effort. Only the
-  // board's default worker is listed while idle; the per-ticket variants show up once they have work.
+  // board's default worker is listed while idle; the per-ticket variants show up once they have work, and only count
+  // as the host agent of the boards they worked on: boards that leave the agent's name at its default share them.
   const ticketModels = new Map<string, string[]>()
   for (const row of sql.all<{ board_id: string; agent_model: string }>(
     'SELECT DISTINCT board_id, agent_model FROM tickets WHERE agent_model IS NOT NULL',
@@ -330,11 +340,13 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
   const hostAgents: string[] = []
   for (const board of boards) {
     if (!board.agentEnabled) continue
-    hostAgents.push(agentWorkerName(board))
+    const worker = agentWorkerName(board)
+    hostAgents.push(worker)
     const models = new Set([board.agentModel ?? AGENT_DEFAULTS.model, ...(ticketModels.get(board.id) ?? [])])
     for (const agentModel of models) {
       for (const agentEffort of AGENT_EFFORTS) {
         const name = agentWorkerName({ ...board, agentModel, agentEffort })
+        if (name !== worker && !workedOn.get(name)?.has(board.id)) continue
         agentBoards.set(name, [...(agentBoards.get(name) ?? []), board.id])
       }
     }
@@ -376,6 +388,8 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
       (a, b) => statusRank[a.status] - statusRank[b.status] || b.workedMs - a.workedMs || a.name.localeCompare(b.name),
     )
 
+  const agentDisk = agentDiskUsage()
+  const attachmentsOn = attachmentBytes()
   const overviewBoards = boards.map((board): OverviewBoard => {
     const counts = boardCounts.get(board.id) ?? { open: 0, working: 0, review: 0 }
     return {
@@ -388,8 +402,10 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
       events: eventsOn.get(board.id) ?? 0,
       tokens: tokensOn.get(board.id) ?? 0,
       lastActivityAt: boardLastActivity.get(board.id) ?? null,
+      disk: { attachments: attachmentsOn.get(board.id) ?? 0, agent: agentDisk.get(board.id) ?? null },
     }
   })
+  const deletedBoards = [...agentDisk].filter(([id]) => !boardNames.has(id)).map(([, disk]) => disk)
 
   const recent = sql
     .all<ActivityRow & { number: number; title: string; board_id: string; board_name: string }>(
@@ -422,6 +438,13 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
     agents,
     hiddenAgents,
     boards: overviewBoards,
+    disk: {
+      measuredAt: [...agentDisk.values()].reduce<string | null>(
+        (latest, disk) => (latest === null || disk.measuredAt > latest ? disk.measuredAt : latest),
+        null,
+      ),
+      deletedBoards: sum(deletedBoards.map((disk) => disk.repo + disk.worktrees + disk.state)),
+    },
     events,
     sessions: clipped,
     completions: completions.sort((a, b) => a.at.localeCompare(b.at)),

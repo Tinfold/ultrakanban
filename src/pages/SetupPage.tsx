@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils'
 
 /** GitHub's page for a classic token, with the scopes the board and the agents need ticked. */
 const TOKEN_URL = 'https://github.com/settings/tokens/new?scopes=repo,read:org,workflow&description=ultrakanban'
+const GH_INSTALL_URL = 'https://github.com/cli/cli/blob/trunk/docs/install_linux.md'
 
 /** The supervisor checks in every 30 seconds; after this long without it, it isn't running. */
 const AGENTS_OFFLINE_MS = 3 * 60_000
@@ -264,7 +265,20 @@ function Waiting({ children }: { children: ReactNode }) {
 function StartAgents() {
   return (
     <div className="grid gap-2 text-xs text-muted-foreground">
-      <p>Start them from the folder you cloned ultrakanban into. On Linux, as services on this machine:</p>
+      <p>
+        Start them from the folder you cloned ultrakanban into. On Linux, as services on this machine, which need Claude
+        Code (the <code>claude</code> command), the{' '}
+        <a
+          href={GH_INSTALL_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="text-foreground underline underline-offset-2"
+        >
+          GitHub CLI
+        </a>{' '}
+        (<code>gh</code>, from your package manager) and jq installed:
+      </p>
+      <Command>npm install -g @anthropic-ai/claude-code</Command>
       <Command>scripts/setup.sh --agents</Command>
       <p>On Windows and macOS (or Linux, if you’d rather), in a container:</p>
       <Command>docker compose --profile agents up -d --build</Command>
@@ -275,7 +289,7 @@ function StartAgents() {
 
 export function SetupPage() {
   const queryClient = useQueryClient()
-  const { data: status, error } = useSetup()
+  const { data: status, error, dataUpdatedAt } = useSetup()
   const { data: boards } = useBoards()
   const now = useNow(10_000)
 
@@ -294,7 +308,10 @@ export function SetupPage() {
     content = <p className="text-sm text-muted-foreground">Couldn’t load the setup: {error.message}</p>
   } else if (status) {
     const { github, agents } = status
-    const online = !!agents.seenAt && now - Date.parse(agents.seenAt) < AGENTS_OFFLINE_MS
+    // The server's time now: it stamped the check-in, and its clock can be off from this browser's (Docker Desktop's
+    // VM's drifts, e.g. after the machine sleeps). `now` ticks every 10 seconds, so it can be older than the status.
+    const serverNow = Math.max(now, dataUpdatedAt) + Date.parse(status.serverTime) - dataUpdatedAt
+    const online = !!agents.seenAt && serverNow - Date.parse(agents.seenAt) < AGENTS_OFFLINE_MS
     const where = agents.runsIn === 'container' ? 'in the agents container' : 'on this machine'
     const later = online ? 'todo' : 'later'
     const boardWithAgent = boards?.find((board) => board.agentEnabled && board.githubRepo)
@@ -334,9 +351,9 @@ export function SetupPage() {
           title="Start the agents"
           status={
             online
-              ? `Running ${where}; checked in ${formatRelative(agents.seenAt!)}.`
+              ? `Running ${where}; checked in ${formatRelative(agents.seenAt!, serverNow)}.`
               : agents.seenAt
-                ? `They last checked in ${formatRelative(agents.seenAt)}, ${where}. Start them again:`
+                ? `They last checked in ${formatRelative(agents.seenAt, serverNow)}, ${where}. Start them again:`
                 : 'The agents work tickets on boards that have them switched on. They aren’t running yet.'
           }
         >

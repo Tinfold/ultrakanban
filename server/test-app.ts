@@ -21,8 +21,15 @@ import type { PullRequestStatus } from './store/tickets.ts'
 export const pullRequestStatuses = new Map<string, PullRequestStatus>()
 /** Fake GitHub signed in as "octocat"; repositories it has created, as owner/name. */
 export const github = { auth: 'env' as GitHubAuth, repos: new Set<string>(), created: [] as NewRepository[] }
-/** Fake GitHub pull requests for merging, by `owner/name#number`. */
-export const pulls = new Map<string, GitHubPullRequest & { files: string[] }>()
+/** Fake GitHub pull requests for merging, by `owner/name#number`; their head is in the same repository unless set. */
+export const pulls = new Map<
+  string,
+  Omit<GitHubPullRequest, 'headRepo'> & { files: string[]; headRepo?: string | null }
+>()
+/** Fake GitHub branches' commits, by `owner/name:branch`; every repository's default branch is `main`. */
+export const branches = new Map<string, string>()
+/** Branches the fake GitHub was asked to delete, as `owner/name:branch`. */
+export const deletedBranches: string[] = []
 /** `head>base` pairs where `head` contains `base`'s commits. */
 export const containing = new Set<string>()
 /** Called after the fake merges a pull request, to change the others the way GitHub would. */
@@ -58,7 +65,7 @@ const pullRequests = createPullRequestSync({
     github.created.push(input)
     return { repo, url: `https://github.com/${repo}` }
   },
-  getPullRequest: async (repo, number) => ({ ...pull(repo, number) }),
+  getPullRequest: async (repo, number) => ({ headRepo: repo, ...pull(repo, number) }),
   listPullRequestFiles: async (repo, number) => pull(repo, number).files,
   containsCommit: async (_repo, head, base) => containing.has(`${head}>${base}`),
   mergeMethods: async () => ['merge', 'squash'],
@@ -72,6 +79,16 @@ const pullRequests = createPullRequestSync({
     afterMerge(`${repo}#${number}`)
   },
   setPullRequestBase: async (repo, number, base) => void (pull(repo, number).base = base),
+  listPullRequestsInto: async (repo, base) =>
+    [...pulls]
+      .filter(([key, other]) => key.startsWith(`${repo}#`) && other.state === 'open' && other.base === base)
+      .map(([key]) => Number(key.split('#')[1])),
+  defaultBranch: async () => 'main',
+  branchSha: async (repo, branch) => branches.get(`${repo}:${branch}`) ?? null,
+  async deleteBranch(repo, branch) {
+    if (!branches.delete(`${repo}:${branch}`)) throw new GitHubError(422, 'Reference does not exist')
+    deletedBranches.push(`${repo}:${branch}`)
+  },
   async commentOnPullRequest(repo, number, body) {
     if (body === 'fail') throw new GitHubError(403, 'Resource not accessible by integration')
     prComments.push(`${repo}#${number}: ${body}`)

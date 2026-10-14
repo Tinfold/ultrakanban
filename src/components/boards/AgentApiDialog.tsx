@@ -68,7 +68,7 @@ Work one ticket at a time, and use a fresh agent per ticket so context stays sma
       wrap: true,
       code: `Track your work on the kanban board through its HTTP API at ${api} (reference: GET ${api}).
 Board id: ${detail.board.id}. Send the header "X-Actor: <your name>" on every request.
-Your name is <agent>/<model>/<effort>: the tool you run in, then your exact model and effort level, e.g. claude/claude-opus-5-5/high. Use the same name every time.
+Your name is <agent>/<model>/<effort>: the tool you run in, then your exact model and effort level, e.g. claude/claude-opus-5-5/high or codex/gpt-5.1-codex/medium. If your model has no effort levels, use default, e.g. opencode/qwen3-coder:30b/default. Use the same name every time.
 
 1. Claim a ticket: POST ${boardPath}/tickets/claim-next {"agent":"<your name>","column":"${todo}","moveTo":"${inProgress}"}.
 2. Read the ticket and its comments: GET /tickets/<id> and GET /tickets/<id>/activity. Comments may be newer than the description; follow the newest instruction and ask in a comment if they conflict. Before you start the work, post a short plan with a size estimate (S, M or L): POST /tickets/<id>/plan {"agent":"<your name>","estimate":"M","plan":"<markdown>"}. If the returned ticket's "approval" is "pending", stop until a person approves the plan.

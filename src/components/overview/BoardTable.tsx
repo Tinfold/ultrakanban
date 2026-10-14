@@ -1,7 +1,8 @@
 import { BotIcon } from 'lucide-react'
 import { Link } from 'wouter'
-import type { OverviewBoard } from '@shared/domain'
-import { formatDateTime, formatRelative, formatTokens } from '@/lib/format'
+import type { BoardDiskUsage, OverviewBoard } from '@shared/domain'
+import { formatBytes, formatDateTime, formatRelative, formatTokens } from '@/lib/format'
+import { diskBytes } from '@/lib/overview'
 
 const COUNTS = [
   ['open', 'Open'],
@@ -10,6 +11,20 @@ const COUNTS = [
   ['completed', 'Completed'],
   ['events', 'Events'],
 ] as const
+
+/** What a board's disk space is made of, for its cell's tooltip. */
+function diskDetail({ attachments, agent }: BoardDiskUsage) {
+  const lines = agent
+    ? [
+        `Clone: ${formatBytes(agent.repo)}`,
+        `Worktrees: ${formatBytes(agent.worktrees)}`,
+        `Agent state and scratch files: ${formatBytes(agent.state)}`,
+      ]
+    : ['Agent folder: not measured']
+  lines.push(`Attachments: ${formatBytes(attachments)}`)
+  if (agent) lines.push(`Measured ${formatRelative(agent.measuredAt)}`)
+  return lines.join('\n')
+}
 
 export function BoardTable({ boards }: { boards: OverviewBoard[] }) {
   return (
@@ -30,6 +45,9 @@ export function BoardTable({ boards }: { boards: OverviewBoard[] }) {
             ))}
             <th scope="col" className="px-3 py-2 text-right font-medium whitespace-nowrap">
               Tokens
+            </th>
+            <th scope="col" className="px-3 py-2 text-right font-medium whitespace-nowrap">
+              Disk
             </th>
             <th scope="col" className="px-3 py-2 text-right font-medium whitespace-nowrap">
               Last activity
@@ -60,6 +78,13 @@ export function BoardTable({ boards }: { boards: OverviewBoard[] }) {
               ))}
               <td className="px-3 py-2 text-right tabular-nums" title={`${board.tokens.toLocaleString()} tokens`}>
                 {board.tokens ? formatTokens(board.tokens) : <span className="text-muted-foreground/60">0</span>}
+              </td>
+              <td className="px-3 py-2 text-right whitespace-nowrap tabular-nums" title={diskDetail(board.disk)}>
+                {diskBytes(board.disk) ? (
+                  formatBytes(diskBytes(board.disk))
+                ) : (
+                  <span className="text-muted-foreground/60">0</span>
+                )}
               </td>
               <td className="px-3 py-2 text-right whitespace-nowrap text-muted-foreground">
                 {board.lastActivityAt ? (

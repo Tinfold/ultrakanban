@@ -139,6 +139,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
       agentAllSkills: data.get('agentAllSkills') === 'on',
       agentDocker: data.get('agentDocker') === 'on',
       autoMerge: data.get('autoMerge') === 'on',
+      deleteMergedBranches: data.get('deleteMergedBranches') === 'on',
       archiveDoneDays: archiveDays >= 1 ? Math.round(archiveDays) : null,
       approvalSize: approvalSize === NONE ? null : (approvalSize as TicketSize),
       notifyUrl: text('notifyUrl'),
@@ -221,6 +222,22 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
             with GitHub.
           </p>
         </div>
+        <div className="grid gap-1">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              name="deleteMergedBranches"
+              defaultChecked={detail.board.deleteMergedBranches}
+              className="size-4 accent-primary"
+            />
+            Delete branches after merge
+          </label>
+          <p className="pl-6 text-xs text-muted-foreground">
+            Deletes a pull request's branch on GitHub once it is merged, however it was merged. Pull requests based on
+            the branch move to its base first. Keeps branches in forks, the default branch and branches with commits
+            pushed after the merge.
+          </p>
+        </div>
         <GitHubStatus />
       </fieldset>
 
@@ -278,8 +295,9 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
               name="agentModel"
               defaultValue={detail.board.agentModel ?? ''}
               placeholder={AGENT_DEFAULTS.model}
-              pattern="[\w.\[\]\-]{1,100}"
-              title="A model alias or name, e.g. opus or claude-opus-5-5"
+              pattern="[\w.:\[\]\-]+(/[\w.:\[\]\-]+)*"
+              maxLength={100}
+              title="A model alias or name, e.g. opus, claude-opus-5-5 or qwen3-coder:30b"
               onChange={(event) => setAgent({ ...agent, agentModel: event.target.value.trim() || null })}
             />
           </div>
@@ -326,8 +344,10 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
         </div>
         <p className="text-xs text-muted-foreground">
           It claims tickets as <code>{agentWorkerName(agent)}</code>. A full model name, such as claude-opus-5-5, keeps
-          each model version apart on the board. With more than one parallel run, it works that many tickets at once,
-          each in its own git worktree, all on your Claude usage.
+          each model version apart on the board. A local model or another provider's, such as qwen3-coder:30b, works
+          once Claude Code where the agent runs is pointed at an endpoint that serves it (docs/agents.md). With more
+          than one parallel run, it works that many tickets at once, each in its own git worktree, all on the same
+          Claude usage or endpoint.
         </p>
         <label className="flex items-center gap-2 text-sm">
           <input

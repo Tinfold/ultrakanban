@@ -1,8 +1,10 @@
 import {
+  AGENT_DEFAULTS,
   type AgentEffort,
   type AgentSettingStats,
   type AgentSuggestion,
   CANCELLED_COLUMN,
+  parseWorkerName,
   type SimilarTicket,
   workerSetting,
 } from '../../shared/domain.ts'
@@ -90,8 +92,10 @@ interface PastTicket {
  * Tickets of the board that were decided, with the setting that worked them: finished (in the done column or with a
  * merged pull request) or given up on (in the cancelled column, or with its pull request closed unmerged). Tickets
  * still being worked, and ones no run under an `<agent>/<model>/<effort>` name worked, tell nothing and are left out.
+ * So are tickets another agent did most of the work on (Codex on GPT, say): a suggestion sets the model and effort the
+ * board's agent (`agent`) works a ticket at, and it can't run theirs.
  */
-function pastTickets(boardId: string, features: Features): PastTicket[] {
+function pastTickets(boardId: string, agent: string, features: Features): PastTicket[] {
   const done = workflowColumns(boardId).done ?? listColumns(boardId).at(-1)
   const rows = sql.all<PastTicketRow>(
     `SELECT t.id, t.number, t.title, t.description,
@@ -117,14 +121,12 @@ function pastTickets(boardId: string, features: Features): PastTicket[] {
 
   return rows.flatMap((row) => {
     const ticketRuns = runs.get(row.id) ?? []
-    // The setting that used the most tokens on it did most of its work.
+    // The `<agent>/<model>/<effort>` that used the most tokens on it did most of its work.
     const main = ticketRuns
-      .flatMap((run) => {
-        const setting = workerSetting(run.agent)
-        return setting ? [{ ...run, setting }] : []
-      })
+      .filter((run) => parseWorkerName(run.agent)?.effort)
       .sort((a, b) => b.tokens - a.tokens || a.agent.localeCompare(b.agent))[0]
-    if (!main) return []
+    const setting = main && parseWorkerName(main.agent)?.agent === agent ? workerSetting(main.agent) : null
+    if (!setting) return []
     const score = similarity(features, {
       tags: new Set(row.tag_ids?.split(',') ?? []),
       words: titleWords(row.title),
@@ -147,7 +149,7 @@ function pastTickets(boardId: string, features: Features): PastTicket[] {
       costUsd,
       tokens: ticketRuns.reduce((sum, run) => sum + run.tokens, 0),
     }
-    return { ticket, setting: main.setting }
+    return { ticket, setting }
   })
 }
 
@@ -190,7 +192,7 @@ const cheaper = (a: AgentSettingStats, b: AgentSettingStats) =>
  * finishes the same kind of work wins; one that keeps getting its work cancelled or closed doesn't.
  */
 export function suggestAgent(boardId: string, query: AgentSuggestionQuery): AgentSuggestion {
-  getBoard(boardId)
+  const board = getBoard(boardId)
   const tags = listTags(boardId)
   const tagIds = query.tag.flatMap((ref) => {
     const tag = tags.find((entry) => entry.id === ref || entry.name.toLowerCase() === ref.toLowerCase())
@@ -198,7 +200,7 @@ export function suggestAgent(boardId: string, query: AgentSuggestionQuery): Agen
   })
   const features = { tags: new Set(tagIds), words: titleWords(query.title), steps: query.steps }
 
-  const similar = pastTickets(boardId, features)
+  const similar = pastTickets(boardId, board.agentName ?? AGENT_DEFAULTS.name, features)
     .sort((a, b) => b.ticket.similarity - a.ticket.similarity || b.ticket.number - a.ticket.number)
     .slice(0, MOST_SIMILAR)
   const bySetting = new Map<string, PastTicket[]>()

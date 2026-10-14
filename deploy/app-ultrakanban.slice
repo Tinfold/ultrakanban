@@ -1,0 +1,23 @@
+# Holds every board's agent loop (ultrakanban-agent@<board>.service) and the claude runs and builds they start, so
+# that together they can't starve the rest of the machine of memory, swap or CPU. Installed by
+# scripts/install-services.sh. The percentages are of the machine's memory.
+#
+# Change the limits with `systemctl --user edit app-ultrakanban.slice` (a drop-in, kept when you install again); they
+# take effect at once, without restarting the agents. `systemctl --user status app-ultrakanban.slice` shows what the
+# agents use now.
+[Unit]
+Description=UltraKanban agents
+
+[Slice]
+# Over MemoryHigh the kernel slows the agents down and takes memory back from them (page cache first), rather than
+# pushing the rest of the machine out to swap. At MemoryMax it kills one of their processes (the biggest), never one
+# outside: a run killed this way fails and the loop retries it later.
+MemoryHigh=60%
+MemoryMax=75%
+# How much swap the agents may fill, so their memory (and files they leave in a /tmp held in memory) doesn't end up
+# taking all of it for good. A size, not a percentage: systemd takes a percentage here of the memory, not the swap.
+MemorySwapMax=2G
+# All the boards' agents share one CPU share, as much as any other app, however many run at once.
+CPUWeight=100
+# Runaway test runners and fork bombs.
+TasksMax=8192

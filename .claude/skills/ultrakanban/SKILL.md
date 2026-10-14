@@ -12,12 +12,17 @@ agents can work the same board safely.
 
 - `KANBAN` — the board's base URL, e.g. `http://localhost:8080`. Ask the user if you don't have it.
 - `BOARD` — the board id. List boards with `curl -s $KANBAN/api/boards`; ask the user which one if several.
+- Read the board's description once (`curl -s $KANBAN/api/boards/$BOARD | jq -r .board.description`): it is where
+  people put what the board is for and the conventions every ticket on it should follow. Follow them unless a ticket
+  says otherwise. The board's agent loop puts it in your prompt, so there you needn't fetch it.
 - Send `-H "X-Actor: <your name>"` on every write so the activity log shows who did what. Use the same name
   as the `agent` field.
 - Your name is `<agent>/<model>/<effort>`: the agent, then your exact model and effort level, e.g.
   `claude/claude-opus-5-5/high`. When you are given a name (the board's agent loop always gives one), use exactly
   that. Otherwise build it this way, with `claude` as the agent for Claude Code, and never make one up: the board
   and its dashboard group work by name, so the same model and effort must always show up under the same name.
+  Other agents name themselves the same way, e.g. `codex/gpt-5.1-codex/medium`, with `default` as the effort for a
+  model that has no effort levels, e.g. `opencode/qwen3-coder:30b/default`.
 
 ## Working rules
 

@@ -304,6 +304,41 @@ const MIGRATIONS = [
   );
   INSERT INTO setup (id) VALUES (1);
   `,
+  `
+  ALTER TABLE boards ADD COLUMN delete_merged_branches INTEGER NOT NULL DEFAULT 0;
+  `,
+  `
+  -- Disk space of each board's agent folder where the agents run, as the agent supervisor last measured it (see
+  -- AgentDiskUsage). Keyed by the folder's name, a board id, which may be of a board deleted since.
+  CREATE TABLE agent_disk_usage (
+    board_id TEXT PRIMARY KEY,
+    repo INTEGER NOT NULL,
+    worktrees INTEGER NOT NULL,
+    state INTEGER NOT NULL,
+    measured_at TEXT NOT NULL
+  );
+  `,
+  `
+  -- The update: whether it merges origin (git pull --no-ff) instead of fast-forwarding, and the checkout's commit and
+  -- local commits not on origin, as the supervisor reports them.
+  ALTER TABLE app_update ADD COLUMN merge INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE app_update ADD COLUMN commit_sha TEXT;
+  ALTER TABLE app_update ADD COLUMN ahead INTEGER;
+  `,
+  `
+  -- When someone last asked the board's agent loops to clear their checkouts' build output (see BoardSummary).
+  ALTER TABLE boards ADD COLUMN agent_cleanup_requested_at TEXT;
+  `,
+  `
+  -- Every board's agents switched off at once from the header (see AgentServices), and the boards whose agent loop the
+  -- agent supervisor last found running there, as a JSON array of board ids.
+  ALTER TABLE setup ADD COLUMN agents_paused INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE setup ADD COLUMN agents_changed_at TEXT;
+  ALTER TABLE setup ADD COLUMN agents_changed_by TEXT;
+  ALTER TABLE setup ADD COLUMN agents_running TEXT;
+  ALTER TABLE setup ADD COLUMN agents_reported_at TEXT;
+  ALTER TABLE setup ADD COLUMN agents_handled_at TEXT;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

@@ -13,8 +13,15 @@ export function colorForName(name: string): Color {
 export const AGENT_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 export type AgentEffort = (typeof AGENT_EFFORTS)[number]
 
-/** Model aliases offered for a ticket; boards and tickets can also name a model in full, e.g. claude-opus-5-5. */
+/**
+ * Model aliases offered for a ticket; boards and tickets can also name a model in full, e.g. claude-opus-5-5, or one
+ * that an Anthropic-compatible endpoint serves the agent instead of Claude, e.g. qwen3-coder:30b (see docs/agents.md).
+ */
 export const AGENT_MODELS = ['fable', 'opus', 'sonnet', 'haiku'] as const
+
+/** Whether a model is one of Claude's: an alias (`AGENT_MODELS`) or a full name such as claude-opus-5-5. */
+export const isClaudeModel = (model: string) =>
+  (AGENT_MODELS as readonly string[]).includes(model) || /^claude-/i.test(model)
 
 /** What a board's agent runs as when the board doesn't say (see scripts/agent-board.sh). */
 export const AGENT_DEFAULTS = { name: 'claude', model: 'opus', effort: 'medium', concurrency: 1 } as const
@@ -111,23 +118,35 @@ export function agentWorkerName(board: Pick<BoardSummary, 'agentName' | 'agentMo
 }
 
 /**
- * The model a run under an `<agent>/<model>/<effort>` name (see `agentWorkerName`) runs, e.g. `opus`
- * for `claude/opus/high`; null for other names.
+ * The parts of an `<agent>/<model>/<effort>` name (see `agentWorkerName`): the agent first, the effort last and the
+ * model everything in between, so model names with slashes work too (`opencode/openrouter/qwen/qwen3-coder/high`).
+ * The effort is whatever the agent calls it: agents other than Claude Code have their own levels (`minimal`) or
+ * `default` for models without any. An `<agent>/<model>` name has no effort. Null for other names, e.g. a person's.
  */
-export function workerModel(agent: string) {
-  const parts = agent.split('/')
-  return parts.length === 3 && parts[1] ? parts[1] : null
+export function parseWorkerName(name: string): { agent: string; model: string; effort: string | null } | null {
+  const parts = name.split('/')
+  if (parts.length < 2 || parts.some((part) => !part)) return null
+  if (parts.length === 2) return { agent: parts[0], model: parts[1], effort: null }
+  return { agent: parts[0], model: parts.slice(1, -1).join('/'), effort: parts[parts.length - 1] }
 }
 
 /**
- * The model and effort a run under an `<agent>/<model>/<effort>` name (see `agentWorkerName`) works at, e.g.
- * `{ model: 'opus', effort: 'high' }` for `claude/opus/high`; null for other names.
+ * The model a run under an `<agent>/<model>/<effort>` name (see `parseWorkerName`) runs, e.g. `opus` for
+ * `claude/opus/high` or `gpt-5-codex` for `codex/gpt-5-codex/minimal`; null for other names.
+ */
+export function workerModel(agent: string) {
+  return parseWorkerName(agent)?.model ?? null
+}
+
+/**
+ * The model and effort a run under an `<agent>/<model>/<effort>` name (see `parseWorkerName`) works at, e.g.
+ * `{ model: 'opus', effort: 'high' }` for `claude/opus/high`; null for other names and for efforts the board's agent
+ * doesn't have (`AGENT_EFFORTS`).
  */
 export function workerSetting(agent: string): { model: string; effort: AgentEffort } | null {
-  const parts = agent.split('/')
-  const [, model, effort] = parts
-  const isEffort = (AGENT_EFFORTS as readonly string[]).includes(effort)
-  return parts.length === 3 && model && isEffort ? { model, effort: effort as AgentEffort } : null
+  const worker = parseWorkerName(agent)
+  const isEffort = (AGENT_EFFORTS as readonly string[]).includes(worker?.effort ?? '')
+  return worker && isEffort ? { model: worker.model, effort: worker.effort as AgentEffort } : null
 }
 
 export const PULL_REQUEST_STATES = ['unknown', 'open', 'draft', 'merged', 'closed'] as const
@@ -262,7 +281,10 @@ export interface BoardSummary {
   agentEnabled: boolean
   /** Name of the board's agent (its controller); `claude` when not set. Its workers are named by `agentWorkerName`. */
   agentName: string | null
-  /** Claude model the agent runs, as an alias or a full model name; `opus` when not set. */
+  /**
+   * Model the agent runs Claude Code with: a Claude alias or full model name, or another model that an
+   * Anthropic-compatible endpoint serves (see docs/agents.md); `opus` when not set.
+   */
   agentModel: string | null
   /** Effort level the agent runs at; `medium` when not set. */
   agentEffort: AgentEffort | null
@@ -286,6 +308,12 @@ export interface BoardSummary {
    */
   autoMerge: boolean
   /**
+   * Whether the server deletes a pull request's branch on GitHub once the pull request is merged, after moving the open
+   * pull requests based on it to the merged one's base. Branches in forks, the default branch and branches that got
+   * new commits after the merge are kept.
+   */
+  deleteMergedBranches: boolean
+  /**
    * Days a ticket stays in the done column before it is archived: left out of the board (`GET /boards/:id`) unless
    * asked for, but still found by the ticket list and search. Never archived when not set.
    */
@@ -300,6 +328,11 @@ export interface BoardSummary {
    * is ready to merge): an ntfy topic, a Discord webhook or any other webhook URL. Nothing is sent when not set.
    */
   notifyUrl: string | null
+  /**
+   * When someone last asked the board's agent loops to clear their checkouts' build output (`POST
+   * /boards/:id/agent-cleanup`); each loop does it before its next run, or at once when idle. Null if never asked.
+   */
+  agentCleanupRequestedAt: string | null
   ticketCount: number
   createdAt: string
   updatedAt: string
@@ -358,7 +391,7 @@ export interface Ticket {
   dueDate: string | null
   /** Effort level the board's agent works this ticket at; the board's `agentEffort` when not set. */
   agentEffort: AgentEffort | null
-  /** Claude model the board's agent works this ticket with; the board's `agentModel` when not set. */
+  /** Model the board's agent works this ticket with; the board's `agentModel` when not set. */
   agentModel: string | null
   /** Whether the board's agent works this ticket in a Docker container; the board's `agentDocker` when not set. */
   agentDocker: boolean | null
@@ -528,8 +561,11 @@ export interface TokenUsage extends TokenCounts {
 
 /** Token counts added up over several runs. */
 export interface UsageCounts extends TokenCounts {
-  /** Estimated cost in US dollars of the runs that reported one. */
-  costUsd: number
+  /**
+   * Estimated cost in US dollars of the runs that reported one; null when none did, e.g. an agent on a local model or
+   * one that doesn't know its cost.
+   */
+  costUsd: number | null
   runs: number
 }
 
@@ -544,7 +580,7 @@ const noCounts = (): UsageCounts => ({
   outputTokens: 0,
   cacheReadTokens: 0,
   cacheWriteTokens: 0,
-  costUsd: 0,
+  costUsd: null,
   runs: 0,
 })
 
@@ -555,7 +591,7 @@ function addCounts(totals: UsageCounts, counts: TokenCounts & { costUsd: number 
   totals.outputTokens += counts.outputTokens
   totals.cacheReadTokens += counts.cacheReadTokens
   totals.cacheWriteTokens += counts.cacheWriteTokens
-  totals.costUsd += counts.costUsd ?? 0
+  if (counts.costUsd !== null) totals.costUsd = (totals.costUsd ?? 0) + counts.costUsd
   totals.runs += runs
 }
 
@@ -658,7 +694,64 @@ export interface OverviewBoard {
   /** Tokens agents used on its tickets within the range. */
   tokens: number
   lastActivityAt: string | null
+  disk: BoardDiskUsage
 }
+
+/** Disk space a board's agent takes where the agents run, in bytes, as the agent supervisor last measured it. */
+export interface AgentDiskUsage {
+  /** The board's clone. */
+  repo: number
+  /** The git worktrees of its parallel runs. */
+  worktrees: number
+  /** The rest: the agent loop's state and the runs' scratch files. */
+  state: number
+  measuredAt: string
+}
+
+/** Disk space a board takes, in bytes. */
+export interface BoardDiskUsage {
+  /** Its tickets' attachments, on the board's server. */
+  attachments: number
+  /** Its agent's folder where the agents run; null if the agent supervisor hasn't measured one. */
+  agent: AgentDiskUsage | null
+}
+
+/** A number of attachments and the bytes they take. */
+export interface AttachmentBytes {
+  count: number
+  bytes: number
+}
+
+/** A ticket's attachments, in a board's disk usage. */
+export interface TicketAttachmentBytes extends AttachmentBytes {
+  ticketId: string
+  number: number
+  title: string
+  /** Whether the ticket is finished: in the done column or the Cancelled one. */
+  finished: boolean
+}
+
+/** What a board's disk space is made of (`GET /boards/:id/disk-usage`), in bytes. */
+export interface BoardDiskBreakdown {
+  attachments: {
+    /** Screenshots: PNG, JPEG, GIF and WebP. */
+    images: AttachmentBytes
+    /** Screen recordings: MP4 and WebM. */
+    videos: AttachmentBytes
+    /** Those of finished tickets (in the done or Cancelled column), which `POST /boards/:id/attachments/cleanup` deletes. */
+    finished: AttachmentBytes
+    /** The tickets whose attachments take the most space, largest first (at most `DISK_USAGE_TICKETS`). */
+    tickets: TicketAttachmentBytes[]
+  }
+  /** The board's agent folder where the agents run; null if the agent supervisor hasn't measured one. */
+  agent: AgentDiskUsage | null
+}
+
+/** How many of the largest tickets a board's disk usage lists. */
+export const DISK_USAGE_TICKETS = 10
+
+/** What `POST /boards/:id/attachments/cleanup` deleted. */
+export type AttachmentCleanup = AttachmentBytes
 
 /** How an activity entry counts in the overview's timeline. */
 export type OverviewEventKind = 'created' | 'completed' | 'comment' | 'update'
@@ -741,6 +834,12 @@ export interface Overview {
   /** Agents cleared from the overview that haven't done anything since; they aren't in `agents`. */
   hiddenAgents: string[]
   boards: OverviewBoard[]
+  disk: {
+    /** When the agent supervisor last measured the agents' folders; null if it never has. */
+    measuredAt: string | null
+    /** Bytes in the agents' folders of boards that no longer exist. */
+    deletedBoards: number
+  }
   /** Every activity entry within the range, oldest first. */
   events: OverviewEvent[]
   sessions: WorkSession[]
@@ -776,6 +875,14 @@ export interface AppUpdate {
   version: string | null
   /** Commits the checkout's default branch is behind origin, as of the supervisor's last fetch. */
   behind: number | null
+  /** Its commits that aren't on origin: the update fails to fast-forward over them, so it has to merge. */
+  ahead: number | null
+  /** The checkout's full commit sha. */
+  commit: string | null
+  /** The commit the running board was built from (`ULTRAKANBAN_COMMIT` at build time); null when unknown. */
+  runningCommit: string | null
+  /** Whether the requested (or last) update merges origin with `git pull --no-ff` instead of fast-forwarding. */
+  merge: boolean
 }
 
 /** One of the Claude plan's usage limits: the current session, the week, or the week for one model. */
@@ -847,6 +954,28 @@ export interface AgentHost {
   login: AgentLogin | null
 }
 
+/**
+ * Every board's agents at once, as the header shows them: switched off (`paused`) or on there, and which loops the agent
+ * supervisor last found running. Switched off, the supervisor stops every loop and the containers their runs use, and
+ * starts none; switched on again, it starts the loop of every board whose agent is on, as before.
+ */
+export interface AgentServices {
+  paused: boolean
+  /** When it was last switched on or off, and by whom; null if it never has been. */
+  changedAt: string | null
+  changedBy: string | null
+  /** The boards whose agent is on (with a repository): each should have a loop running unless paused. */
+  wanted: string[]
+  /** The boards whose loop the supervisor last found running. */
+  running: string[]
+  /** When the supervisor last reported them; null if it never has, so nothing would act on the switch. */
+  reportedAt: string | null
+  /** The switch (its `changedAt`) the supervisor had seen to when it reported; until it is `changedAt`, it is on its way. */
+  handledAt: string | null
+  /** The server's time when it answered, to judge `reportedAt` by: the browser's clock can be off from it. */
+  serverTime: string
+}
+
 /** What the Setup page shows: the board's GitHub access and the agents'. */
 export interface SetupStatus {
   github: {
@@ -856,4 +985,9 @@ export interface SetupStatus {
     error: string | null
   }
   agents: AgentHost
+  /**
+   * The server's time when it answered: the page judges the agents' check-in by it, since the server's clock can be off
+   * from the browser's (Docker Desktop's VM's drifts, e.g. after the machine sleeps).
+   */
+  serverTime: string
 }

@@ -1,13 +1,16 @@
 import type {
   Activity,
   AgentHost,
+  AgentServices,
   AgentLoginKind,
   AgentSuggestion,
   AppUpdate,
   ApiErrorBody,
   Attachment,
+  AttachmentCleanup,
   ClaudeUsage,
   BoardDetail,
+  BoardDiskBreakdown,
   BoardSummary,
   Column,
   Epic,
@@ -30,6 +33,7 @@ import type {
   CreateTagInput,
   CreateTicketInput,
   MoveTicketInput,
+  RequestAppUpdateInput,
   UpdateBoardInput,
   UpdateColumnInput,
   UpdateEpicInput,
@@ -131,6 +135,10 @@ export const api = {
     return request<Attachment>('POST', `/tickets/${ticketId}/attachments`, form)
   },
   deleteAttachment: (attachmentId: string) => request<void>('DELETE', `/attachments/${attachmentId}`),
+  diskUsage: (boardId: string) => request<BoardDiskBreakdown>('GET', `/boards/${boardId}/disk-usage`),
+  cleanUpAttachments: (boardId: string, olderThanDays: number | null) =>
+    request<AttachmentCleanup>('POST', `/boards/${boardId}/attachments/cleanup`, { olderThanDays }),
+  requestAgentCleanup: (boardId: string) => request<BoardSummary>('POST', `/boards/${boardId}/agent-cleanup`),
   addComment: (ticketId: string, body: string, pullRequest = false) =>
     request<Activity>('POST', `/tickets/${ticketId}/comments`, { body, pullRequest }),
   mergePlan: (boardId: string) => request<MergePlan>('GET', `/boards/${boardId}/merge-plan`),
@@ -142,7 +150,7 @@ export const api = {
   showHiddenAgents: () => request<void>('DELETE', '/overview/hidden-agents'),
   appUpdate: () => request<AppUpdate>('GET', '/system/update'),
   claudeUsage: () => request<ClaudeUsage>('GET', '/system/claude-usage'),
-  requestAppUpdate: () => request<AppUpdate>('POST', '/system/update'),
+  requestAppUpdate: (input: RequestAppUpdateInput = {}) => request<AppUpdate>('POST', '/system/update', input),
   cancelAppUpdate: () => request<AppUpdate>('DELETE', '/system/update'),
   setup: () => request<SetupStatus>('GET', '/system/setup'),
   setGitHubToken: (token: string) => request<SetupStatus>('PUT', '/system/github-token', { token }),
@@ -150,6 +158,8 @@ export const api = {
   requestAgentLogin: (kind: AgentLoginKind) => request<AgentHost>('POST', '/system/agents/login', { kind }),
   cancelAgentLogin: () => request<AgentHost>('DELETE', '/system/agents/login'),
   sendAgentLoginCode: (code: string) => request<AgentHost>('POST', '/system/agents/login/code', { code }),
+  agentServices: () => request<AgentServices>('GET', '/system/agents/services'),
+  setAgentsPaused: (paused: boolean) => request<AgentServices>('PUT', '/system/agents/services', { paused }),
 }
 
 export const errorMessage = (error: unknown) => (error instanceof Error ? error.message : 'Something went wrong')

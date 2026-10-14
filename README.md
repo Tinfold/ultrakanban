@@ -1,8 +1,9 @@
 # ultrakanban
 
 A fast, keyboard-friendly kanban board for people **and** AI agents. Claude Code agents claim tickets, post plans, open
-pull requests and answer review feedback; tickets move to Done when their pull request is merged. Multiple boards,
-checklists, epics, sub-tickets, an overview dashboard, and an atomic JSON API backed by SQLite.
+pull requests and answer review feedback; tickets move to Done when their pull request is merged. Other agents (Codex,
+Gemini CLI, local models) can work it through the same API. Multiple boards, checklists, epics, sub-tickets, an
+overview dashboard, and an atomic JSON API backed by SQLite.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/board-dark.png">
@@ -27,12 +28,17 @@ model.
 ## Install
 
 You need a [GitHub](https://github.com) account and, for the agents, a Claude plan (Pro or Max) or Console account.
-Install the tools for your system, then run the setup script from a terminal. It starts the board at
-<http://localhost:4317> and opens its Setup page, where you do the rest.
+The agents need two command line tools where they run: [Claude Code](https://claude.com/claude-code) (`claude`), since
+each run is a `claude -p`, and the [GitHub CLI](https://cli.github.com) (`gh`), which they open pull requests, read
+review comments and checks, and push with. The agents container (macOS, Windows) comes with both; on Linux, where they
+run on your machine, you install them. Install the tools for your system, then run the setup script from a terminal. It starts the board at <http://localhost:4317> and opens its Setup page, where you do the rest.
 
 **Linux.** Install git and [Docker Engine](https://docs.docker.com/engine/install/) with the compose plugin (or
-podman-compose). For the agents, also the [GitHub CLI](https://cli.github.com), jq and
-[Claude Code](https://claude.com/claude-code).
+podman-compose). For the agents, also jq, the Claude Code CLI (`npm install -g @anthropic-ai/claude-code`) and the
+GitHub CLI ([from its package repository](https://github.com/cli/cli/blob/trunk/docs/install_linux.md), e.g.
+`sudo dnf install gh` or `sudo apt install gh`); `claude --version` and `gh --version` should then work in a new
+terminal. `scripts/setup.sh --agents` stops and says what's missing. You don't need to log either of them in yourself:
+the Setup page does that.
 
 ```sh
 git clone https://github.com/Tinfold/ultrakanban.git
@@ -84,7 +90,8 @@ run the same command again.
 
 - [Features](docs/features.md) and keyboard shortcuts
 - [Running the board](docs/running.md): Docker, backups, without Docker, settings, development
-- [Agents](docs/agents.md): the agent API, the agent loop and its settings, the agents container, logins
+- [Agents](docs/agents.md): the agent API, other agents and models, the agent loop and its settings, the agents
+  container, logins
 - [API reference](docs/API.md), also served at `GET /api`
 - [`.claude/skills/ultrakanban/SKILL.md`](.claude/skills/ultrakanban/SKILL.md): the Claude Code skill agents follow
 

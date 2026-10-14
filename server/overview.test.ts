@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { beforeEach, describe, test } from 'node:test'
 import { type Overview, type Ticket, type TokenUsage } from '../shared/domain.ts'
 import { getOverview } from './store/overview.ts'
-import { addTicket, boardId, call, pullRequestStatuses, useBoard } from './test-app.ts'
+import { addTicket, app, boardId, call, pullRequestStatuses, useBoard } from './test-app.ts'
 
 describe('overview', () => {
   const PR = 'https://github.com/acme/app/pull/42'
@@ -145,13 +145,25 @@ describe('overview', () => {
     assert.deepEqual([agent?.status, agent?.agentOf], ['idle', [boardId]])
     assert.ok(!idle.agents.some((entry) => entry.name === 'idle-agent' || entry.name === 'idle-agent/opus/max'))
 
-    // A ticket's own model and effort run under their own worker name, which still counts as the board's host agent.
+    // Another board whose agent has the same name shares its worker names.
+    const { body: other } = await call<{ id: string }>('POST', '/boards', { name: 'Other', columns: ['Todo', 'Done'] })
+    await call('PATCH', `/boards/${other.id}`, {
+      githubRepo: 'acme/other',
+      agentEnabled: true,
+      agentName: 'idle-agent',
+    })
+    await call('POST', `/boards/${other.id}/tickets`, { title: 'B', agentModel: 'sonnet' })
+
+    // A ticket's own model and effort run under their own worker name, which still counts as the board's host agent,
+    // but only of the boards it works on.
     await addTicket({ title: 'A', agentModel: 'sonnet' })
     await call('POST', `/boards/${boardId}/tickets/claim-next`, { agent: 'idle-agent/sonnet/max', column: 'Todo' })
     const { body: working } = await call<Overview>('GET', '/overview')
     const variant = working.agents.find((entry) => entry.name === 'idle-agent/sonnet/max')
     assert.deepEqual([variant?.status, variant?.agentOf], ['working', [boardId]])
-    await call('PATCH', `/boards/${boardId}`, { agentEnabled: false })
+    const worker = working.agents.find((entry) => entry.name === 'idle-agent/opus/medium')
+    assert.deepEqual(worker?.agentOf.sort(), [boardId, other.id].sort())
+    for (const id of [boardId, other.id]) await call('PATCH', `/boards/${id}`, { agentEnabled: false })
   })
 
   test('agents report the tokens their runs use, and the overview adds them up', async () => {
@@ -264,12 +276,13 @@ describe('overview', () => {
         costUsd: 1,
         runs: 1,
       },
+      // Its runs reported no cost for it.
       'claude-haiku-4-5': {
         inputTokens: 5,
         outputTokens: 6,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
-        costUsd: 0,
+        costUsd: null,
         runs: 1,
       },
       opus: { inputTokens: 1, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.5, runs: 1 },
@@ -279,6 +292,31 @@ describe('overview', () => {
       [['claude-opus-5-5', 'claude-haiku-4-5'], ['opus']],
     )
     assert.equal(overview.totals.usage.models.opus?.runs, 1)
+  })
+
+  test("runs of agents on other models count as the model in the agent's name, however it is written", async () => {
+    const ticket = await addTicket({ title: 'A' })
+    const names = {
+      // Codex's own effort level.
+      'codex/gpt-5-codex/minimal': 'gpt-5-codex',
+      // A model name with a provider in it, and `default` for a model without effort levels.
+      'opencode/openrouter/qwen/qwen3-coder/default': 'openrouter/qwen/qwen3-coder',
+      // An Ollama tag.
+      'local-agent/qwen3-coder:30b/default': 'qwen3-coder:30b',
+      // No effort at all.
+      'gemini/gemini-2.5-pro': 'gemini-2.5-pro',
+    }
+    for (const agent of Object.keys(names)) {
+      // Local models cost nothing, so they report no cost.
+      await call('POST', `/tickets/${ticket.id}/usage`, { agent, inputTokens: 1, outputTokens: 2 })
+    }
+
+    const { body: overview } = await call<Overview>('GET', '/overview')
+    for (const [agent, model] of Object.entries(names)) {
+      const usage = overview.agents.find((entry) => entry.name === agent)?.usage
+      assert.deepEqual(Object.keys(usage?.models ?? {}), [model], agent)
+      assert.equal(usage?.costUsd, null)
+    }
   })
 
   test('agents report runs that were not on a ticket to the board', async () => {
@@ -384,5 +422,46 @@ describe('overview', () => {
     await call('POST', '/overview/hidden-agents', { names: [agent] })
     assert.equal((await call('DELETE', '/overview/hidden-agents')).status, 204)
     assert.deepEqual(await listed(), [true, false])
+  })
+
+  test('overview shows the disk space boards take: their attachments, and their agent folders as last measured', async () => {
+    const boardOf = (overview: Overview, id = boardId) => overview.boards.find((entry) => entry.id === id)!
+    const { body: before } = await call<Overview>('GET', '/overview')
+    assert.deepEqual(boardOf(before).disk, { attachments: 0, agent: null })
+
+    const ticket = await addTicket({ title: 'A' })
+    const form = new FormData()
+    form.append(
+      'file',
+      new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2])], 'a.png', {
+        type: 'image/png',
+      }),
+    )
+    await app.request(`/api/tickets/${ticket.id}/attachments`, { method: 'POST', body: form })
+    const { body: other } = await call<{ id: string }>('POST', '/boards', { name: 'Other' })
+
+    const report = (boards: unknown[]) => call('POST', '/system/disk-usage', { boards }, 'agent-supervisor')
+    assert.equal((await report([{ boardId, repo: -1, worktrees: 0, state: 0 }])).status, 400)
+    const measured = await report([
+      { boardId, repo: 3000, worktrees: 2000, state: 100 },
+      { boardId: other.id, repo: 40, worktrees: 0, state: 2 },
+      { boardId: 'deleted-board', repo: 500, worktrees: 0, state: 0 },
+    ])
+    assert.equal(measured.status, 204)
+
+    const { body: after } = await call<Overview>('GET', '/overview')
+    const { agent, attachments } = boardOf(after).disk
+    assert.equal(attachments, 10)
+    assert.deepEqual([agent?.repo, agent?.worktrees, agent?.state], [3000, 2000, 100])
+    assert.ok(after.disk.measuredAt && agent?.measuredAt === after.disk.measuredAt)
+    assert.equal(after.disk.deletedBoards, 500)
+
+    // A deleted board's folder counts as one of a deleted board until it is gone too.
+    await call('DELETE', `/boards/${other.id}`)
+    assert.equal((await call<Overview>('GET', '/overview')).body.disk.deletedBoards, 542)
+    await report([{ boardId, repo: 3000, worktrees: 0, state: 100 }])
+    const { body: latest } = await call<Overview>('GET', '/overview')
+    assert.equal(latest.disk.deletedBoards, 0)
+    assert.equal(boardOf(latest).disk.agent?.worktrees, 0)
   })
 })

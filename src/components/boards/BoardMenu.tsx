@@ -1,4 +1,12 @@
-import { BotIcon, DownloadIcon, MoreHorizontalIcon, SettingsIcon, TagsIcon, Trash2Icon } from 'lucide-react'
+import {
+  BotIcon,
+  DownloadIcon,
+  HardDriveIcon,
+  MoreHorizontalIcon,
+  SettingsIcon,
+  TagsIcon,
+  Trash2Icon,
+} from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { useLocation } from 'wouter'
@@ -16,9 +24,10 @@ import { useBoardTransfer } from '@/hooks/use-board-transfer'
 import { api, errorMessage } from '@/lib/api'
 import { AgentApiDialog } from './AgentApiDialog'
 import { BoardSettingsDialog } from './BoardSettingsDialog'
+import { DiskUsageDialog } from './DiskUsageDialog'
 import { TagManagerDialog } from './TagManagerDialog'
 
-type OpenDialog = 'settings' | 'tags' | 'api' | 'delete' | null
+type OpenDialog = 'settings' | 'tags' | 'api' | 'disk' | 'delete' | null
 
 export function BoardMenu() {
   const { detail } = useBoardContext()
@@ -61,6 +70,10 @@ export function BoardMenu() {
             <BotIcon />
             Agent API
           </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setDialog('disk')}>
+            <HardDriveIcon />
+            Disk usage
+          </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => exportBoard(detail.board.id)}>
             <DownloadIcon />
             Export to file
@@ -76,6 +89,7 @@ export function BoardMenu() {
       <BoardSettingsDialog {...dialogProps('settings')} />
       <TagManagerDialog {...dialogProps('tags')} />
       <AgentApiDialog {...dialogProps('api')} />
+      <DiskUsageDialog {...dialogProps('disk')} />
       <ConfirmDialog
         {...dialogProps('delete')}
         title={`Delete “${detail.board.name}”?`}

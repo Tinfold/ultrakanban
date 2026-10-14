@@ -1,5 +1,6 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import type { OverviewRange } from '@shared/domain'
+import { agentsSwitching } from '@/lib/agents-switch'
 import { api } from '@/lib/api'
 import { withoutPendingDeletes } from '@/lib/board-updates'
 
@@ -12,6 +13,7 @@ export const queryKeys = {
   allAttachments: ['attachments'] as const,
   github: ['github'] as const,
   idleTickets: (columnId: string) => ['idle-tickets', columnId] as const,
+  diskUsage: (boardId: string) => ['disk-usage', boardId] as const,
   mergePlan: (boardId: string) => ['merge-plan', boardId] as const,
   mergeRun: (boardId: string) => ['merge-run', boardId] as const,
   overview: (days: OverviewRange) => ['overview', days] as const,
@@ -19,6 +21,7 @@ export const queryKeys = {
   appUpdate: ['app-update'] as const,
   claudeUsage: ['claude-usage'] as const,
   setup: ['setup'] as const,
+  agentServices: ['agent-services'] as const,
 }
 
 export const useBoards = () => useQuery({ queryKey: queryKeys.boards, queryFn: api.listBoards })
@@ -54,6 +57,10 @@ export const useIdleTickets = (columnId: string, enabled: boolean) =>
     refetchInterval: 60_000,
   })
 
+/** What the board's disk space is made of, for its Disk usage dialog. */
+export const useDiskUsage = (boardId: string) =>
+  useQuery({ queryKey: queryKeys.diskUsage(boardId), queryFn: () => api.diskUsage(boardId) })
+
 /** Asks GitHub about every pull request in review, so it is only loaded while needed. */
 export const useMergePlan = (boardId: string, enabled: boolean) =>
   useQuery({
@@ -82,6 +89,17 @@ export const useAppUpdate = () =>
     refetchInterval: (query) => {
       const state = query.state.data?.state
       return state === 'requested' || state === 'running' ? 3000 : 60_000
+    },
+  })
+
+/** Checked every few seconds after switching the agents off or on, until the supervisor has seen to it. */
+export const useAgentServices = () =>
+  useQuery({
+    queryKey: queryKeys.agentServices,
+    queryFn: api.agentServices,
+    refetchInterval: (query) => {
+      const services = query.state.data
+      return services && agentsSwitching(services) ? 2000 : 30_000
     },
   })
 

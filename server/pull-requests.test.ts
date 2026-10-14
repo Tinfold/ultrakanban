@@ -224,7 +224,9 @@ describe('pull request workflow', () => {
     assert.equal((await call('PATCH', `/boards/${boardId}`, { githubRepo: 'not a repo' })).status, 400)
     assert.equal((await call('PATCH', `/boards/${boardId}`, { agentName: 'has space' })).status, 400)
     assert.equal((await call('PATCH', `/boards/${boardId}`, { agentName: 'claude/opus' })).status, 400)
-    assert.equal((await call('PATCH', `/boards/${boardId}`, { agentModel: 'opus/high' })).status, 400)
+    for (const agentModel of ['opus high', '/opus', 'openai//gpt-5', 'opus/', 'a'.repeat(101)]) {
+      assert.equal((await call('PATCH', `/boards/${boardId}`, { agentModel })).status, 400, agentModel)
+    }
     assert.equal((await call('PATCH', `/boards/${boardId}`, { agentEffort: 'extreme' })).status, 400)
     for (const agentConcurrency of [0, 1.5, AGENT_MAX_CONCURRENCY + 1, '2']) {
       assert.equal((await call('PATCH', `/boards/${boardId}`, { agentConcurrency })).status, 400)
@@ -259,6 +261,15 @@ describe('pull request workflow', () => {
     assert.equal(agentWorkerName(on), 'claude-2/claude-sonnet-5/xhigh')
     const { body: boards } = await call<BoardSummary[]>('GET', '/boards')
     assert.ok(boards.some((board) => board.id === boardId && board.agentEnabled))
+
+    // Models that an Anthropic-compatible endpoint serves instead of Claude: Ollama's tags, OpenRouter's providers.
+    for (const agentModel of ['qwen3-coder:30b', 'openai/gpt-5', 'claude-opus-5-5[1m]']) {
+      const { body } = await call<BoardSummary>('PATCH', `/boards/${boardId}`, { agentModel })
+      assert.equal(body.agentModel, agentModel)
+      const ticket = await addTicket({ title: agentModel, agentModel })
+      assert.equal(ticket.agentModel, agentModel)
+    }
+    assert.equal(agentWorkerName({ ...on, agentModel: 'openai/gpt-5' }), 'claude-2/openai/gpt-5/xhigh')
 
     const { body: cleared } = await call<BoardSummary>('PATCH', `/boards/${boardId}`, {
       agentEnabled: false,

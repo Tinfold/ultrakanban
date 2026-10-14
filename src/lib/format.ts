@@ -1,4 +1,4 @@
-import { differenceInCalendarDays, format, formatDistanceToNowStrict, isThisYear, parseISO } from 'date-fns'
+import { differenceInCalendarDays, format, formatDistanceStrict, isThisYear, parseISO } from 'date-fns'
 import type { TicketUsage } from '@shared/domain'
 
 export const toISODate = (date: Date) => format(date, 'yyyy-MM-dd')
@@ -19,7 +19,9 @@ export function dueState(value: string): 'overdue' | 'soon' | 'later' {
   return days < 0 ? 'overdue' : days <= 2 ? 'soon' : 'later'
 }
 
-export const formatRelative = (iso: string) => formatDistanceToNowStrict(parseISO(iso), { addSuffix: true })
+/** E.g. `5 minutes ago`, from now or from `now` (e.g. the server's time, when it matters that its clock is off). */
+export const formatRelative = (iso: string, now = Date.now()) =>
+  formatDistanceStrict(parseISO(iso), now, { addSuffix: true })
 
 export const formatDateTime = (iso: string) => format(parseISO(iso), 'MMM d, yyyy, HH:mm')
 
@@ -41,6 +43,22 @@ const compactNumber = new Intl.NumberFormat(undefined, { notation: 'compact', ma
 /** Compact token count, e.g. `950`, `12.3K`, `4.5M`. */
 export const formatTokens = (count: number) => compactNumber.format(count)
 
+const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+const wholeNumber = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0, useGrouping: false })
+const oneDecimal = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1, useGrouping: false })
+
+/** Disk space in steps of 1024, as `du -h` counts: `950 B`, `4.5 MB`, `44 GB` (a decimal only below 10). */
+export function formatBytes(bytes: number) {
+  let unit = 0
+  let value = bytes
+  // From 1023.5 on, the value would read 1024 rounded.
+  while (value >= 1023.5 && unit < BYTE_UNITS.length - 1) {
+    value /= 1024
+    unit++
+  }
+  return `${(unit && value < 9.95 ? oneDecimal : wholeNumber).format(value)} ${BYTE_UNITS[unit]}`
+}
+
 const dollars = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' })
 
 /** US dollars to the cent, e.g. `$12.34`; amounts below a cent read `<$0.01`. */
@@ -59,15 +77,23 @@ export function formatUsage(usage: TicketUsage) {
 
 /**
  * Readable model name, e.g. `Opus 5.5` for `claude-opus-5-5`, `Haiku 4.5` for `claude-haiku-4-5-20251001` and `Opus`
- * for the `opus` alias. Names it doesn't recognise are shown as they are.
+ * for the `opus` alias; for agents on other models, `GPT-5.1 Codex` for `gpt-5.1-codex` and `Gemini 2.5 Pro` for
+ * `gemini-2.5-pro`. Names it doesn't recognise are shown as they are.
  */
 export function formatModel(model: string) {
   const capitalized = (word: string) => word.charAt(0).toUpperCase() + word.slice(1)
-  const match = /^claude-([a-z]+)-(\d+)(?:-(\d))?(?:-\d{8})?(\[1m\])?$/i.exec(model)
-  if (match) {
-    const [, family, major, minor, longContext] = match
+  const claude = /^claude-([a-z]+)-(\d+)(?:-(\d))?(?:-\d{8})?(\[1m\])?$/i.exec(model)
+  if (claude) {
+    const [, family, major, minor, longContext] = claude
     return `${capitalized(family)} ${major}${minor ? `.${minor}` : ''}${longContext ? ' (1M)' : ''}`
   }
+  const other = /^(gpt|gemini)-(\d[\w.]*)((?:-[a-z]+)*)$/i.exec(model)
+  if (other) {
+    const [, family, version, variant] = other
+    const name = family.toLowerCase() === 'gpt' ? `GPT-${version}` : `Gemini ${version}`
+    return [name, ...variant.split('-').filter(Boolean).map(capitalized)].join(' ')
+  }
+  if (model.toLowerCase() === 'gpt') return 'GPT'
   return /^[a-z]+$/i.test(model) ? capitalized(model) : model
 }
 

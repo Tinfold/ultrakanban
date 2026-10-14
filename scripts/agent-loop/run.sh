@@ -2,9 +2,11 @@
 # Part of agent-loop.sh, which sources it; the settings it uses are described there.
 
 # The tokens a run used, from claude's JSON output (every model it called, subagents included), in all and per model,
-# as the body of POST /tickets/:id/usage.
+# as the body of POST /tickets/:id/usage. Claude prices models it doesn't know (another provider's, or a local one,
+# through ANTHROPIC_BASE_URL) as if they were Opus and says so with costBasis "unknown": those costs are left out.
 read -r -d '' USAGE <<'JQ'
 def total($field): [.[] | .[$field] // 0] | add // 0;
+def cost: if .costBasis == "unknown" then null else .costUSD end;
 select(.type == "result")
 | (if (.modelUsage // {}) != {} then [.modelUsage[]] else [.usage // {} | {
     inputTokens: .input_tokens, outputTokens: .output_tokens,
@@ -13,10 +15,12 @@ select(.type == "result")
 | {agent: $agent, inputTokens: ($models | total("inputTokens")), outputTokens: ($models | total("outputTokens")),
    cacheReadTokens: ($models | total("cacheReadInputTokens")),
    cacheWriteTokens: ($models | total("cacheCreationInputTokens")),
-   costUsd: .total_cost_usd, durationMs: .duration_ms,
+   costUsd: (if any(.modelUsage // {} | .[]; .costBasis == "unknown") then [.modelUsage[] | cost // empty] | add
+     else .total_cost_usd end),
+   durationMs: .duration_ms,
    models: [.modelUsage // {} | to_entries[] | {model: .key, inputTokens: (.value.inputTokens // 0),
      outputTokens: (.value.outputTokens // 0), cacheReadTokens: (.value.cacheReadInputTokens // 0),
-     cacheWriteTokens: (.value.cacheCreationInputTokens // 0), costUsd: .value.costUSD}]}
+     cacheWriteTokens: (.value.cacheCreationInputTokens // 0), costUsd: (.value | cost)}]}
 JQ
 
 # When Claude usage resets, from claude's limit message: "... resets 2:50pm (America/New_York)", "... resets Oct 3,
@@ -101,6 +105,43 @@ inhibit_sleep() {
   ) </dev/null >/dev/null 2>&1 &
 }
 
+# A ticket's scratch directory: its runs' TMPDIR, under STATE_DIR on disk. Agents otherwise leave clones, builds and
+# test output in /tmp, which is often held in memory (tmpfs) and never cleaned up, so it ends up filling swap for good.
+# It is removed when a run on the ticket finishes (remove_scratch), and kept for the next run when the run is resumed.
+scratch_dir() { printf '%s/tmp/%s' "$STATE_DIR" "$1"; }
+
+# Creates the given ticket's scratch directory and prints it. Removes the scratch directories no run has used for 3
+# days first: those of tickets the agent no longer works, or whose run stopped and was never resumed. (A run lasts at
+# most TICKET_TIMEOUT, and each one touches its directory as it starts.)
+make_scratch() {
+  local dir
+  dir=$(scratch_dir "$1")
+  find "$STATE_DIR/tmp" -mindepth 1 -maxdepth 1 -type d -mtime +2 -exec rm -rf {} + 2>/dev/null
+  mkdir -p "$dir" && touch "$dir" && printf '%s\n' "$dir"
+}
+
+remove_scratch() { rm -rf "$(scratch_dir "$1")"; }
+
+# Stops what a run left running when it ended, such as a dev server it started in the background: every process
+# that still has the run's ULTRAKANBAN_RUN marker in its environment, including those that left its process group.
+stop_leftovers() {
+  local id=$1 run=$2 proc pid pids=() left i
+  for proc in /proc/[0-9]*; do
+    [[ -O $proc ]] && grep -qzxF "ULTRAKANBAN_RUN=$run" "$proc/environ" 2>/dev/null && pids+=("${proc#/proc/}")
+  done
+  ((${#pids[@]})) || return 0
+  log "ticket $id: stopping what its run left running: $(ps -o comm= -p "$(IFS=,; echo "${pids[*]}")" |
+    sort -u | paste -sd, -)"
+  kill -TERM "${pids[@]}" 2>/dev/null
+  for i in 1 2 3 4 5; do
+    left=()
+    for pid in "${pids[@]}"; do kill -0 "$pid" 2>/dev/null && left+=("$pid"); done
+    ((${#left[@]})) || return 0
+    sleep 1
+  done
+  kill -KILL "${left[@]}" 2>/dev/null
+}
+
 # The skills the next run gets, as arguments for claude (skill_args): only the ultrakanban skill, in the system prompt,
 # unless the board's agentAllSkills is on or the repository has skills or commands of its own.
 use_skills() {
@@ -168,7 +209,9 @@ use_docker() {
   fi
   [[ -n ${GH_TOKEN:-} ]] || GH_TOKEN=$(gh auth token 2>/dev/null) || GH_TOKEN=
   [[ -n $GH_TOKEN ]] && export GH_TOKEN && docker_args+=(--env GH_TOKEN)
-  [[ -n ${ANTHROPIC_API_KEY:-} ]] && docker_args+=(--env ANTHROPIC_API_KEY)
+  # Claude's API key, and the endpoint that serves another provider's or a local model and its token
+  # (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN), when they are set.
+  while read -r name; do docker_args+=(--env "$name"); done < <(compgen -e | grep '^ANTHROPIC_')
   read -r -a extra <<<"${DOCKER_ARGS:-}"
   docker_args+=(${extra[@]+"${extra[@]}"} "$DOCKER_IMAGE")
 }
@@ -182,7 +225,7 @@ container() { printf 'ultrakanban-%s-%s-%s' "$BOARD" "$1" "$$"; }
 # it used. Returns claude's exit status. If someone takes the ticket away from the agent meanwhile, the run is stopped
 # and claude_stopped says why (it is empty otherwise).
 run_claude() {
-  local id=$1 prompt=$2 output errors stopped code usage response
+  local id=$1 prompt=$2 output errors stopped code usage response scratch= run
   shift 2
   output=$(mktemp) && errors=$(mktemp) && stopped=$(mktemp) || return 1
   use_skills
@@ -191,9 +234,20 @@ run_claude() {
     rm -f "$output" "$errors" "$stopped"
     return 1
   fi
+  # A run in a container has its own /tmp, which goes with the container.
+  if ! ((${#docker_args[@]})) && scratch=$(make_scratch "$id"); then
+    prompt+="
+
+Put scratch files (clones, builds, test output, screenshots) in \$TMPDIR ($scratch), not in /tmp: /tmp may be held \
+in memory and is never cleaned up. \$TMPDIR is on disk, and the loop empties it once the ticket's run finishes."
+  fi
+  run=$(new_session_id)
   (
     # Without the ticket lock's descriptor: anything claude leaves running mustn't keep the ticket locked.
     if [[ -n $lock_fd ]]; then exec {lock_fd}>&-; fi
+    # The marker stop_leftovers looks for, inherited by everything the run starts.
+    export ULTRAKANBAN_RUN=$run
+    if [[ -n $scratch ]]; then export TMPDIR=$scratch; fi
     exec timeout --foreground "$TICKET_TIMEOUT" ${docker_args[@]+"${docker_args[@]}"} claude -p ${claude_args[@]+"${claude_args[@]}"} \
       ${skill_args[@]+"${skill_args[@]}"} --model "$model" --effort "$effort" --output-format json "$@"
   ) <<<"$prompt" >"$output" 2>"$errors" &
@@ -208,6 +262,7 @@ run_claude() {
   end_run "$id"
   # A container whose docker client was killed would go on running.
   if ((${#docker_args[@]})); then "$DOCKER" rm --force "$(container "$id")" >/dev/null 2>&1; fi
+  stop_leftovers "$id" "$run"
   running= watcher=
   claude_stopped=$(<"$stopped")
   claude_errors=$(<"$errors")
@@ -289,12 +344,14 @@ The repository is checked out on $branch, freshly updated from origin$(
   fi
   if [[ $code == 0 ]]; then
     write_state "$id" "$snapshot"
+    remove_scratch "$id"
     return 0
   fi
   if [[ -n $claude_stopped ]]; then
     # Someone took the ticket away from the agent, so this isn't a failure. The next round puts it back in the queue
     # (see requeue) or forgets it.
     update_state "$id" 'del(.session)'
+    remove_scratch "$id"
     note "$id" "Stopped the agent's run on this ticket: $claude_stopped."
     return 0
   fi
@@ -302,6 +359,7 @@ The repository is checked out on $branch, freshly updated from origin$(
     # The session is gone (e.g. claude's history was cleared): start a new one next round, and don't count a failure.
     log "can't resume the session of the previous run on $id; starting a new one"
     update_state "$id" 'del(.session)'
+    remove_scratch "$id"
     return 0
   fi
   log "claude exited with status $code on $id"
@@ -318,6 +376,9 @@ ticket until $(date -d "@$paused_until" '+%-I:%M%P %Z on %b %-d'), then resumes 
   fi
   if [[ $code == 124 ]]; then
     why="it ran longer than the $TICKET_TIMEOUT timeout (TICKET_TIMEOUT) and was stopped"
+  elif [[ $code == 137 ]]; then
+    why="claude was killed (SIGKILL), most likely by the kernel for running out of memory: the machine's, or what \
+the agents may use together (app-ultrakanban.slice, see docs/agents.md)"
   else
     why="claude exited with status $code"
     [[ -n $claude_result ]] && why+=". Its last output: \"$(tail -n 1 <<<"$claude_result" | cut -c 1-300)\""
@@ -325,6 +386,7 @@ ticket until $(date -d "@$paused_until" '+%-I:%M%P %Z on %b %-d'), then resumes 
   write_state "$id" "$(read_state "$id" | jq -c --arg fp "$fingerprint" --argjson now "$(date +%s)" \
     --argjson ci "$ci_runs" '. + {failures: (if .failedFor == $fp then (.failures // 0) + 1 else 1 end),
       failedAt: $now, failedFor: $fp, ciRuns: $ci} | del(.session) | if $ci == 0 then del(.capNoted) else . end')"
+  remove_scratch "$id"
   note "$id" "Agent run failed: $why. It is retried with backoff, up to $MAX_ATTEMPTS runs in a row; after that, \
 new feedback such as a ticket comment retries it."
 }
@@ -340,4 +402,12 @@ POST $KANBAN/api/tickets/<id>/checklist/<index> (0-based) instead of editing the
 End every pull request comment, review and inline reply you post with this exact line, so the loop doesn't mistake
 your own replies for feedback:
 $MARKER"
+  # The board's description holds conventions for every ticket on it, so each run gets it rather than having to look.
+  local description
+  description=$(get "/boards/$BOARD" | jq -r '.board.description // "" | gsub("^\\s+|\\s+$"; "")') || description=
+  [[ -z $description ]] || printf '%s' "
+
+The board's description (its conventions for every ticket on it; follow them unless the ticket says otherwise):
+
+$description"
 }
