@@ -35,9 +35,9 @@ import {
 
 /**
  * What the agent supervisor does on the host: updating and restarting ultrakanban itself (see `AppUpdate`), reading
- * how much Claude usage is left (see `ClaudeUsage`, with the share of it agents leave to people), the disk space of the boards' agents (see `AgentDiskUsage`), and
- * the agents' logins (see `AgentHost`), and switching every board's agents off and on (see `AgentServices`); and the
- * Setup page.
+ * how much Claude usage is left (see `ClaudeUsage`, with how much of it agents leave to people), the disk space of the
+ * boards' agents (see `AgentDiskUsage`), and the agents' logins (see `AgentHost`), and switching every board's agents
+ * off and on (see `AgentServices`); and the Setup page.
  */
 export const systemRoutes = ({ pullRequests: { github } }: AppServices) => {
   const setupStatus = async (): Promise<SetupStatus> => ({
@@ -75,8 +75,8 @@ export const systemRoutes = ({ pullRequests: { github } }: AppServices) => {
         return c.json(transaction(() => reportClaudeUsage(input)))
       })
       .put('/claude-usage/reserve', async (c) => {
-        const { reservePercent } = await readJson(c, setUsageReserveSchema)
-        return c.json(transaction(() => setUsageReserve(reservePercent)))
+        const input = await readJson(c, setUsageReserveSchema)
+        return c.json(transaction(() => setUsageReserve(input)))
       })
       .post('/disk-usage', async (c) => {
         const input = await readJson(c, reportDiskUsageSchema)

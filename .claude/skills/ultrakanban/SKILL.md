@@ -70,9 +70,9 @@ curl -s -X POST $KANBAN/api/boards/$BOARD/tickets/claim-next \
 
 Only one agent can win a ticket. `404 no_ticket_available` means there is nothing to do: stop and report that.
 It skips blocked tickets: tagged `blocked`, waiting for an unfinished ticket (`blocked by #12`, `depends on #12`), or
-with unfinished sub-tickets, and tickets whose runs used up their budget.
-`404 usage_reserve_reached` means the rest of the week's Claude usage is kept for people: don't claim anything else
-(not even a specific ticket); stop and report the message.
+with unfinished sub-tickets.
+`404 usage_reserve_reached` means the rest of the week's or the session's Claude usage is kept for people: don't claim
+anything else (not even a specific ticket); stop and report the message.
 To work a specific ticket instead, use `POST /api/tickets/$TICKET/claim` with the same body minus `column`.
 
 ## 2. Read the ticket and its comments
@@ -202,7 +202,7 @@ stop there. A human has to fix CI.
 | `409 pull_request_not_merged` | You tried to move a ticket into the done column. Don't; the merge does it. |
 | `409 awaiting_approval`       | The ticket's plan waits for approval. Stop, and don't work it until then.  |
 | `404 no_ticket_available`     | Nothing to claim right now.                                                |
-| `404 usage_reserve_reached`   | The week's Claude usage is kept for people. Stop and report it.            |
+| `404 usage_reserve_reached`   | Claude usage is kept for people. Stop and report it.                       |
 | `415 unsupported_media_type`  | Attachments must be PNG, JPEG, GIF, WebP, MP4 or WebM.                     |
 
 ## Creating tickets

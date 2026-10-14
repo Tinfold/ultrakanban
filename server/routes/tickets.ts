@@ -25,7 +25,6 @@ import { newId, transaction } from '../db.ts'
 import { badRequest, gitHubFailure, HttpError } from '../errors.ts'
 import type { GitHubClient } from '../github.ts'
 import { actorOf, errorBody, readJson } from '../http.ts'
-import { budgetMessage } from '../notifications.ts'
 import { listActivity } from '../store/activity.ts'
 import { createAttachment, listAttachments } from '../store/attachments.ts'
 import {
@@ -198,22 +197,10 @@ export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles, notifi
     .get('/:ticketId/usage', (c) => c.json(listUsage(c.req.param('ticketId'))))
     .post('/:ticketId/usage', async (c) => {
       const input = await readJson(c, recordUsageSchema)
-      const ticketId = c.req.param('ticketId')
-      const { usage, ticket, wasOver } = transaction(() => {
-        const wasOver = getTicket(ticketId).budget?.over ?? false
-        const usage = recordUsage(ticketId, input)
-        return { usage, ticket: getTicket(ticketId), wasOver }
-      })
-      // The run that takes the ticket over its budget; the budget in the key tells a raised one going over apart.
-      if (ticket.budget?.over && !wasOver) {
-        notifier.notify(
-          ticket,
-          'budget',
-          `budget:${ticket.budget.limitUsd}`,
-          budgetMessage(ticket.budget, ticket.budgetUsd !== null),
-        )
-      }
-      return c.json(usage, 201)
+      return c.json(
+        transaction(() => recordUsage(c.req.param('ticketId'), input)),
+        201,
+      )
     })
     .get('/:ticketId/runs', (c) => {
       const { limit } = listRunsQuerySchema.parse({ limit: c.req.query('limit') })

@@ -1,5 +1,5 @@
 import { differenceInCalendarDays, format, formatDistanceStrict, isThisYear, parseISO } from 'date-fns'
-import { BUDGET_WARNING_SHARE, type RunRecord, type TicketBudget, type TicketUsage } from '@shared/domain'
+import type { RunRecord, TicketUsage } from '@shared/domain'
 
 export const toISODate = (date: Date) => format(date, 'yyyy-MM-dd')
 
@@ -113,21 +113,6 @@ export function formatRunTotals(run: Pick<RunRecord, 'durationMs' | 'turns' | 'c
     .filter(Boolean)
     .join(' · ')
 }
-
-/** How much of a ticket's budget its runs cost: `over` once used up, `near` from `BUDGET_WARNING_SHARE` of it on. */
-export function budgetLevel({ spentUsd, limitUsd, over }: TicketBudget): 'under' | 'near' | 'over' {
-  return over ? 'over' : spentUsd >= limitUsd * BUDGET_WARNING_SHARE ? 'near' : 'under'
-}
-
-/** Text colors for a ticket's cost by `budgetLevel`: amber when nearly used up, red once it is. */
-export const BUDGET_STYLES: Record<ReturnType<typeof budgetLevel>, string> = {
-  under: '',
-  near: 'text-amber-600 dark:text-amber-400',
-  over: 'text-red-600 dark:text-red-400',
-}
-
-/** A ticket's cost against its budget, e.g. `$4.12 of $5.00`. */
-export const formatBudget = (budget: TicketBudget) => `${formatCost(budget.spentUsd)} of ${formatCost(budget.limitUsd)}`
 
 /**
  * Readable model name, e.g. `Opus 5.5` for `claude-opus-5-5`, `Haiku 4.5` for `claude-haiku-4-5-20251001` and `Opus`

@@ -1,10 +1,5 @@
-import {
-  CLAUDE_USAGE_FRESH_MINUTES,
-  type ClaudeUsage,
-  type ClaudeUsageLimit,
-  isWeeklyLimit,
-} from '../../shared/domain.ts'
-import type { ReportClaudeUsageInput } from '../../shared/schemas.ts'
+import { CLAUDE_USAGE_FRESH_MINUTES, type ClaudeUsage, type ClaudeUsageLimit, reserveFor } from '../../shared/domain.ts'
+import type { ReportClaudeUsageInput, SetUsageReserveInput } from '../../shared/schemas.ts'
 import { now, sql } from '../db.ts'
 
 interface ClaudeUsageRow {
@@ -12,29 +7,37 @@ interface ClaudeUsageRow {
   plan: string | null
   limits: string
   error: string | null
-  reserve_percent: number | null
+  week_reserve_percent: number | null
+  session_reserve_percent: number | null
 }
 
+/** When a limit resets; never for one that isn't running (no reset time). */
+const resetTime = (limit: ClaudeUsageLimit) => (limit.resetsAt === null ? Infinity : Date.parse(limit.resetsAt))
+
+/** Whether the limit `a` lifts after `b`: it resets later, or at the same time and is more used. */
+const liftsAfter = (a: ClaudeUsageLimit, b: ClaudeUsageLimit) =>
+  resetTime(a) > resetTime(b) || (resetTime(a) === resetTime(b) && a.percent > b.percent)
+
 /**
- * The weekly limit that holds agents back with the usage reserve at `at` (see `ClaudeUsage.reserveReached`): the most
- * used of the weekly limits that haven't reset since the report, when the report is fresh and that one is at or over
- * the reserve. A stale or missing report never holds them back, so agents don't stop with a supervisor that did.
+ * The limit that holds agents back with the usage reserve at `at` (see `ClaudeUsage.reserveReached`): of the limits at
+ * or over their reserve that haven't reset since the report, the one that lifts last, when the report is fresh. A
+ * stale or missing report never holds them back, so agents don't stop with a supervisor that did.
  */
 export function reserveReached(
-  { reportedAt, limits, reservePercent }: Pick<ClaudeUsage, 'reportedAt' | 'limits' | 'reservePercent'>,
+  { reportedAt, limits, reserve }: Pick<ClaudeUsage, 'reportedAt' | 'limits' | 'reserve'>,
   at = Date.now(),
 ): ClaudeUsageLimit | null {
-  if (reservePercent === null || !reportedAt) return null
-  if (Date.parse(reportedAt) < at - CLAUDE_USAGE_FRESH_MINUTES * 60_000) return null
-  // Past its reset time a limit starts again from nothing, even before the next report says so.
-  const running = limits.filter(
-    (limit) => isWeeklyLimit(limit) && (limit.resetsAt === null || Date.parse(limit.resetsAt) > at),
-  )
-  const most = running.reduce<ClaudeUsageLimit | null>(
-    (highest, limit) => (highest === null || limit.percent > highest.percent ? limit : highest),
+  if (!reportedAt || Date.parse(reportedAt) < at - CLAUDE_USAGE_FRESH_MINUTES * 60_000) return null
+  const reached = limits.filter((limit) => {
+    const percent = reserveFor(limit, reserve)
+    // Past its reset time a limit starts again from nothing, even before the next report says so.
+    const running = limit.resetsAt === null || Date.parse(limit.resetsAt) > at
+    return percent !== null && running && limit.percent >= percent
+  })
+  return reached.reduce<ClaudeUsageLimit | null>(
+    (last, limit) => (last === null || liftsAfter(limit, last) ? limit : last),
     null,
   )
-  return most && most.percent >= reservePercent ? most : null
 }
 
 function toClaudeUsage(row: ClaudeUsageRow): ClaudeUsage {
@@ -43,16 +46,21 @@ function toClaudeUsage(row: ClaudeUsageRow): ClaudeUsage {
     plan: row.plan,
     limits: JSON.parse(row.limits) as ClaudeUsageLimit[],
     error: row.error,
-    reservePercent: row.reserve_percent,
+    reserve: { week: row.week_reserve_percent, session: row.session_reserve_percent },
   }
   return { ...usage, reserveReached: reserveReached(usage) }
 }
 
 export const getClaudeUsage = () => toClaudeUsage(sql.get<ClaudeUsageRow>('SELECT * FROM claude_usage WHERE id = 1')!)
 
-/** Sets the usage reserve (see `ClaudeUsage.reservePercent`); null switches it off. */
-export function setUsageReserve(reservePercent: number | null): ClaudeUsage {
-  sql.run('UPDATE claude_usage SET reserve_percent = ? WHERE id = 1', reservePercent)
+/** Sets the usage reserve of the week, the current session or both (see `ClaudeUsageReserve`); null switches it off. */
+export function setUsageReserve({ week, session }: SetUsageReserveInput): ClaudeUsage {
+  const current = getClaudeUsage().reserve
+  sql.run(
+    'UPDATE claude_usage SET week_reserve_percent = ?, session_reserve_percent = ? WHERE id = 1',
+    week === undefined ? current.week : week,
+    session === undefined ? current.session : session,
+  )
   return getClaudeUsage()
 }
 

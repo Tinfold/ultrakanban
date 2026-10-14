@@ -382,13 +382,10 @@ const MIGRATIONS = [
   ALTER TABLE tickets ADD COLUMN auto_merge_since TEXT;
   `,
   `
-  -- The usage reserve (see ClaudeUsage): once a weekly limit of the Claude plan is used to this percent, agents claim
-  -- no new tickets, leaving the rest of the week to the user. Off when NULL.
-  ALTER TABLE claude_usage ADD COLUMN reserve_percent INTEGER;
-  -- Most the agent runs on a ticket may cost, in estimated US dollars (see TicketBudget): the board's default for its
-  -- tickets, and a ticket's own (NULL: the board's). No cap when both are NULL.
-  ALTER TABLE boards ADD COLUMN ticket_budget_usd REAL;
-  ALTER TABLE tickets ADD COLUMN budget_usd REAL;
+  -- The usage reserve (see ClaudeUsageReserve): once a weekly limit of the Claude plan, or the current session, is used
+  -- to this percent, agents claim no new tickets, leaving the rest to the user. Off when NULL.
+  ALTER TABLE claude_usage ADD COLUMN week_reserve_percent INTEGER;
+  ALTER TABLE claude_usage ADD COLUMN session_reserve_percent INTEGER;
   `,
 ]
 

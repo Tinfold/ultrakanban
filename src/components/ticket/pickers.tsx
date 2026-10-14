@@ -7,7 +7,7 @@ import {
   PlusIcon,
   UserRoundXIcon,
 } from 'lucide-react'
-import { type FormEvent, type ReactNode, useId, useState } from 'react'
+import { type ReactNode, useState } from 'react'
 import {
   AGENT_DEFAULTS,
   AGENT_EFFORTS,
@@ -21,8 +21,6 @@ import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import {
   DropdownMenu,
@@ -35,7 +33,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useActor } from '@/hooks/use-actor'
 import { swatch } from '@/lib/colors'
-import { boardDockerLabel, dockerLabel, formatCost, parseISODate, toISODate } from '@/lib/format'
+import { boardDockerLabel, dockerLabel, parseISODate, toISODate } from '@/lib/format'
 import { PRIORITIES_DESC, PRIORITY_LABELS } from '@/lib/priority'
 import { cn } from '@/lib/utils'
 import { useBoardContext } from '../board/board-context'
@@ -160,73 +158,6 @@ export function DockerPicker({ value, onChange, children }: PickerProps<boolean 
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>
-  )
-}
-
-/**
- * The most a ticket's agent runs may cost, in US dollars; `null` follows the board's `ticketBudgetUsd`. Amounts are
- * kept to the cent, from one up.
- */
-export function BudgetPicker({ value, onChange, children }: PickerProps<number | null>) {
-  const { detail } = useBoardContext()
-  const id = useId()
-  const [open, setOpen] = useState(false)
-  const [amount, setAmount] = useState('')
-  const boardBudget = detail.board.ticketBudgetUsd
-  const cents = Math.round(Number(amount) * 100)
-
-  const select = (next: number | null) => {
-    onChange(next)
-    setOpen(false)
-  }
-  const submit = (event: FormEvent) => {
-    event.preventDefault()
-    if (cents >= 1) select(cents / 100)
-  }
-
-  return (
-    <Popover
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next)
-        if (next) setAmount(value === null ? '' : String(value))
-      }}
-    >
-      <PopoverTrigger asChild>{children}</PopoverTrigger>
-      <PopoverContent align="start" className="w-72">
-        <form onSubmit={submit} className="grid gap-2">
-          <Label htmlFor={id}>Budget for this ticket</Label>
-          <div className="flex items-center gap-2">
-            <span className="text-muted-foreground">$</span>
-            <Input
-              id={id}
-              type="number"
-              inputMode="decimal"
-              min={0.01}
-              step={0.01}
-              value={amount}
-              onChange={(event) => setAmount(event.target.value)}
-              placeholder={boardBudget === null ? 'No cap' : String(boardBudget)}
-              className="h-8"
-              autoFocus
-            />
-            <Button type="submit" size="sm" disabled={!(cents >= 1)}>
-              Set
-            </Button>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Once its runs cost this much (estimated), agents don’t claim it and the agent loop starts no more runs on
-            it. It is checked before each run, so the run that uses it up can go over.
-          </p>
-        </form>
-        {value !== null && (
-          <Button variant="ghost" size="sm" className="justify-start" onClick={() => select(null)}>
-            <CircleOffIcon />
-            {boardBudget === null ? 'No budget (board has none)' : `Board default (${formatCost(boardBudget)})`}
-          </Button>
-        )}
-      </PopoverContent>
-    </Popover>
   )
 }
 

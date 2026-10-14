@@ -7,7 +7,6 @@ import {
   parsePullRequestUrl,
   type Tag,
   type Ticket,
-  ticketBudget,
 } from '@shared/domain'
 import { pendingDeletes } from './pending-deletes'
 
@@ -32,7 +31,6 @@ export type BoardPatch = Partial<
     | 'archiveDoneDays'
     | 'approvalSize'
     | 'notifyUrl'
-    | 'ticketBudgetUsd'
   >
 >
 export type TicketPatch = Partial<
@@ -46,7 +44,6 @@ export type TicketPatch = Partial<
     | 'agentEffort'
     | 'agentModel'
     | 'agentDocker'
-    | 'budgetUsd'
     | 'tagIds'
     | 'epicId'
   >
@@ -61,30 +58,20 @@ const defined = <T extends object>(patch: T) =>
 
 const byPosition = (a: { position: number }, b: { position: number }) => a.position - b.position
 
-/** A ticket with its budget worked out again from its own and its board's caps (see `ticketBudget`). */
-const withBudget = (ticket: Ticket, board: BoardSummary): Ticket => ({
-  ...ticket,
-  budget: ticketBudget(ticket.budgetUsd ?? board.ticketBudgetUsd, ticket.usage.costUsd),
+export const patchBoard = (detail: BoardDetail, patch: BoardPatch): BoardDetail => ({
+  ...detail,
+  board: { ...detail.board, ...defined(patch) },
 })
-
-export function patchBoard(detail: BoardDetail, patch: BoardPatch): BoardDetail {
-  const board = { ...detail.board, ...defined(patch) }
-  const tickets = patch.ticketBudgetUsd === undefined ? detail.tickets : detail.tickets.map((t) => withBudget(t, board))
-  return { ...detail, board, tickets }
-}
 
 export const addTicket = (detail: BoardDetail, ticket: Ticket): BoardDetail => ({
   ...detail,
   tickets: [...detail.tickets.filter((existing) => existing.id !== ticket.id), ticket],
 })
 
-export function patchTicket(detail: BoardDetail, ticketId: string, patch: TicketPatch): BoardDetail {
-  const patched = (ticket: Ticket) => {
-    const next = { ...ticket, ...defined(patch) }
-    return patch.budgetUsd === undefined ? next : withBudget(next, detail.board)
-  }
-  return { ...detail, tickets: detail.tickets.map((ticket) => (ticket.id === ticketId ? patched(ticket) : ticket)) }
-}
+export const patchTicket = (detail: BoardDetail, ticketId: string, patch: TicketPatch): BoardDetail => ({
+  ...detail,
+  tickets: detail.tickets.map((ticket) => (ticket.id === ticketId ? { ...ticket, ...defined(patch) } : ticket)),
+})
 
 /** Links a pull request whose state is not known until the server has checked GitHub. */
 export function linkPullRequest(detail: BoardDetail, ticketId: string, url: string | null): BoardDetail {
