@@ -271,6 +271,7 @@ interface BoardSummary {
   archiveDoneDays: number | null // days in the done column after which tickets are archived, 1-3650 (never when null)
   approvalSize: 'S' | 'M' | 'L' | null // smallest estimate at which the agent waits for approval of its plan (never when null)
   notifyUrl: string | null // where to notify people when a ticket needs them: ntfy, Discord or webhook URL (see Boards)
+  agentCleanupRequestedAt: string | null // when someone last asked its agent to clear its build output (see Disk usage)
   ticketCount: number
   createdAt: string
   updatedAt: string
@@ -693,6 +694,32 @@ endpoint's answer as it is (the board picks the limits out of it), `error` says 
 The agent supervisor measures the disk space of each board's agent folder where the agents run and reports it (204)
 with `POST /system/disk-usage` and `{ boards: { boardId, repo, worktrees, state }[] }`, in bytes. Each report replaces
 the last one. The overview shows it (see `disk` above).
+
+A board's **Disk usage** dialog (in its menu) shows what it is made of and frees some:
+
+| Method | Path                                   | Body                 | Returns                       |
+| ------ | -------------------------------------- | -------------------- | ----------------------------- |
+| GET    | `/boards/:boardId/disk-usage`          |                      | `BoardDiskBreakdown`          |
+| POST   | `/boards/:boardId/attachments/cleanup` | `{ olderThanDays? }` | `{ count, bytes }` it deleted |
+| POST   | `/boards/:boardId/agent-cleanup`       |                      | `BoardSummary`                |
+
+```ts
+interface BoardDiskBreakdown {
+  attachments: {
+    images: { count: number; bytes: number } // screenshots: PNG, JPEG, GIF, WebP
+    videos: { count: number; bytes: number } // screen recordings: MP4, WebM
+    finished: { count: number; bytes: number } // those of finished tickets, which the cleanup deletes
+    tickets: { ticketId: string; number: number; title: string; finished: boolean; count: number; bytes: number }[] // the 10 largest
+  }
+  agent: AgentDiskUsage | null // its agent folder (see `disk` in the overview)
+}
+```
+
+A finished ticket is one in the board's done column (its last column if it has none) or its Cancelled column.
+`attachments/cleanup` deletes the attachments of finished tickets, with `olderThanDays` (1-3650) only those uploaded
+more than that many days ago, files included. `agent-cleanup` sets the board's `agentCleanupRequestedAt` and wakes its
+agent: each of its loops then removes its checkout's ignored files (build output such as `node_modules/` or
+`target/`) before its next run, right away when idle, never during a run (see `MAX_BUILD_GB` in docs/agents.md).
 
 ## Setup
 

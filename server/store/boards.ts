@@ -27,6 +27,7 @@ interface BoardRow {
   archive_done_days: number | null
   approval_size: TicketSize | null
   notify_url: string | null
+  agent_cleanup_requested_at: string | null
   ticket_count: number
   created_at: string
   updated_at: string
@@ -56,6 +57,7 @@ const toBoard = (row: BoardRow): BoardSummary => ({
   archiveDoneDays: row.archive_done_days,
   approvalSize: row.approval_size,
   notifyUrl: row.notify_url,
+  agentCleanupRequestedAt: row.agent_cleanup_requested_at,
   ticketCount: row.ticket_count,
   createdAt: row.created_at,
   updatedAt: row.updated_at,

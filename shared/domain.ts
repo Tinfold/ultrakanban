@@ -328,6 +328,11 @@ export interface BoardSummary {
    * is ready to merge): an ntfy topic, a Discord webhook or any other webhook URL. Nothing is sent when not set.
    */
   notifyUrl: string | null
+  /**
+   * When someone last asked the board's agent loops to clear their checkouts' build output (`POST
+   * /boards/:id/agent-cleanup`); each loop does it before its next run, or at once when idle. Null if never asked.
+   */
+  agentCleanupRequestedAt: string | null
   ticketCount: number
   createdAt: string
   updatedAt: string
@@ -710,6 +715,43 @@ export interface BoardDiskUsage {
   /** Its agent's folder where the agents run; null if the agent supervisor hasn't measured one. */
   agent: AgentDiskUsage | null
 }
+
+/** A number of attachments and the bytes they take. */
+export interface AttachmentBytes {
+  count: number
+  bytes: number
+}
+
+/** A ticket's attachments, in a board's disk usage. */
+export interface TicketAttachmentBytes extends AttachmentBytes {
+  ticketId: string
+  number: number
+  title: string
+  /** Whether the ticket is finished: in the done column or the Cancelled one. */
+  finished: boolean
+}
+
+/** What a board's disk space is made of (`GET /boards/:id/disk-usage`), in bytes. */
+export interface BoardDiskBreakdown {
+  attachments: {
+    /** Screenshots: PNG, JPEG, GIF and WebP. */
+    images: AttachmentBytes
+    /** Screen recordings: MP4 and WebM. */
+    videos: AttachmentBytes
+    /** Those of finished tickets (in the done or Cancelled column), which `POST /boards/:id/attachments/cleanup` deletes. */
+    finished: AttachmentBytes
+    /** The tickets whose attachments take the most space, largest first (at most `DISK_USAGE_TICKETS`). */
+    tickets: TicketAttachmentBytes[]
+  }
+  /** The board's agent folder where the agents run; null if the agent supervisor hasn't measured one. */
+  agent: AgentDiskUsage | null
+}
+
+/** How many of the largest tickets a board's disk usage lists. */
+export const DISK_USAGE_TICKETS = 10
+
+/** What `POST /boards/:id/attachments/cleanup` deleted. */
+export type AttachmentCleanup = AttachmentBytes
 
 /** How an activity entry counts in the overview's timeline. */
 export type OverviewEventKind = 'created' | 'completed' | 'comment' | 'update'

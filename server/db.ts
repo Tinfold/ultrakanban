@@ -325,6 +325,10 @@ const MIGRATIONS = [
   ALTER TABLE app_update ADD COLUMN commit_sha TEXT;
   ALTER TABLE app_update ADD COLUMN ahead INTEGER;
   `,
+  `
+  -- When someone last asked the board's agent loops to clear their checkouts' build output (see BoardSummary).
+  ALTER TABLE boards ADD COLUMN agent_cleanup_requested_at TEXT;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

@@ -6,8 +6,10 @@ import type {
   AppUpdate,
   ApiErrorBody,
   Attachment,
+  AttachmentCleanup,
   ClaudeUsage,
   BoardDetail,
+  BoardDiskBreakdown,
   BoardSummary,
   Column,
   Epic,
@@ -132,6 +134,10 @@ export const api = {
     return request<Attachment>('POST', `/tickets/${ticketId}/attachments`, form)
   },
   deleteAttachment: (attachmentId: string) => request<void>('DELETE', `/attachments/${attachmentId}`),
+  diskUsage: (boardId: string) => request<BoardDiskBreakdown>('GET', `/boards/${boardId}/disk-usage`),
+  cleanUpAttachments: (boardId: string, olderThanDays: number | null) =>
+    request<AttachmentCleanup>('POST', `/boards/${boardId}/attachments/cleanup`, { olderThanDays }),
+  requestAgentCleanup: (boardId: string) => request<BoardSummary>('POST', `/boards/${boardId}/agent-cleanup`),
   addComment: (ticketId: string, body: string, pullRequest = false) =>
     request<Activity>('POST', `/tickets/${ticketId}/comments`, { body, pullRequest }),
   mergePlan: (boardId: string) => request<MergePlan>('GET', `/boards/${boardId}/merge-plan`),
