@@ -5,6 +5,14 @@
 # of its head commit (ci_status) or null, pull request comments, reviews and inline comments (GitHub REST), and its
 # saved state. Prints the snapshot to save after a successful run, the items to hand over, their fingerprint,
 # whether to run now (backoff after failures), and which notes to leave (CI not running, CI run cap reached).
+#
+# The board wakes the loop up for the same ticket activity this counts as human feedback (comments, moves into the
+# in-progress column and approved plans by anyone but the agent; see wakeForFeedback in server/store/tickets.ts), so
+# keep the two in step.
+#
+# After a person stopped a run on the ticket (the state's `stopped`, that run's snapshot), it doesn't run again until
+# there is human feedback that run wasn't handed: a comment, a move or an approval on the ticket, or pull request
+# feedback, newer than the snapshot. Then it hands over everything new as usual, that feedback included.
 read -r -d '' TRIAGE <<'JQ'
 def bot: (.user.type // "") == "Bot" or ((.user.login // "") | endswith("[bot]"));
 def feedback: (bot | not) and ((.body // "") | contains($marker) | not);
@@ -17,26 +25,30 @@ def clip: if length > 2000 then .[:2000] + " [...]" else . end;
 | (($ci.code // []) - $handedOver) as $newFailures
 | (if $p.mergeable == "CONFLICTING" or $p.mergeStateStatus == "DIRTY" then "\($p.headRefOid):\($p.baseRefOid)"
    else "" end) as $conflict
-| [ ($activity[] | select(.type == "comment" and .id > ($s.activity // 0) and (.actor | ours | not))
+# The human feedback above the given watermarks (a snapshot's activity, issue, review and inline ids).
+| def human($w): [
+    ($activity[] | select(.type == "comment" and .id > ($w.activity // 0) and (.actor | ours | not))
       | {key: "t\(.id)", text: "Ticket comment from \(.actor):\n\(.data.body // "" | clip)"}),
-    ($activity[] | select(.type == "moved" and .id > ($s.activity // 0) and (.actor | ours | not))
+    ($activity[] | select(.type == "moved" and .id > ($w.activity // 0) and (.actor | ours | not))
       | select((.data.to // "" | ascii_downcase) == ($working | ascii_downcase))
       | {key: "t\(.id)", text: ("\(.actor) moved the ticket from \(.data.from) to \(.data.to):\n"
          + "They want more work on it. Look for what in their comments on the ticket and the pull request. If they "
          + "don't say, ask them in a ticket comment and leave the ticket in \(.data.to).")}),
-    ($activity[] | select(.type == "approved" and .id > ($s.activity // 0) and (.actor | ours | not))
+    ($activity[] | select(.type == "approved" and .id > ($w.activity // 0) and (.actor | ours | not))
       | {key: "t\(.id)", text: ("\(.actor) approved your plan:\n"
          + "Go on with the work you planned, and take the ticket through to review.")}),
-    ($issue[] | select(.id > ($s.issue // 0) and feedback)
+    ($issue[] | select(.id > ($w.issue // 0) and feedback)
       | {key: "i\(.id)", text: "Pull request comment from \(.user.login) (\(.html_url)):\n\(.body // "" | clip)"}),
-    ($reviews[] | select(.id > ($s.review // 0) and feedback and .state != "PENDING")
+    ($reviews[] | select(.id > ($w.review // 0) and feedback and .state != "PENDING")
       | select(.state != "COMMENTED" or (.body // "") != "")
       | {key: "r\(.id)",
          text: "Pull request review (\(.state)) from \(.user.login) (\(.html_url)):\n\(.body // "" | clip)"}),
-    ($inline[] | select(.id > ($s.inline // 0) and feedback)
+    ($inline[] | select(.id > ($w.inline // 0) and feedback)
       | {key: "c\(.id)", text: ("Inline review comment from \(.user.login) "
          + "on \(.path):\(.line // .original_line // "?") (\(.html_url)):\n\(.body // "" | clip)")})
-  ] as $human
+  ];
+human($s) as $human
+| ($s.stopped | if type == "object" then human(.) != [] else true end) as $resumable
 | [ if $newFailures != [] then
       {key: "checks \($ci.sha):\($newFailures | join(","))",
        text: "Failing checks on \($ci.sha[:7]): \($newFailures | join(", "))"}
@@ -72,7 +84,7 @@ def clip: if length > 2000 then .[:2000] + " [...]" else . end;
     capNote: $capNote
   }
 | .fingerprint = (.items | map(.key) | join(" "))
-| .run = (.items != [] and (($s.failedFor // null) != .fingerprint or (($s.failures // 0) < $max
+| .run = ($resumable and .items != [] and (($s.failedFor // null) != .fingerprint or (($s.failures // 0) < $max
     and $now >= ($s.failedAt // 0) + $retry * pow(2; ($s.failures // 1) - 1))))
 JQ
 

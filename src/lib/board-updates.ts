@@ -73,6 +73,16 @@ export const patchTicket = (detail: BoardDetail, ticketId: string, patch: Ticket
   tickets: detail.tickets.map((ticket) => (ticket.id === ticketId ? { ...ticket, ...defined(patch) } : ticket)),
 })
 
+/** Marks the run working the ticket as asked to stop by `by`, unless someone already asked; nothing without a run. */
+export const requestStop = (detail: BoardDetail, ticketId: string, by: string): BoardDetail => ({
+  ...detail,
+  tickets: detail.tickets.map((ticket) =>
+    ticket.id === ticketId && ticket.run && !ticket.run.stopRequested
+      ? { ...ticket, run: { ...ticket.run, stopRequested: { at: new Date().toISOString(), by } } }
+      : ticket,
+  ),
+})
+
 /** Links a pull request whose state is not known until the server has checked GitHub. */
 export function linkPullRequest(detail: BoardDetail, ticketId: string, url: string | null): BoardDetail {
   const parsed = url === null ? null : parsePullRequestUrl(url)

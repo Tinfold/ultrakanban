@@ -42,6 +42,15 @@
 # say what the run is doing (working the ticket, or the feedback it answers), and the loop tells the board when the run
 # ends, so the ticket's card shows the run while it goes on.
 #
+# People can also stop a run without taking the ticket away, to give the agent new instructions (the Stop button,
+# POST /tickets/:id/stop). The same check of the ticket sees that and stops the run, but keeps its session and its
+# unfinished work as for a run cut short by a restart (see below), and doesn't count a failure. The ticket then waits
+# for feedback the stopped run wasn't given, such as a comment (one posted just before the stop counts), and its next
+# run resumes the stopped session with that feedback.
+#
+# The board wakes the loop up from its idle wait when someone gives feedback on one of its tickets (a comment, an
+# approved plan, a move into the in-progress column), so the agent answers within seconds rather than IDLE_SECONDS.
+#
 # Before each run the loop takes a snapshot of what it hands over: the newest ticket activity id, the newest pull
 # request comment, review and inline comment ids, and the failing checks and conflict state of the pull request's
 # head commit. Only when the run exits successfully does it save that snapshot as the ticket's watermark, in a
@@ -108,8 +117,8 @@
 #   CANCELLED_COLUMN    column for tickets whose pull request was closed without merging (default: Cancelled)
 #   IDLE_SECONDS        wait between rounds when there is nothing to do (default: 300); the board can cut it short
 #   TICKET_TIMEOUT      stop a run that takes longer than this, as accepted by timeout(1) (default: 4h)
-#   TICKET_CHECK_SECONDS  how often a run's ticket is checked for having been taken away from the agent, and a
-#                       heartbeat sent for it; keep it well under 10 minutes (default: 30)
+#   TICKET_CHECK_SECONDS  how often a run's ticket is checked for having been taken away from the agent or for a
+#                       request to stop the run, and a heartbeat sent for it; keep it well under 10 minutes (default: 30)
 #   INHIBIT_SLEEP       1 keeps the machine from suspending or going idle while a run is going (a systemd-logind
 #                       inhibitor lock, where systemd-inhibit is available), 0 doesn't (default: 1)
 #   RETRY_SECONDS       wait before retrying a failed run, doubled after each failure (default: 600)
@@ -226,7 +235,8 @@ pause() {
 }
 
 # Waits the given number of seconds, or less when someone wakes the board's agent up (a `wake` event on the board's
-# event stream, sent by the review column's "fix conflicts" button). Waits them out anyway if the stream can't be read.
+# event stream, sent for a person's feedback on a ticket the agent holds, and by buttons such as the review column's
+# "fix conflicts"). Waits them out anyway if the stream can't be read.
 idle() {
   local line end=$((SECONDS + $1)) events
   exec {events}< <(exec curl -sfN --max-time "$1" "$KANBAN/api/events?board=$BOARD" 2>/dev/null)

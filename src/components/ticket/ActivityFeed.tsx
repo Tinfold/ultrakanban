@@ -1,7 +1,8 @@
-import { ChevronRightIcon, SendHorizontalIcon, XIcon } from 'lucide-react'
+import { ChevronRightIcon, SendHorizontalIcon, SquareIcon, XIcon } from 'lucide-react'
 import { type FormEvent, type ReactNode, useMemo, useState } from 'react'
 import {
   type Activity,
+  type AgentRun,
   type Attachment,
   parsePullRequestUrl,
   type PullRequest,
@@ -88,6 +89,8 @@ function describe(entry: Exclude<Activity, { type: 'comment' | 'plan' | 'attachm
       return entry.actor === entry.data.assignee ? <>released this</> : <>unassigned {entry.data.assignee}</>
     case 'approved':
       return <>approved the plan{entry.data.estimate && <> (size {entry.data.estimate})</>}</>
+    case 'stopped':
+      return <>stopped the agent&apos;s run{entry.data.step && <> ({entry.data.step})</>}</>
   }
 }
 
@@ -187,6 +190,7 @@ const OUTCOME_STYLES: Record<RunOutcome, { item: string; label: string }> = {
   timed_out: { item: 'border-red-500/40 bg-red-500/5', label: 'text-red-600 dark:text-red-400' },
   killed: { item: 'border-red-500/40 bg-red-500/5', label: 'text-red-600 dark:text-red-400' },
   stopped: { item: '', label: 'text-muted-foreground' },
+  stop_requested: { item: '', label: 'text-muted-foreground' },
   usage_limit: { item: 'border-amber-500/40 bg-amber-500/5', label: 'text-amber-600 dark:text-amber-400' },
 }
 
@@ -276,19 +280,30 @@ function feedEntries(activity: Activity[], runs: RunRecord[]): FeedEntry[] {
   return entries
 }
 
-function CommentComposer({ ticketId, pullRequest }: { ticketId: string; pullRequest: PullRequest | null }) {
+interface CommentComposerProps {
+  ticketId: string
+  pullRequest: PullRequest | null
+  /** The agent run working the ticket: while it goes on, a comment can stop it too, to redirect the agent. */
+  run: AgentRun | null
+}
+
+function CommentComposer({ ticketId, pullRequest, run }: CommentComposerProps) {
   const { actions } = useBoardContext()
   const [body, setBody] = useState('')
   const [sending, setSending] = useState(false)
   const [onPullRequest, setOnPullRequest] = useState(false)
   // Merged and closed pull requests aren't where review feedback goes any more.
   const canPostOnPullRequest = pullRequest?.state === 'open' || pullRequest?.state === 'draft'
+  // Once a stop is asked for, the run resumes with any new comment anyway.
+  const canStopRun = run !== null && !run.stopRequested
 
-  const submit = async (event?: FormEvent) => {
+  /** Posts the comment; with `stopRun`, then stops the agent's run, which carries on with the comment. */
+  const submit = async (event?: FormEvent, stopRun = false) => {
     event?.preventDefault()
     if (!body.trim() || sending) return
     setSending(true)
-    const comment = await actions.addComment(ticketId, body.trim(), canPostOnPullRequest && onPullRequest)
+    const post = stopRun ? actions.commentAndStopRun : actions.addComment
+    const comment = await post(ticketId, body.trim(), canPostOnPullRequest && onPullRequest)
     setSending(false)
     if (comment) setBody('')
   }
@@ -304,7 +319,7 @@ function CommentComposer({ ticketId, pullRequest }: { ticketId: string; pullRequ
         placeholder="Leave a comment… (markdown supported)"
         className="min-h-20 resize-y border-0 bg-transparent! shadow-none focus-visible:ring-0"
       />
-      <div className="flex items-center justify-end gap-2 px-2 pb-2">
+      <div className="flex flex-wrap items-center justify-end gap-2 px-2 pb-2">
         {canPostOnPullRequest && (
           <label className="mr-auto flex items-center gap-1.5 px-1 text-xs text-muted-foreground select-none">
             <input
@@ -319,6 +334,19 @@ function CommentComposer({ ticketId, pullRequest }: { ticketId: string; pullRequ
         <span className="hidden text-xs text-muted-foreground sm:inline">
           <Kbd>⌘</Kbd> <Kbd>↵</Kbd>
         </span>
+        {canStopRun && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={!body.trim() || sending}
+            title="Post the comment and stop the agent's run: it carries on where it left off, with your comment as new instructions"
+            onClick={() => void submit(undefined, true)}
+          >
+            <SquareIcon />
+            Comment and stop run
+          </Button>
+        )}
         <Button type="submit" size="sm" disabled={!body.trim() || sending}>
           <SendHorizontalIcon />
           Comment
@@ -328,7 +356,7 @@ function CommentComposer({ ticketId, pullRequest }: { ticketId: string; pullRequ
   )
 }
 
-export function ActivityFeed({ ticketId, pullRequest }: { ticketId: string; pullRequest: PullRequest | null }) {
+export function ActivityFeed({ ticketId, pullRequest, run }: CommentComposerProps) {
   const { data: activity = [] } = useTicketActivity(ticketId)
   const { data: runs = [] } = useTicketRuns(ticketId)
   const { data: attachments = [] } = useTicketAttachments(ticketId)
@@ -355,7 +383,7 @@ export function ActivityFeed({ ticketId, pullRequest }: { ticketId: string; pull
           ),
         )}
       </ol>
-      <CommentComposer ticketId={ticketId} pullRequest={pullRequest} />
+      <CommentComposer ticketId={ticketId} pullRequest={pullRequest} run={run} />
       <AttachmentViewer ticketId={ticketId} attachment={viewing} onClose={() => setViewing(null)} />
     </section>
   )

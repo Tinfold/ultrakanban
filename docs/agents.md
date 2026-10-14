@@ -262,7 +262,10 @@ comment with `<!-- ultrakanban:<agent> -->`, which the loop ignores. A pull requ
 its ticket to the `Cancelled` column (`CANCELLED_COLUMN`; add it to the board, the loop won't fall back to Todo)
 and unassigns it, so it is never picked up again. When none of its tickets needs work, it claims a new Todo ticket,
 and when there is nothing to do at all it waits `IDLE_SECONDS` (60 under the supervisor), or until the board wakes it
-up: the review column's "fix conflicts" button does.
+up. The board does that as soon as someone gives the agent feedback on one of its tickets: a comment, an approved
+plan, or a move back into In progress, by anyone but the agent itself. So the agent answers a comment within seconds
+rather than after the idle wait; pull request feedback and CI, which the board doesn't see happen, still wait for it.
+The review column's "fix conflicts" button and the Stop button (below) wake it up too.
 
 You can drag the agent's tickets like any other. A ticket you move back to Todo (`TODO_COLUMN`), or to a column
 before it such as Backlog, goes back to the queue: the loop releases it, with a note, and forgets its state, so it is
@@ -273,15 +276,29 @@ or deletes it. Moving a ticket back into In progress asks for more work (see abo
 nothing, and the loop leaves tickets it doesn't hold alone, so dragging a Todo ticket to In progress yourself keeps it
 away from the agent.
 
+**Stopping a run to redirect it.** A run already going doesn't see a new comment until its next run, and a run can
+take hours. To change its course without taking the ticket away (which forgets the run), press **Stop** on the
+running ticket's card or in the ticket, or write your new instructions in the ticket's comment box and press
+**Comment and stop run**. The loop sees the request at its next check of the ticket (within `TICKET_CHECK_SECONDS`;
+the card says "Stopping…" until then), stops the run, and notes on the ticket that it did. Nothing of the run is lost
+and it doesn't count as a failure: the loop keeps its `claude` session, its scratch directory and, in a dedicated
+clone, the work it left in the checkout (as for a run cut short by a restart, below). The ticket then waits for
+feedback the stopped run wasn't given: a comment, an approved plan or a move back into In progress, or pull request
+feedback. A comment posted just before the stop, as **Comment and stop run** does, counts, so that one resumes right
+away. The next run resumes the stopped session with `claude --resume`, told that you stopped it to give it new
+instructions and handed the new feedback, so it carries on with everything it already knew. A stopped claimed ticket
+whose first run hadn't finished still counts against `CLAIM_LIMIT` while it waits, so the agent doesn't start on
+another ticket in the meantime.
+
 Every run leaves a record on its ticket, so you can see what the agent did and why it's stuck without reading the
 loop's logs. The loop runs claude with `--output-format stream-json --verbose`, which writes each message and tool call
 as the run goes, and once the run ends posts a record of it (`POST /tickets/:id/runs`): how it ended (finished, failed,
-timed out, killed, stopped because the ticket was taken away, or out of Claude usage), its exit status, how long it
-took, its turns and cost, its final message (or what it last said, for a run cut short) and each tool call with a short
-target: a command's first line, a file's path, a search pattern. A run of more than 150 tool calls keeps its first and
-last 75. The ticket's activity shows the records among its other events: open one to see the steps, with failed ones
-in red. Runs that time out or are killed are recorded too, though they leave no token usage; only a run cut short by
-the loop itself stopping (a restart) leaves none, and the next run resumes it.
+timed out, killed, stopped because the ticket was taken away or because someone asked, or out of Claude usage), its
+exit status, how long it took, its turns and cost, its final message (or what it last said, for a run cut short) and
+each tool call with a short target: a command's first line, a file's path, a search pattern. A run of more than 150
+tool calls keeps its first and last 75. The ticket's activity shows the records among its other events: open one to
+see the steps, with failed ones in red. Runs that time out or are killed are recorded too, though they leave no token
+usage; only a run cut short by the loop itself stopping (a restart) leaves none, and the next run resumes it.
 
 Nothing is missed, even while a run is going: before each run the loop notes the newest ticket activity id,
 pull request comment, review and inline comment ids, and the head commit's checks and conflict state. It saves

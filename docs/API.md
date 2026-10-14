@@ -246,6 +246,7 @@ interface AgentRun {
   startedAt: string // its first heartbeat
   seenAt: string // its latest heartbeat
   step: string | null // what it is doing, as its agent last said
+  stopRequested: { at: string; by: string } | null // when someone asked it to stop (POST /tickets/:id/stop) and who, until it ends
 }
 
 interface ChecklistItem {
@@ -379,6 +380,18 @@ and can say what the run is doing (`step`; a heartbeat without one keeps the run
 `DELETE /tickets/:ticketId/heartbeat`, or after 10 minutes without a heartbeat. Cards show a run as stalled after 3
 minutes without one.
 
+### Stopping a run
+
+`POST /tickets/:ticketId/stop` (no body; the Stop button on a running ticket's card and in the ticket) asks the run
+working the ticket to stop, e.g. to give its agent new instructions. It sets the run's `stopRequested` to when and who
+(`X-Actor`), logs a `stopped` activity entry (`data: { step }`, what the run was doing), sends a `wake` event (see
+[Live updates](#live-updates)) and returns the `Ticket`; `409 no_run` when no run is going. Asking again before the
+run stops changes nothing. The request lasts until the run ends (`DELETE /tickets/:ticketId/heartbeat`), and a new run
+starts without one. `scripts/agent-loop.sh` sees it at its next check of the ticket (every `TICKET_CHECK_SECONDS`),
+stops the run without losing its session or work, and resumes it once there is new feedback, such as a comment.
+Agents of your own that send heartbeats should do the same: stop when their ticket's `run.stopRequested` is set,
+and end the run.
+
 ## Tickets
 
 | Method | Path                                   | Body / query                                                                                                                                                                                                                                                        | Returns                                                                                                                                                                                                                                                                                                              |
@@ -394,6 +407,7 @@ minutes without one.
 | POST   | `/tickets/:ticketId/release`           | `{ agent, moveTo?: ref, force? }`                                                                                                                                                                                                                                   | `Ticket`; `409` if claimed by someone else unless `force`                                                                                                                                                                                                                                                            |
 | POST   | `/tickets/:ticketId/heartbeat`         | `{ step? }` (optional)                                                                                                                                                                                                                                              | `204`; says an agent is working on the ticket right now (not a change: nothing is logged)                                                                                                                                                                                                                            |
 | DELETE | `/tickets/:ticketId/heartbeat`         |                                                                                                                                                                                                                                                                     | `204`; says the agent's run on the ticket has ended                                                                                                                                                                                                                                                                  |
+| POST   | `/tickets/:ticketId/stop`              |                                                                                                                                                                                                                                                                     | `Ticket` with `run.stopRequested` set: asks the run working it to stop (see Stopping a run); `409 no_run` without one                                                                                                                                                                                                |
 | POST   | `/boards/:boardId/tickets/bulk`        | `{ tickets: ref[], moveTo?: ref, force?, priority?, addTags?: ref[], removeTags?: ref[], epic?: ref \| null }` or `{ tickets: ref[], delete: true }`                                                                                                                | `{ tickets: Ticket[] }`: the same change to several tickets, all or nothing (e.g. `409` if one can't enter the done column, unless `force`); moved tickets are appended in the order given; `tickets: []` when deleted                                                                                               |
 | POST   | `/boards/:boardId/tickets/claim-next`  | `{ agent, column: ref, tags?: ref[], moveTo?: ref }`                                                                                                                                                                                                                | `Ticket`: highest priority, then earliest due date, then board order, among unassigned, unblocked tickets in `column` having all `tags` (see below)                                                                                                                                                                  |
 | POST   | `/tickets/:ticketId/plan`              | `{ agent, estimate: 'S' \| 'M' \| 'L', plan: markdown }`                                                                                                                                                                                                            | `Ticket`: posts the plan, sets `estimate`, and holds the ticket for approval (`approval: 'pending'`) when the board's `approvalSize` asks for it; `409` if claimed by someone else                                                                                                                                   |
@@ -524,8 +538,9 @@ interface RunRecord {
   agent: string // who ran, e.g. claude/opus/high
   // finished: exited successfully; failed: exited with an error; timed_out: ran past the loop's TICKET_TIMEOUT;
   // killed: by a signal (exit status 137 is most likely the kernel, out of memory); stopped: the loop stopped it as
-  // someone took the ticket away; usage_limit: the account ran out of Claude usage (the run is resumed later)
-  outcome: 'finished' | 'failed' | 'timed_out' | 'killed' | 'stopped' | 'usage_limit'
+  // someone took the ticket away; stop_requested: the loop stopped it as someone asked (POST /tickets/:id/stop; the
+  // run is resumed with new feedback); usage_limit: the account ran out of Claude usage (the run is resumed later)
+  outcome: 'finished' | 'failed' | 'timed_out' | 'killed' | 'stopped' | 'stop_requested' | 'usage_limit'
   exitCode: number | null
   durationMs: number | null
   turns: number | null // responses of the model
@@ -863,9 +878,16 @@ the `changedAt` it saw to.
 ## Live updates
 
 `GET /events?board=:boardId` is a server-sent event stream. It emits `change` events with data `{ "boardId": "..." }`
-after every committed change (omit `board` to receive all boards), `wake` events with the same data when someone
-asks the board's agent to look for work now (`scripts/agent-loop.sh` ends its idle wait on one), plus periodic `ping`
-events.
+after every committed change (omit `board` to receive all boards), `wake` events with the same data when the board's
+agent has something to look at now (`scripts/agent-loop.sh` ends its idle wait on one), plus periodic `ping` events.
+
+The board sends a `wake` for what the agent loop counts as feedback on a ticket it holds (one with an assignee), by
+anyone but that agent: a comment, an approved plan (`POST /tickets/:ticketId/approve`), and a move into the
+`In progress` column (the loop's `IN_PROGRESS_COLUMN` default, by name, case-insensitive). The agent's own names
+don't count: its assignee name, the agent's name before the first `/`, its loop's `<agent>-loop` and its other
+workers' `<agent>/...`. It also sends one for fixing conflicts (`POST /boards/:boardId/fix-conflicts`), stopping a run
+(`POST /tickets/:ticketId/stop`) and clearing build output (`POST /boards/:boardId/agent-cleanup`). Each change sends
+at most one per board, and only once it is committed.
 
 ## Examples
 

@@ -19,6 +19,7 @@ import { useDebouncedCallback } from '@/hooks/use-debounced-callback'
 import { formatDateTime, formatRelative, ticketRef } from '@/lib/format'
 import { ticketHref } from '@/lib/overview'
 import { useBoardContext } from '../board/board-context'
+import { RunStatus } from '../board/RunStatus'
 import { ActivityFeed } from './ActivityFeed'
 import { AttachmentsSection } from './attachments'
 import { DescriptionEditor } from './DescriptionEditor'
@@ -101,7 +102,8 @@ function TicketDetail({ ticket, onClose }: { ticket: Ticket; onClose: () => void
           </span>
         )}
         <WaitingBadge ticket={ticket} className="ml-2 text-xs [&_svg]:size-3.5" />
-        <div className="ml-auto flex items-center gap-0.5">
+        {ticket.run && <RunStatus ticket={ticket} className="mt-0 ml-2 text-xs" />}
+        <div className="ml-auto flex shrink-0 items-center gap-0.5">
           <Button variant="ghost" size="icon-sm" aria-label="Copy link" onClick={copyLink}>
             {copied ? <CheckIcon /> : <LinkIcon />}
           </Button>
@@ -166,7 +168,7 @@ function TicketDetail({ ticket, onClose }: { ticket: Ticket; onClose: () => void
             />
             <SubticketsSection ticket={ticket} />
             <AttachmentsSection ticketId={ticket.id} uploads={uploads} />
-            <ActivityFeed ticketId={ticket.id} pullRequest={ticket.pullRequest} />
+            <ActivityFeed ticketId={ticket.id} pullRequest={ticket.pullRequest} run={ticket.run} />
           </div>
         </div>
       </div>

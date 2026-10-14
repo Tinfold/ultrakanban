@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { describe, mock, test } from 'node:test'
+import { beforeEach, describe, mock, test } from 'node:test'
 import {
   type Activity,
   AGENT_IDLE_MINUTES,
@@ -11,8 +11,20 @@ import {
   type RunRecord,
   type Ticket,
 } from '../shared/domain.ts'
-import { subscribe } from './events.ts'
-import { addTicket, boardId, call, ticketsIn } from './test-app.ts'
+import { subscribe, subscribeWake } from './events.ts'
+import { addTicket, boardId, call, ticketsIn, useBoard } from './test-app.ts'
+
+/** The boards `fn` wakes the agent of (`wake` events), in order. */
+async function wakes(fn: () => Promise<unknown>) {
+  const boards: string[] = []
+  const unsubscribe = subscribeWake((event) => boards.push(event.boardId))
+  try {
+    await fn()
+  } finally {
+    unsubscribe()
+  }
+  return boards
+}
 
 describe('tickets', () => {
   test('creates tickets with column/tag names and sequential numbers', async () => {
@@ -327,10 +339,141 @@ describe('idle tickets', () => {
     assert.equal(restarted!.step, null)
   })
 
+  test('records who asked a run to stop, and wakes the agent up, until the run ends', async () => {
+    const ticket = await addTicket({ title: 'A' })
+    const stop = (actor = 'person') =>
+      call<Ticket & ApiErrorBody>('POST', `/tickets/${ticket.id}/stop`, undefined, actor)
+    const get = async () => (await call<Ticket>('GET', `/tickets/${ticket.id}`)).body
+    const activity = async () => (await call<Activity[]>('GET', `/tickets/${ticket.id}/activity`)).body
+
+    const idle = await stop()
+    assert.equal(idle.status, 409)
+    assert.equal(idle.body.error.code, 'no_run')
+
+    await call('POST', `/tickets/${ticket.id}/heartbeat`, { step: 'Working the ticket' }, 'alpha')
+    assert.equal((await get()).run?.stopRequested, null)
+    let stopped: Awaited<ReturnType<typeof stop>> | undefined
+    assert.deepEqual(await wakes(async () => void (stopped = await stop())), [boardId])
+    assert.equal(stopped?.status, 200)
+    assert.equal(stopped?.body.run?.stopRequested?.by, 'person')
+    assert.ok(stopped?.body.run?.stopRequested?.at)
+    // Not a change to the ticket itself, but its activity says who stopped the run, and what the run was doing.
+    assert.equal(stopped?.body.version, ticket.version)
+    const entry = (await activity()).at(-1)!
+    assert.deepEqual([entry.type, entry.actor, entry.data], ['stopped', 'person', { step: 'Working the ticket' }])
+
+    // Asking again before the run stops changes nothing.
+    const again = await stop('someone else')
+    assert.equal(again.body.run?.stopRequested?.by, 'person')
+    assert.equal((await activity()).filter((item) => item.type === 'stopped').length, 1)
+
+    // The run's heartbeats keep the request; its end clears it, and the next run starts without one.
+    await call('POST', `/tickets/${ticket.id}/heartbeat`, undefined, 'alpha')
+    assert.equal((await get()).run?.stopRequested?.by, 'person')
+    await call('DELETE', `/tickets/${ticket.id}/heartbeat`, undefined, 'alpha')
+    assert.equal((await get()).run, null)
+    await call('POST', `/tickets/${ticket.id}/heartbeat`, undefined, 'alpha')
+    assert.equal((await get()).run?.stopRequested, null)
+
+    assert.equal((await call('POST', '/tickets/missing/stop')).status, 404)
+  })
+
+  test('a run that went quiet takes its stop request with it', async () => {
+    const ticket = await addTicket({ title: 'A' })
+    await call('POST', `/tickets/${ticket.id}/heartbeat`, undefined, 'alpha')
+    // A body is ignored.
+    assert.equal((await call('POST', `/tickets/${ticket.id}/stop`, {}, 'person')).status, 200)
+
+    const minutes = AGENT_IDLE_MINUTES + 1
+    const [quiet, next] = await later(minutes, async () => {
+      const quiet = await call<ApiErrorBody>('POST', `/tickets/${ticket.id}/stop`, undefined, 'person')
+      await call('POST', `/tickets/${ticket.id}/heartbeat`, undefined, 'alpha')
+      return [quiet, (await call<Ticket>('GET', `/tickets/${ticket.id}`)).body.run] as const
+    })
+    assert.equal(quiet.status, 409)
+    assert.equal(next?.stopRequested, null)
+  })
+
   test('refuses to move idle tickets into their own column', async () => {
     const column = await doingColumn()
     const res = await call('POST', `/columns/${column.id}/release-idle`, { moveTo: 'Doing' })
     assert.equal(res.status, 400)
+  })
+})
+
+describe('waking the agent up', () => {
+  const AGENT = 'claude/opus/high'
+
+  beforeEach(async () => {
+    const { body } = await call<{ id: string }>('POST', '/boards', {
+      name: 'Agent',
+      columns: ['Todo', 'In progress', 'Review', 'Done'],
+      reviewColumn: 'Review',
+      doneColumn: 'Done',
+      approvalSize: 'M',
+    })
+    useBoard(body.id)
+  })
+
+  /** A Todo ticket the agent claims into In progress, which doesn't wake it up: it did that itself. */
+  async function claimed() {
+    const ticket = await addTicket({ title: 'Work', column: 'Todo' })
+    let claim: Ticket | undefined
+    const woken = await wakes(async () => {
+      const body = { agent: AGENT, moveTo: 'In progress' }
+      claim = (await call<Ticket>('POST', `/tickets/${ticket.id}/claim`, body, AGENT)).body
+    })
+    assert.deepEqual(woken, [])
+    return claim!
+  }
+  const comment = (ticketId: string, actor: string) =>
+    call('POST', `/tickets/${ticketId}/comments`, { body: 'Use the other API' }, actor)
+  const move = (ticket: Ticket, column: string, actor: string) =>
+    call('POST', `/tickets/${ticket.id}/move`, { column }, actor)
+
+  test("someone's comment on a ticket the agent holds wakes it up; the agent's own comments don't", async () => {
+    const ticket = await claimed()
+    assert.deepEqual(await wakes(() => comment(ticket.id, 'person')), [boardId])
+    // The agent's comments, its loop's notes and its other workers' are its own, as the agent loop tells them apart.
+    for (const actor of [AGENT, 'claude', 'claude-loop', 'claude/sonnet/low']) {
+      assert.deepEqual(await wakes(() => comment(ticket.id, actor)), [], actor)
+    }
+    // Another agent's comment is feedback like a person's.
+    assert.deepEqual(await wakes(() => comment(ticket.id, 'codex/gpt/high')), [boardId])
+    // No agent waits for comments on a ticket nobody holds.
+    const free = await addTicket({ title: 'Free' })
+    assert.deepEqual(await wakes(() => comment(free.id, 'person')), [])
+  })
+
+  test('approving the plan and moving the ticket back into In progress wake the agent up', async () => {
+    const ticket = await claimed()
+    await call('POST', `/tickets/${ticket.id}/plan`, { agent: AGENT, estimate: 'L', plan: 'A big change' }, AGENT)
+    assert.deepEqual(await wakes(() => call('POST', `/tickets/${ticket.id}/approve`, undefined, 'person')), [boardId])
+
+    // Moves into other columns aren't feedback, and neither are the agent's own.
+    assert.deepEqual(await wakes(() => move(ticket, 'Review', AGENT)), [])
+    assert.deepEqual(await wakes(() => move(ticket, 'In progress', AGENT)), [])
+    assert.deepEqual(await wakes(() => move(ticket, 'Review', 'person')), [])
+    assert.deepEqual(await wakes(() => move(ticket, 'In progress', 'person')), [boardId])
+
+    // Moving several tickets back at once wakes it up once.
+    const other = await claimed()
+    const bulk = { tickets: [ticket.id, other.id], moveTo: 'Review' }
+    assert.deepEqual(await wakes(() => call('POST', `/boards/${boardId}/tickets/bulk`, bulk, 'person')), [])
+    assert.deepEqual(
+      await wakes(() => call('POST', `/boards/${boardId}/tickets/bulk`, { ...bulk, moveTo: 'in progress' }, 'person')),
+      [boardId],
+    )
+  })
+
+  test('a change that fails wakes nobody up', async () => {
+    const ticket = await claimed()
+    await move(ticket, 'Review', 'person')
+    const stale = { column: 'In progress', ifVersion: ticket.version }
+    const response = await wakes(async () => {
+      assert.equal((await call('POST', `/tickets/${ticket.id}/move`, stale, 'person')).status, 409)
+    })
+    assert.deepEqual(response, [])
   })
 })
 
