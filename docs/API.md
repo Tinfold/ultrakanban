@@ -780,9 +780,13 @@ starts the loop of every board whose agent is on, as before. The boards' own age
 ```ts
 {
   paused: boolean // switched off
+  restart: boolean // the last switch on asked for the loops that run to be restarted too
   changedAt: string | null, changedBy: string | null // when it was last switched, and by whom
   wanted: string[] // the boards whose agent is on (with a repository): each should have a loop running unless paused
   running: string[] // the boards whose loop the supervisor last found running
+  // boards where claim-next last failed (e.g. its moveTo column is gone), why, and since when; each stays until a
+  // claim there goes through or finds nothing to do, or the supervisor reports its loop stopped
+  claimErrors: { boardId: string, message: string, since: string }[]
   reportedAt: string | null // when the supervisor last reported them; null if it never has
   handledAt: string | null // the changedAt it had seen to then: until it equals changedAt, the switch is on its way
   serverTime: string // the server's time, to judge reportedAt by: the browser's clock can be off from it
@@ -791,7 +795,8 @@ starts the loop of every board whose agent is on, as before. The boards' own age
 
 `PUT /system/agents/services` with `{ paused }` switches them off or on; the supervisor sees to it within a few
 seconds. `{ paused: false }` while they are on starts the loops that aren't running now, rather than after the
-supervisor's wait between retries. When the supervisor can't read the switch, it goes by its last answer. It reports
+supervisor's wait between retries, and `{ paused: false, restart: true }` also stops and starts the ones that run (with
+the containers their runs use). When the supervisor can't read the switch, it goes by its last answer. It reports
 the running loops after each poll with `POST /system/agents/services/status` and `{ running: string[], handledAt? }`,
 the `changedAt` it saw to.
 

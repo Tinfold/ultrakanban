@@ -961,6 +961,11 @@ export interface AgentHost {
  */
 export interface AgentServices {
   paused: boolean
+  /**
+   * Whether the last switch on asked for the loops that run to be restarted too: stopped, with the containers their
+   * runs use, and started again.
+   */
+  restart: boolean
   /** When it was last switched on or off, and by whom; null if it never has been. */
   changedAt: string | null
   changedBy: string | null
@@ -968,12 +973,25 @@ export interface AgentServices {
   wanted: string[]
   /** The boards whose loop the supervisor last found running. */
   running: string[]
+  /**
+   * Running loops that can't take any ticket: the boards where claiming one last failed, why (e.g. its in-progress
+   * column is gone) and since when. Each stays until a claim there goes through or finds nothing to do.
+   */
+  claimErrors: AgentClaimError[]
   /** When the supervisor last reported them; null if it never has, so nothing would act on the switch. */
   reportedAt: string | null
   /** The switch (its `changedAt`) the supervisor had seen to when it reported; until it is `changedAt`, it is on its way. */
   handledAt: string | null
   /** The server's time when it answered, to judge `reportedAt` by: the browser's clock can be off from it. */
   serverTime: string
+}
+
+/** Why claiming a ticket on a board fails (see `AgentServices`). */
+export interface AgentClaimError {
+  boardId: string
+  message: string
+  /** When it first failed this way. */
+  since: string
 }
 
 /** What the Setup page shows: the board's GitHub access and the agents'. */

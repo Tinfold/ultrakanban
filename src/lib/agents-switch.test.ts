@@ -11,6 +11,8 @@ const services = (overrides: Partial<AgentServices> = {}): AgentServices => ({
   changedBy: null,
   wanted: ['a', 'b'],
   running: ['a', 'b'],
+  restart: false,
+  claimErrors: [],
   reportedAt,
   handledAt: null,
   serverTime: reportedAt,
@@ -35,6 +37,21 @@ describe('agentsSwitchState', () => {
     })
   })
 
+  test("warns of the wanted boards whose loop runs but can't claim a ticket", () => {
+    const since = '2026-10-14T11:58:00.000Z'
+    const message = 'Column "In progress" not found'
+    assert.deepEqual(state(services({ claimErrors: [{ boardId: 'b', message, since }] })), {
+      kind: 'failing',
+      boards: [{ name: 'Beta', message, since }],
+    })
+    // A board no longer wanted (switched off, deleted) isn't one of the agents the button stands for.
+    assert.deepEqual(state(services({ claimErrors: [{ boardId: 'gone', message, since }] })), { kind: 'up', boards: 2 })
+    // A loop that's down is the bigger problem, and switched off, nothing claims at all.
+    const failing = { claimErrors: [{ boardId: 'a', message, since }] }
+    assert.equal(state(services({ ...failing, running: ['a'] })).kind, 'missing')
+    assert.equal(state(services({ ...failing, paused: true })).kind, 'paused')
+  })
+
   test('is paused once the supervisor has seen to it, even with loops still reported', () => {
     const changedAt = '2026-10-14T11:59:00.000Z'
     assert.deepEqual(state(services({ paused: true, changedAt, handledAt: changedAt, running: [] })), {
@@ -47,8 +64,17 @@ describe('agentsSwitchState', () => {
     const changedAt = '2026-10-14T11:59:59.000Z'
     // Its report came after the click, but from a look it took before it: still on its way.
     const raced = services({ paused: true, changedAt, handledAt: '2026-10-14T11:00:00.000Z' })
-    assert.deepEqual(state(raced), { kind: 'switching', paused: true })
-    assert.deepEqual(state(services({ changedAt, handledAt: null })), { kind: 'switching', paused: false })
+    assert.deepEqual(state(raced), { kind: 'switching', paused: true, restart: false })
+    assert.deepEqual(state(services({ changedAt, handledAt: null })), {
+      kind: 'switching',
+      paused: false,
+      restart: false,
+    })
+    assert.deepEqual(state(services({ changedAt, handledAt: null, restart: true })), {
+      kind: 'switching',
+      paused: false,
+      restart: true,
+    })
     assert.deepEqual(state(services({ changedAt, handledAt: changedAt })), { kind: 'up', boards: 2 })
   })
 

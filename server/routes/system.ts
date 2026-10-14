@@ -122,8 +122,8 @@ export const systemRoutes = ({ pullRequests: { github } }: AppServices) => {
 
       .get('/agents/services', (c) => c.json(getAgentServices()))
       .put('/agents/services', async (c) => {
-        const { paused } = await readJson(c, setAgentServicesSchema)
-        return c.json(transaction(() => setAgentsPaused(paused, actorOf(c))))
+        const { paused, restart } = await readJson(c, setAgentServicesSchema)
+        return c.json(transaction(() => setAgentsPaused(paused, actorOf(c), restart)))
       })
       // For the supervisor: the boards whose loop runs, after it started and stopped loops.
       .post('/agents/services/status', async (c) => {

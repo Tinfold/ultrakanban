@@ -501,10 +501,11 @@ wait_poll() {
 }
 
 # Whether every board's agents are switched off in the header, and when it was last switched there, as reconcile last
-# found. Switching them on while they are on starts the loops that aren't running now, rather than after their wait.
+# found. Switching them on while they are on starts the loops that aren't running now, rather than after their wait;
+# switching them on with restart also stops and starts the ones that are.
 paused= changed_at= seen_switch=
 reconcile() {
-  local boards response services wanted= id repo agent model effort concurrency settings unit state units now=
+  local boards response services wanted= id repo agent model effort concurrency settings unit state units now= restart=
   boards=$(curl -sf "$KANBAN/api/boards") || { echo "can't reach $KANBAN; leaving the loops as they are"; return; }
   response=$(curl -s -w '\n%{http_code}' "$KANBAN/api/system/agents/services")
   case ${response##*$'\n'} in
@@ -512,6 +513,7 @@ reconcile() {
       services=${response%$'\n'*}
       paused=$(jq -r '.paused // false' <<<"$services")
       [[ -n $seen_switch && $(jq -r '.changedAt // ""' <<<"$services") != "$changed_at" ]] && now=1
+      [[ -n $now && $(jq -r '.restart // false' <<<"$services") == true ]] && restart=1
       changed_at=$(jq -r '.changedAt // ""' <<<"$services") seen_switch=1
       ;;
     # A board older than the switch: its agents are on.
@@ -538,7 +540,13 @@ reconcile() {
     fi
     loop_state "$id"
     case $state in
-      active | reloading | deactivating) ;;
+      active | reloading)
+        if [[ -n $restart ]]; then
+          echo "board $id: restarting its agent loop, as asked"
+          loop_restart "$id"
+        fi
+        ;;
+      deactivating) ;;
       activating)
         # Waiting to be started again after it stopped; started now when asked to in the header.
         if [[ -n $now ]]; then

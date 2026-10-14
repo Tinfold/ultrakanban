@@ -23,6 +23,7 @@ import { wake } from '../events.ts'
 import { actorOf, readJson } from '../http.ts'
 import type { AppServices } from '../app.ts'
 import { createBoard, deleteBoard, getBoard, getBoardDetail, listBoards, updateBoard } from '../store/boards.ts'
+import { recordClaim } from '../store/agent-services.ts'
 import { createColumn } from '../store/columns.ts'
 import { listAttachmentIds } from '../store/attachments.ts'
 import { boardDiskBreakdown, cleanUpAttachments, requestAgentCleanup } from '../store/disk-usage.ts'
@@ -139,8 +140,20 @@ export const boardRoutes = ({ pullRequests, mergeQueue, attachmentFiles }: AppSe
       return c.json({ tickets: transaction(() => bulkUpdateTickets(boardId, input, actorOf(c))) })
     })
     .post('/:boardId/tickets/claim-next', async (c) => {
+      const boardId = c.req.param('boardId')
       const input = await readJson(c, claimNextSchema)
-      return c.json(transaction(() => claimNextTicket(c.req.param('boardId'), input)))
+      // Noted for the header's agents button: a loop whose claims fail runs, but never works a ticket.
+      try {
+        const ticket = transaction(() => claimNextTicket(boardId, input))
+        transaction(() => recordClaim(boardId, null))
+        return c.json(ticket)
+      } catch (error) {
+        const nothingToDo = error instanceof HttpError && error.code === 'no_ticket_available'
+        transaction(() =>
+          recordClaim(boardId, nothingToDo ? null : error instanceof Error ? error.message : String(error)),
+        )
+        throw error
+      }
     })
     .post('/:boardId/fix-conflicts', (c) => {
       const boardId = getBoard(c.req.param('boardId')).id

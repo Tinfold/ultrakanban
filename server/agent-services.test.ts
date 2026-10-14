@@ -37,8 +37,52 @@ describe("switching every board's agents off and on", () => {
     assert.equal((await call<AgentServices>('PUT', '/system/agents/services', { paused: false })).body.paused, false)
   })
 
+  test('restarts the running loops only when switched on with restart, until the next switch', async () => {
+    const put = async (body: Record<string, unknown>) =>
+      (await call<AgentServices>('PUT', '/system/agents/services', body)).body
+    const restarted = await put({ paused: false, restart: true })
+    assert.equal(restarted.restart, true)
+    assert.equal(restarted.paused, false)
+    assert.equal((await status()).restart, true)
+    // Switching off restarts nothing, and a plain switch on only starts the loops that don't run.
+    assert.equal((await put({ paused: true, restart: true })).restart, false)
+    assert.equal((await put({ paused: false })).restart, false)
+  })
+
+  test("notes why a board's claims fail, until one goes through or finds nothing to do", async () => {
+    github.repos.add('acme/claims')
+    const { body: board } = await call<{ id: string }>('POST', '/boards', { name: 'Claims', columns: ['Todo', 'Done'] })
+    await call('PATCH', `/boards/${board.id}`, { githubRepo: 'acme/claims', agentEnabled: true })
+    const claim = (moveTo = 'In progress') =>
+      call('POST', `/boards/${board.id}/tickets/claim-next`, { agent: 'claude', column: 'Todo', moveTo })
+    const error = async () => (await status()).claimErrors.find(({ boardId }) => boardId === board.id)
+
+    // Nothing to claim yet, but the column a claim moves to is missing all the same.
+    assert.equal((await claim()).status, 404)
+    const first = await error()
+    assert.equal(first?.message, 'Column "In progress" not found')
+    assert.ok(first?.since)
+    await call('POST', `/boards/${board.id}/tickets`, { title: 'Waits' })
+    assert.equal((await claim()).status, 404)
+    assert.deepEqual(await error(), first, 'the same failure again keeps when it started')
+
+    // Nothing to do is a claim that worked.
+    assert.equal((await claim('Done')).status, 200)
+    assert.equal((await claim('Done')).status, 404)
+    assert.equal(await error(), undefined)
+
+    // A loop reported stopped forgets it: started again, it tries afresh.
+    await claim()
+    assert.ok(await error())
+    await report({ running: [board.id] })
+    assert.ok(await error(), 'kept while its loop runs')
+    await report({ running: [] })
+    assert.equal(await error(), undefined)
+  })
+
   test('validates', async () => {
     assert.equal((await call('PUT', '/system/agents/services', { paused: 'yes' })).status, 400)
+    assert.equal((await call('PUT', '/system/agents/services', { paused: false, restart: 'yes' })).status, 400)
     assert.equal((await report({})).status, 400)
     assert.equal((await report({ running: [''] })).status, 400)
   })
