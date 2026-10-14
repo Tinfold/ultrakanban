@@ -1,4 +1,13 @@
-import { CalendarIcon, ContainerIcon, CpuIcon, GaugeIcon, LayersIcon, TagIcon, UserRoundIcon } from 'lucide-react'
+import {
+  CalendarIcon,
+  ContainerIcon,
+  CpuIcon,
+  GaugeIcon,
+  LayersIcon,
+  TagIcon,
+  UserRoundIcon,
+  WalletIcon,
+} from 'lucide-react'
 import type { ReactNode } from 'react'
 import { AGENT_DEFAULTS, type Ticket } from '@shared/domain'
 import { EpicChip } from '@/components/common/EpicChip'
@@ -6,12 +15,24 @@ import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { ColorDot, TagChip } from '@/components/common/TagChip'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
-import { boardDockerLabel, dockerLabel, dueState, formatCost, formatDueDate, formatTokens } from '@/lib/format'
+import {
+  BUDGET_STYLES,
+  budgetLevel,
+  boardDockerLabel,
+  COST_NOTE,
+  dockerLabel,
+  dueState,
+  formatBudget,
+  formatCost,
+  formatDueDate,
+  formatTokens,
+} from '@/lib/format'
 import { PRIORITY_LABELS } from '@/lib/priority'
 import { cn } from '@/lib/utils'
 import { useBoardContext } from '../board/board-context'
 import {
   AssigneePicker,
+  BudgetPicker,
   ColumnPicker,
   DueDatePicker,
   DockerPicker,
@@ -159,12 +180,51 @@ export function TicketProperties({ ticket }: { ticket: Ticket }) {
         <Property label="Usage">
           <p className="px-2 py-1.5 text-sm tabular-nums">
             {formatTokens(ticket.usage.tokens)} tokens
-            {ticket.usage.costUsd !== null && <> · {formatCost(ticket.usage.costUsd)}</>}
+            {ticket.usage.costUsd !== null && (
+              <span title={COST_NOTE}>
+                {' '}
+                · {formatCost(ticket.usage.costUsd)} <span className="text-muted-foreground">est.</span>
+              </span>
+            )}
             <span className="text-muted-foreground">
               {' '}
               over {ticket.usage.runs} {ticket.usage.runs === 1 ? 'run' : 'runs'}
             </span>
           </p>
+        </Property>
+      )}
+
+      {(detail.board.agentEnabled || ticket.budget) && (
+        <Property label="Budget">
+          <BudgetPicker
+            value={ticket.budgetUsd}
+            onChange={(budgetUsd) => actions.updateTicket(ticket.id, { budgetUsd })}
+          >
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                triggerClass,
+                'tabular-nums',
+                ticket.budget ? BUDGET_STYLES[budgetLevel(ticket.budget)] : 'text-muted-foreground',
+              )}
+              title={
+                ticket.budget?.over
+                  ? 'Used up: its agent starts no more runs on it until the budget is raised or cleared'
+                  : undefined
+              }
+            >
+              <WalletIcon />
+              {ticket.budget ? (
+                <span className="truncate">
+                  {formatBudget(ticket.budget)}
+                  {ticket.budgetUsd === null && <span className="text-muted-foreground"> (board default)</span>}
+                </span>
+              ) : (
+                'No budget'
+              )}
+            </Button>
+          </BudgetPicker>
         </Property>
       )}
 

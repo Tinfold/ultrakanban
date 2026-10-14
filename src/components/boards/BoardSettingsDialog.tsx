@@ -123,6 +123,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
     }
     const text = (field: string) => String(data.get(field) ?? '').trim() || null
     const archiveDays = Number(text('archiveDoneDays'))
+    const budgetCents = Math.round(Number(text('ticketBudgetUsd')) * 100)
     const approvalSize = String(data.get('approvalSize') ?? NONE)
     void actions.updateBoard({
       name,
@@ -142,6 +143,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
       deleteMergedBranches: data.get('deleteMergedBranches') === 'on',
       archiveDoneDays: archiveDays >= 1 ? Math.round(archiveDays) : null,
       approvalSize: approvalSize === NONE ? null : (approvalSize as TicketSize),
+      ticketBudgetUsd: budgetCents >= 1 ? budgetCents / 100 : null,
       notifyUrl: text('notifyUrl'),
     })
     onClose()
@@ -424,6 +426,31 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
             these sizes wait until someone approves the plan on the ticket, before the agent spends more tokens on them.
           </p>
         </div>
+        <div className="grid gap-1">
+          <div className="flex items-center gap-2 text-sm">
+            <Label htmlFor="board-settings-budget" className="font-normal">
+              Budget per ticket
+            </Label>
+            <span className="text-muted-foreground">$</span>
+            <Input
+              id="board-settings-budget"
+              name="ticketBudgetUsd"
+              type="number"
+              inputMode="decimal"
+              min={0.01}
+              max={1_000_000}
+              step={0.01}
+              defaultValue={detail.board.ticketBudgetUsd ?? ''}
+              placeholder="no cap"
+              className="h-7 w-24"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Once a ticket's agent runs cost this much (estimated, at API prices), the agent doesn't claim it or start
+            more runs on it, and the board notifies you. It is checked before each run, so the run that uses it up can
+            go over. A ticket can have its own budget in its properties. Leave empty for no cap.
+          </p>
+        </div>
       </fieldset>
 
       <fieldset className="grid gap-3 border-t pt-4">
@@ -439,8 +466,9 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
           />
           <p className="text-xs text-muted-foreground">
             Sends a message when a ticket needs you: an agent asks a question, CI needs someone to look at it, a plan
-            waits for approval, a question is answered or a pull request is ready to merge. Takes an ntfy topic, a
-            Discord webhook or any other webhook URL, which gets the notification as JSON. Leave empty to send nothing.
+            waits for approval, a question is answered, a pull request is ready to merge or a ticket's agent runs used
+            up its budget. Takes an ntfy topic, a Discord webhook or any other webhook URL, which gets the notification
+            as JSON. Leave empty to send nothing.
           </p>
         </div>
       </fieldset>

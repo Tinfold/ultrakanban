@@ -6,6 +6,7 @@ import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
 import { swatch } from '@/lib/colors'
 import {
+  COST_NOTE,
   formatCost,
   formatDateTime,
   formatDuration,
@@ -129,6 +130,12 @@ export function AgentList({ agents, boards, worked, now, hidden, onHide }: Agent
               <div title={usageSummary(agent)}>
                 <dt className="text-muted-foreground">Tokens</dt>
                 <dd className="font-medium tabular-nums">{formatTokens(totalTokens(agent.usage))}</dd>
+              </div>
+              <div title={COST_NOTE}>
+                <dt className="text-muted-foreground">Est. cost</dt>
+                <dd className="font-medium tabular-nums">
+                  {agent.usage.costUsd === null ? '—' : formatCost(agent.usage.costUsd)}
+                </dd>
               </div>
               <div>
                 <dt className="text-muted-foreground">Completed</dt>

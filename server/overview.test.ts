@@ -402,6 +402,26 @@ describe('overview', () => {
     assert.ok(!later.tickets.some((entry) => entry.boardId === boardId))
   })
 
+  test('boards and completed tickets show what their agent runs cost', async () => {
+    const agent = 'cost-agent'
+    const done = await addTicket({ title: 'Done' })
+    const local = await addTicket({ title: 'On a local model' })
+    await call('POST', `/tickets/${done.id}/usage`, { agent, inputTokens: 1, outputTokens: 1, costUsd: 1.25 })
+    await call('POST', `/tickets/${done.id}/usage`, { agent, inputTokens: 1, outputTokens: 1, costUsd: 0.5 })
+    await call('POST', `/tickets/${local.id}/usage`, { agent, inputTokens: 1, outputTokens: 1 })
+    for (const ticket of [done, local])
+      await call('POST', `/tickets/${ticket.id}/move`, { column: 'Done', force: true })
+
+    const { body: overview } = await call<Overview>('GET', '/overview')
+    assert.equal(overview.boards.find((board) => board.id === boardId)?.costUsd, 1.75)
+    const costOf = (ticketId: string) => overview.completions.find((entry) => entry.ticketId === ticketId)?.costUsd
+    assert.deepEqual([costOf(done.id), costOf(local.id)], [1.75, null])
+
+    // Only runs within the range count towards a board's cost; a board without runs that report one has none.
+    const later = getOverview(7, new Date(Date.now() + 8 * 24 * 60 * 60 * 1000))
+    assert.equal(later.boards.find((board) => board.id === boardId)?.costUsd, null)
+  })
+
   test('overview hides cleared agents until they do something again', async () => {
     const agent = 'stale-agent'
     const ticket = await addTicket({ title: 'A' })

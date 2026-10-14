@@ -12,6 +12,7 @@ import {
   requestAgentLoginSchema,
   setAgentServicesSchema,
   setGitHubTokenSchema,
+  setUsageReserveSchema,
 } from '../../shared/schemas.ts'
 import type { AppServices } from '../app.ts'
 import { now, transaction } from '../db.ts'
@@ -19,7 +20,7 @@ import { badRequest, gitHubFailure } from '../errors.ts'
 import { actorOf, readJson } from '../http.ts'
 import { getAgentServices, reportAgentServices, setAgentsPaused } from '../store/agent-services.ts'
 import { cancelAppUpdate, getAppUpdate, reportAppUpdate, requestAppUpdate } from '../store/app-update.ts'
-import { getClaudeUsage, reportClaudeUsage } from '../store/claude-usage.ts'
+import { getClaudeUsage, reportClaudeUsage, setUsageReserve } from '../store/claude-usage.ts'
 import { reportDiskUsage } from '../store/disk-usage.ts'
 import {
   cancelAgentLogin,
@@ -34,7 +35,7 @@ import {
 
 /**
  * What the agent supervisor does on the host: updating and restarting ultrakanban itself (see `AppUpdate`), reading
- * how much Claude usage is left (see `ClaudeUsage`), the disk space of the boards' agents (see `AgentDiskUsage`), and
+ * how much Claude usage is left (see `ClaudeUsage`, with the share of it agents leave to people), the disk space of the boards' agents (see `AgentDiskUsage`), and
  * the agents' logins (see `AgentHost`), and switching every board's agents off and on (see `AgentServices`); and the
  * Setup page.
  */
@@ -72,6 +73,10 @@ export const systemRoutes = ({ pullRequests: { github } }: AppServices) => {
       .post('/claude-usage', async (c) => {
         const input = await readJson(c, reportClaudeUsageSchema)
         return c.json(transaction(() => reportClaudeUsage(input)))
+      })
+      .put('/claude-usage/reserve', async (c) => {
+        const { reservePercent } = await readJson(c, setUsageReserveSchema)
+        return c.json(transaction(() => setUsageReserve(reservePercent)))
       })
       .post('/disk-usage', async (c) => {
         const input = await readJson(c, reportDiskUsageSchema)

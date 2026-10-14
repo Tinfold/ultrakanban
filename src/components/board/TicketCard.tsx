@@ -23,7 +23,18 @@ import { EpicChip } from '@/components/common/EpicChip'
 import { TagChip } from '@/components/common/TagChip'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { WaitingBadge } from '@/components/common/WaitingBadge'
-import { dueState, formatDueDate, formatUsage, formatUsageShort, ticketRef } from '@/lib/format'
+import {
+  BUDGET_STYLES,
+  budgetLevel,
+  COST_NOTE,
+  dueState,
+  formatBudget,
+  formatCost,
+  formatDueDate,
+  formatUsage,
+  formatUsageShort,
+  ticketRef,
+} from '@/lib/format'
 import { checklistProgress } from '@/lib/markdown'
 import { CONFLICTS_HINT } from '@/lib/pull-request'
 import { cn } from '@/lib/utils'
@@ -36,6 +47,18 @@ const DUE_STYLES = {
   overdue: 'text-red-600 dark:text-red-400',
   soon: 'text-amber-600 dark:text-amber-400',
   later: '',
+}
+
+/** The tooltip of a ticket's usage: its tokens, runs and cost, and its budget if it has one. */
+function usageTitle({ usage, budget }: Ticket) {
+  const lines = [formatUsage(usage)]
+  if (budget) {
+    lines.push(
+      `Budget: ${formatBudget(budget)}${budget.over ? '. Used up: its agent starts no more runs on it until it is raised or cleared' : ''}`,
+    )
+  }
+  if (usage.costUsd !== null) lines.push(COST_NOTE)
+  return lines.join('\n')
 }
 
 interface TicketCardProps {
@@ -192,9 +215,22 @@ export function TicketCard({ ticket, overlay, selecting, selected }: TicketCardP
             </span>
           )}
           {ticket.usage.runs > 0 && (
-            <span className="flex items-center gap-1 tabular-nums" title={formatUsage(ticket.usage)}>
+            <span
+              className={cn(
+                'flex items-center gap-1 tabular-nums',
+                ticket.budget && BUDGET_STYLES[budgetLevel(ticket.budget)],
+              )}
+              title={usageTitle(ticket)}
+            >
               <CoinsIcon />
-              {formatUsageShort(ticket.usage)}
+              {ticket.budget ? (
+                <>
+                  {formatCost(ticket.budget.spentUsd)}
+                  <span className="opacity-60">/{formatCost(ticket.budget.limitUsd)}</span>
+                </>
+              ) : (
+                formatUsageShort(ticket.usage)
+              )}
             </span>
           )}
           {canMerge && <QuickMergeButton ticket={ticket} />}

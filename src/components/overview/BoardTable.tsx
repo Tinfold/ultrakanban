@@ -1,7 +1,7 @@
 import { BotIcon } from 'lucide-react'
 import { Link } from 'wouter'
 import type { BoardDiskUsage, OverviewBoard } from '@shared/domain'
-import { formatBytes, formatDateTime, formatRelative, formatTokens } from '@/lib/format'
+import { COST_NOTE, formatBytes, formatCost, formatDateTime, formatRelative, formatTokens } from '@/lib/format'
 import { diskBytes } from '@/lib/overview'
 
 const COUNTS = [
@@ -46,6 +46,9 @@ export function BoardTable({ boards }: { boards: OverviewBoard[] }) {
             <th scope="col" className="px-3 py-2 text-right font-medium whitespace-nowrap">
               Tokens
             </th>
+            <th scope="col" className="px-3 py-2 text-right font-medium whitespace-nowrap" title={COST_NOTE}>
+              Cost (est.)
+            </th>
             <th scope="col" className="px-3 py-2 text-right font-medium whitespace-nowrap">
               Disk
             </th>
@@ -78,6 +81,13 @@ export function BoardTable({ boards }: { boards: OverviewBoard[] }) {
               ))}
               <td className="px-3 py-2 text-right tabular-nums" title={`${board.tokens.toLocaleString()} tokens`}>
                 {board.tokens ? formatTokens(board.tokens) : <span className="text-muted-foreground/60">0</span>}
+              </td>
+              <td className="px-3 py-2 text-right tabular-nums" title={COST_NOTE}>
+                {board.costUsd === null ? (
+                  <span className="text-muted-foreground/60">—</span>
+                ) : (
+                  formatCost(board.costUsd)
+                )}
               </td>
               <td className="px-3 py-2 text-right whitespace-nowrap tabular-nums" title={diskDetail(board.disk)}>
                 {diskBytes(board.disk) ? (

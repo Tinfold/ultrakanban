@@ -1,13 +1,13 @@
-import type { Ticket } from '../shared/domain.ts'
+import type { Ticket, TicketBudget } from '../shared/domain.ts'
 import { now, sql } from './db.ts'
 import { getBoard } from './store/boards.ts'
 
 /**
  * Why a ticket needs a person: its agent asked something (`question`), someone has to look at it, e.g. CI that
  * didn't run properly (`attention`), its agent's plan waits for approval (`approval`), a question ticket was answered
- * (`answer`), or its pull request is ready to merge (`ready`).
+ * (`answer`), its pull request is ready to merge (`ready`), or its agent runs used up its budget (`budget`).
  */
-export type NotificationKind = 'question' | 'attention' | 'approval' | 'answer' | 'ready'
+export type NotificationKind = 'question' | 'attention' | 'approval' | 'answer' | 'ready' | 'budget'
 
 export interface Notification {
   kind: NotificationKind
@@ -32,6 +32,23 @@ const HEADLINES: Record<NotificationKind, string> = {
   approval: 'waits for approval of its plan',
   answer: 'was answered',
   ready: 'is ready to merge',
+  budget: 'used up its budget',
+}
+
+const NTFY_TAGS: Partial<Record<NotificationKind, string>> = { ready: 'white_check_mark', budget: 'money_with_wings' }
+
+const usd = (amount: number) => `$${amount.toFixed(2)}`
+
+/**
+ * What a `budget` notification says: what the ticket's runs cost against which budget, and how to let its agent go on.
+ * `own` is whether the budget is the ticket's own rather than its board's default.
+ */
+export function budgetMessage(budget: TicketBudget, own: boolean) {
+  const cap = own ? `its ${usd(budget.limitUsd)} budget` : `the board's budget of ${usd(budget.limitUsd)} per ticket`
+  return (
+    `Its agent runs have cost an estimated ${usd(budget.spentUsd)}, which uses up ${cap}, so its agent starts no ` +
+    `more runs on it. Raise or clear the budget to let the agent carry on.`
+  )
 }
 
 const isDiscord = (url: URL) =>
@@ -54,7 +71,7 @@ export async function sendNotification(target: string, notification: Notificatio
   } else if (isNtfy(url)) {
     // Query parameters rather than headers, which can't carry non-ASCII text such as an emoji in a ticket title.
     url.searchParams.set('title', title)
-    url.searchParams.set('tags', notification.kind === 'ready' ? 'white_check_mark' : 'raising_hand')
+    url.searchParams.set('tags', NTFY_TAGS[notification.kind] ?? 'raising_hand')
     if (link) url.searchParams.set('click', link)
     body = message
     contentType = 'text/plain; charset=utf-8'

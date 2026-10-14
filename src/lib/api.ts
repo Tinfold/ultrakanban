@@ -153,6 +153,9 @@ export const api = {
   showHiddenAgents: () => request<void>('DELETE', '/overview/hidden-agents'),
   appUpdate: () => request<AppUpdate>('GET', '/system/update'),
   claudeUsage: () => request<ClaudeUsage>('GET', '/system/claude-usage'),
+  /** Sets the share of the week after which agents claim no new tickets; `null` switches it off. */
+  setUsageReserve: (reservePercent: number | null) =>
+    request<ClaudeUsage>('PUT', '/system/claude-usage/reserve', { reservePercent }),
   requestAppUpdate: (input: RequestAppUpdateInput = {}) => request<AppUpdate>('POST', '/system/update', input),
   cancelAppUpdate: () => request<AppUpdate>('DELETE', '/system/update'),
   setup: () => request<SetupStatus>('GET', '/system/setup'),

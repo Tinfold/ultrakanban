@@ -57,10 +57,37 @@ adopt() {
   log "ticket #$number ($id): reassigned from $holder to $worker"
 }
 
+# The note on a ticket whose agent runs used up its budget, from its budget (see TicketBudget in shared/domain.ts) with
+# whether the ticket set the budget itself (own) or has its board's.
+read -r -d '' BUDGET_NOTE <<'JQ'
+def usd: (. * 100 | round) as $cents
+  | "$\($cents / 100 | floor).\($cents % 100 | tostring | if length < 2 then "0" + . else . end)";
+(if .own then "its \(.limitUsd | usd) budget" else "the board's budget of \(.limitUsd | usd) per ticket" end) as $cap
+| "Its agent runs have cost an estimated \(.spentUsd | usd), which uses up \($cap), so the loop starts no more runs on "
+  + "it. "
+  + (if .own then "Raise or clear the ticket's budget (Budget in its properties)"
+     else "Give the ticket a budget of its own (Budget in its properties), or raise or clear the board's (Board "
+       + "settings)," end)
+  + " to let the agent carry on with the feedback waiting for it. Costs are only known once a run ends, so the loop "
+  + "checks the budget before each run, and the run that used it up may have gone over."
+JQ
+
+# Holds back the runs of a ticket whose agent runs cost its budget or more, given as its budget JSON with own (see
+# BUDGET_NOTE) and whether its state says the loop noted that already. Says so on the ticket once (budgetNoted in its
+# state, dropped once the budget lets a run start again). Raising or clearing the budget lets the next round run the
+# ticket, with the feedback that came meanwhile.
+hold_over_budget() {
+  local id=$1 number=$2 budget=$3 noted=$4
+  [[ $noted == true ]] && return 0
+  log "ticket #$number ($id): its runs used up its budget; not starting more until it is raised or cleared"
+  note "$id" "$(jq -r "$BUDGET_NOTE" <<<"$budget")"
+  update_state "$id" '.budgetNoted = true'
+}
+
 # Checks the tickets the agent holds and handles the first one that needs work. Returns 1 if none did.
 handle_feedback() {
   local board review cancelled idle tickets file id number column holder version ticket_model ticket_effort pr_url repo pr_number \
-    queued approval pr branch ci issue reviews inline activity state triage items ci_note next
+    queued approval budget pr branch ci issue reviews inline activity state triage items ci_note next
   claim_lock -s
   board=$(get "/boards/$BOARD") || { claim_unlock; log "can't read board $BOARD"; return 1; }
   review=$(jq -r '.board.reviewColumnId // ""' <<<"$board")
@@ -73,7 +100,8 @@ handle_feedback() {
     | select(.columnId != $done and .columnId != $cancelled)
     | [.id, .number, .columnId, .assignee, .version, .agentModel // "-", .agentEffort // "-", .pullRequest.url // "-",
        .pullRequest.repo // "-", .pullRequest.number // "-",
-       ($idle[.columnId] | if .queued then .name else "-" end), .approval // "-"] | @tsv' \
+       ($idle[.columnId] | if .queued then .name else "-" end), .approval // "-",
+       (if .budget.over then .budget + {own: (.budgetUsd != null)} | tojson else "-" end)] | @tsv' \
     <<<"$board")
   board=
 
@@ -94,7 +122,7 @@ handle_feedback() {
   claim_unlock
 
   while IFS=$'\t' read -r -u 3 id number column holder version ticket_model ticket_effort pr_url repo pr_number queued \
-    approval; do
+    approval budget; do
     [[ -n $id ]] || continue
     # Another loop is working this one.
     unlock_ticket
@@ -152,6 +180,12 @@ loop stopped starting runs for CI on this ticket. Comment on the ticket to let i
       update_state "$id" '.capNoted = true'
     fi
     [[ $(jq -r .run <<<"$triage") == true ]] || continue
+    # A ticket over its budget keeps its feedback (no snapshot is saved) for when the budget is raised or cleared.
+    if [[ $budget != - ]]; then
+      hold_over_budget "$id" "$number" "$budget" "$(jq -r '.budgetNoted // false' <<<"$state")"
+      continue
+    fi
+    if [[ $(jq -r '.budgetNoted // false' <<<"$state") == true ]]; then update_state "$id" 'del(.budgetNoted)'; fi
 
     use_worker "${ticket_model#-}" "${ticket_effort#-}"
     adopt "$id" "$number" "$holder" "$version" || continue
@@ -240,6 +274,18 @@ their first run yet (CLAIM_LIMIT $CLAIM_LIMIT)"
     response=$(claim_from "$BACKLOG_COLUMN")
     status=${response##*$'\n'}
     ticket=${response%$'\n'*}
+  fi
+  if [[ $status == 404 && $ticket == *usage_reserve_reached* ]]; then
+    # Agents leave the rest of the week's Claude usage to people (the usage reserve, set on the overview next to the
+    # Claude usage). Tickets the agent holds still get runs; only claiming waits, and the board says why.
+    claim_unlock
+    [[ -n $reserve_held ]] || log "not claiming new tickets: $(jq -r '.error.message // empty' <<<"$ticket")"
+    reserve_held=1
+    return 1
+  fi
+  if [[ -n $reserve_held && ($status == 200 || $ticket == *no_ticket_available*) ]]; then
+    log "the week's Claude usage is below the usage reserve again: claiming new tickets"
+    reserve_held=
   fi
   if [[ $status != 200 ]]; then
     claim_unlock

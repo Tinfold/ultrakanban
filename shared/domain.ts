@@ -369,6 +369,12 @@ export interface BoardSummary {
    * /boards/:id/agent-cleanup`); each loop does it before its next run, or at once when idle. Null if never asked.
    */
   agentCleanupRequestedAt: string | null
+  /**
+   * Most the agent runs on one of its tickets may cost, in estimated US dollars, unless the ticket sets its own
+   * (`Ticket.budgetUsd`). A ticket whose runs cost that much is neither claimed nor run again (see `TicketBudget`).
+   * No cap when not set.
+   */
+  ticketBudgetUsd: number | null
   ticketCount: number
   createdAt: string
   updatedAt: string
@@ -440,6 +446,10 @@ export interface Ticket {
   attachmentCount: number
   /** Tokens agents' runs used on it, added up over all of them. */
   usage: TicketUsage
+  /** Most its agent runs may cost, in estimated US dollars; the board's `ticketBudgetUsd` when not set. */
+  budgetUsd: number | null
+  /** Its spending cap and what its runs cost so far; null when neither it nor its board sets a cap. */
+  budget: TicketBudget | null
   /** The agent run working the ticket right now, if any (see `AgentRun`). */
   run: AgentRun | null
   /**
@@ -501,6 +511,36 @@ export interface TicketUsage {
   tokens: number
   /** Estimated cost in US dollars of the runs that reported one; `null` when none did. */
   costUsd: number | null
+}
+
+/**
+ * A ticket's spending cap (`Ticket.budget`), so one ticket can't spend without limit. Costs are estimates (what the
+ * agent reports; claude's are at API prices, also on a subscription plan) and only known once a run ends, so the cap
+ * is checked before each run: the run that crosses it finishes, and can go over by up to its own cost.
+ */
+export interface TicketBudget {
+  /** The cap in US dollars: the ticket's own `budgetUsd`, or else its board's `ticketBudgetUsd`. */
+  limitUsd: number
+  /** What its runs cost so far (`usage.costUsd`, 0 when none reported a cost). */
+  spentUsd: number
+  /**
+   * Whether its runs cost the cap or more: agents don't claim it (`claim-next`) and the agent loop starts no runs on
+   * it until the cap is raised or cleared.
+   */
+  over: boolean
+}
+
+/** Share of a ticket's budget its runs can cost before the board warns that it is nearly used up. */
+export const BUDGET_WARNING_SHARE = 0.8
+
+/**
+ * A ticket's budget, from its cap (its own `budgetUsd`, or else its board's `ticketBudgetUsd`) and what its runs cost
+ * (`usage.costUsd`); null without a cap.
+ */
+export function ticketBudget(limitUsd: number | null, costUsd: number | null): TicketBudget | null {
+  if (limitUsd === null) return null
+  const spentUsd = costUsd ?? 0
+  return { limitUsd, spentUsd, over: spentUsd >= limitUsd }
 }
 
 /** A finished or abandoned ticket like the one a suggestion is for (see `AgentSettingStats`). */
@@ -816,6 +856,8 @@ export interface OverviewBoard {
   events: number
   /** Tokens agents used on its tickets within the range. */
   tokens: number
+  /** Estimated cost in US dollars of those runs, of the ones that reported one; null when none did. */
+  costUsd: number | null
   lastActivityAt: string | null
   disk: BoardDiskUsage
 }
@@ -904,6 +946,8 @@ export interface OverviewCompletion {
   cycleMs: number | null
   /** From when it last entered the review column to done, if it went straight from review to done. */
   reviewMs: number | null
+  /** Estimated cost in US dollars of all the agent runs on the ticket, whenever they ran; null when none reported one. */
+  costUsd: number | null
 }
 
 /** An agent run's token usage within the range. */
@@ -1018,8 +1062,22 @@ export interface ClaudeUsageLimit {
 }
 
 /**
+ * Whether a usage limit counts the week, for all models or for one (as opposed to the current session): the labels
+ * the board gives them start with "Week" ("Week, all models", "Week, Opus"), or with "weekly" for kinds of limit it
+ * doesn't know.
+ */
+export const isWeeklyLimit = (limit: Pick<ClaudeUsageLimit, 'label'>) => /^week/i.test(limit.label)
+
+/**
+ * How old a usage report can be and still hold agents back with the usage reserve (`ClaudeUsage.reservePercent`). The
+ * supervisor reports every 5 minutes, so an older report means it stopped reporting: agents then claim as usual rather
+ * than wait on a number nobody updates.
+ */
+export const CLAUDE_USAGE_FRESH_MINUTES = 30
+
+/**
  * How much Claude usage is left, as the agent supervisor (`scripts/agent-supervisor.sh`, on the host) last read it from
- * Claude's usage endpoint with the host's claude login.
+ * Claude's usage endpoint with the host's claude login, and the share of the week agents leave for the user.
  */
 export interface ClaudeUsage {
   /** When the supervisor last reported; null if it never has. */
@@ -1029,6 +1087,17 @@ export interface ClaudeUsage {
   limits: ClaudeUsageLimit[]
   /** Why the last report has no limits, e.g. no claude login on the host. */
   error: string | null
+  /**
+   * The usage reserve, one setting for the whole Claude account: once a weekly limit is used to this percent (1 to
+   * 100), agents claim no new tickets (`claim-next`), so the rest of the week is left for the user's own sessions.
+   * Tickets agents already hold still get runs for their feedback. Null when off.
+   */
+  reservePercent: number | null
+  /**
+   * The weekly limit that holds agents back right now: the most used one, when the report is fresh (see
+   * `CLAUDE_USAGE_FRESH_MINUTES`), it is at or over `reservePercent`, and it hasn't reset since. Null otherwise.
+   */
+  reserveReached: ClaudeUsageLimit | null
 }
 
 /** Where the board's GitHub token comes from: set on the Setup page, `GITHUB_TOKEN`, or the GitHub CLI's login. */

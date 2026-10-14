@@ -1,5 +1,5 @@
 import { differenceInCalendarDays, format, formatDistanceStrict, isThisYear, parseISO } from 'date-fns'
-import type { RunRecord, TicketUsage } from '@shared/domain'
+import { BUDGET_WARNING_SHARE, type RunRecord, type TicketBudget, type TicketUsage } from '@shared/domain'
 
 export const toISODate = (date: Date) => format(date, 'yyyy-MM-dd')
 
@@ -61,17 +61,27 @@ export function formatBytes(bytes: number) {
 
 const dollars = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' })
 
-/** US dollars to the cent, e.g. `$12.34`; amounts below a cent read `<$0.01`. */
+/**
+ * US dollars to the cent, e.g. `$12.34`; amounts below a cent read `<$0.01`. Every cost on the board goes through it:
+ * they are estimates (see `COST_NOTE`), so label them as such where they are shown.
+ */
 export const formatCost = (usd: number) => (usd > 0 && usd < 0.01 ? '<$0.01' : dollars.format(usd))
+
+/**
+ * What every cost the board shows is, for its tooltips: claude's `total_cost_usd`, what the runs would cost at API
+ * prices, which on a subscription plan is an equivalent rather than what is billed.
+ */
+export const COST_NOTE =
+  'Estimated: what the agent reports its runs cost at API prices. On a subscription plan this is an equivalent, not what you are billed.'
 
 /** A ticket's usage in a few characters: its cost when its runs reported one, else its tokens. */
 export const formatUsageShort = (usage: TicketUsage) =>
   usage.costUsd !== null ? formatCost(usage.costUsd) : formatTokens(usage.tokens)
 
-/** A ticket's usage in full, e.g. `1.2M tokens over 3 runs, $4.56`. */
+/** A ticket's usage in full, e.g. `1.2M tokens over 3 runs, $4.56 estimated`. */
 export function formatUsage(usage: TicketUsage) {
   const runs = `${usage.runs} ${usage.runs === 1 ? 'run' : 'runs'}`
-  const cost = usage.costUsd !== null ? `, ${formatCost(usage.costUsd)}` : ''
+  const cost = usage.costUsd !== null ? `, ${formatCost(usage.costUsd)} estimated` : ''
   return `${formatTokens(usage.tokens)} tokens over ${runs}${cost}`
 }
 
@@ -103,6 +113,21 @@ export function formatRunTotals(run: Pick<RunRecord, 'durationMs' | 'turns' | 'c
     .filter(Boolean)
     .join(' · ')
 }
+
+/** How much of a ticket's budget its runs cost: `over` once used up, `near` from `BUDGET_WARNING_SHARE` of it on. */
+export function budgetLevel({ spentUsd, limitUsd, over }: TicketBudget): 'under' | 'near' | 'over' {
+  return over ? 'over' : spentUsd >= limitUsd * BUDGET_WARNING_SHARE ? 'near' : 'under'
+}
+
+/** Text colors for a ticket's cost by `budgetLevel`: amber when nearly used up, red once it is. */
+export const BUDGET_STYLES: Record<ReturnType<typeof budgetLevel>, string> = {
+  under: '',
+  near: 'text-amber-600 dark:text-amber-400',
+  over: 'text-red-600 dark:text-red-400',
+}
+
+/** A ticket's cost against its budget, e.g. `$4.12 of $5.00`. */
+export const formatBudget = (budget: TicketBudget) => `${formatCost(budget.spentUsd)} of ${formatCost(budget.limitUsd)}`
 
 /**
  * Readable model name, e.g. `Opus 5.5` for `claude-opus-5-5`, `Haiku 4.5` for `claude-haiku-4-5-20251001` and `Opus`

@@ -1,4 +1,9 @@
-import type { ClaudeUsage, ClaudeUsageLimit } from '../../shared/domain.ts'
+import {
+  CLAUDE_USAGE_FRESH_MINUTES,
+  type ClaudeUsage,
+  type ClaudeUsageLimit,
+  isWeeklyLimit,
+} from '../../shared/domain.ts'
 import type { ReportClaudeUsageInput } from '../../shared/schemas.ts'
 import { now, sql } from '../db.ts'
 
@@ -7,16 +12,49 @@ interface ClaudeUsageRow {
   plan: string | null
   limits: string
   error: string | null
+  reserve_percent: number | null
 }
 
-const toClaudeUsage = (row: ClaudeUsageRow): ClaudeUsage => ({
-  reportedAt: row.reported_at,
-  plan: row.plan,
-  limits: JSON.parse(row.limits) as ClaudeUsageLimit[],
-  error: row.error,
-})
+/**
+ * The weekly limit that holds agents back with the usage reserve at `at` (see `ClaudeUsage.reserveReached`): the most
+ * used of the weekly limits that haven't reset since the report, when the report is fresh and that one is at or over
+ * the reserve. A stale or missing report never holds them back, so agents don't stop with a supervisor that did.
+ */
+export function reserveReached(
+  { reportedAt, limits, reservePercent }: Pick<ClaudeUsage, 'reportedAt' | 'limits' | 'reservePercent'>,
+  at = Date.now(),
+): ClaudeUsageLimit | null {
+  if (reservePercent === null || !reportedAt) return null
+  if (Date.parse(reportedAt) < at - CLAUDE_USAGE_FRESH_MINUTES * 60_000) return null
+  // Past its reset time a limit starts again from nothing, even before the next report says so.
+  const running = limits.filter(
+    (limit) => isWeeklyLimit(limit) && (limit.resetsAt === null || Date.parse(limit.resetsAt) > at),
+  )
+  const most = running.reduce<ClaudeUsageLimit | null>(
+    (highest, limit) => (highest === null || limit.percent > highest.percent ? limit : highest),
+    null,
+  )
+  return most && most.percent >= reservePercent ? most : null
+}
+
+function toClaudeUsage(row: ClaudeUsageRow): ClaudeUsage {
+  const usage = {
+    reportedAt: row.reported_at,
+    plan: row.plan,
+    limits: JSON.parse(row.limits) as ClaudeUsageLimit[],
+    error: row.error,
+    reservePercent: row.reserve_percent,
+  }
+  return { ...usage, reserveReached: reserveReached(usage) }
+}
 
 export const getClaudeUsage = () => toClaudeUsage(sql.get<ClaudeUsageRow>('SELECT * FROM claude_usage WHERE id = 1')!)
+
+/** Sets the usage reserve (see `ClaudeUsage.reservePercent`); null switches it off. */
+export function setUsageReserve(reservePercent: number | null): ClaudeUsage {
+  sql.run('UPDATE claude_usage SET reserve_percent = ? WHERE id = 1', reservePercent)
+  return getClaudeUsage()
+}
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)

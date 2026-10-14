@@ -28,6 +28,7 @@ interface BoardRow {
   approval_size: TicketSize | null
   notify_url: string | null
   agent_cleanup_requested_at: string | null
+  ticket_budget_usd: number | null
   ticket_count: number
   created_at: string
   updated_at: string
@@ -58,6 +59,7 @@ const toBoard = (row: BoardRow): BoardSummary => ({
   approvalSize: row.approval_size,
   notifyUrl: row.notify_url,
   agentCleanupRequestedAt: row.agent_cleanup_requested_at,
+  ticketBudgetUsd: row.ticket_budget_usd,
   ticketCount: row.ticket_count,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -116,6 +118,7 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     archiveDoneDays,
     approvalSize,
     notifyUrl,
+    ticketBudgetUsd,
   } = input
   return updateBoard(id, {
     reviewColumn,
@@ -134,6 +137,7 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     archiveDoneDays,
     approvalSize,
     notifyUrl,
+    ticketBudgetUsd,
   })
 }
 
@@ -159,6 +163,7 @@ export function updateBoard(id: string, input: UpdateBoardInput): BoardSummary {
     archive_done_days: input.archiveDoneDays,
     approval_size: input.approvalSize,
     notify_url: input.notifyUrl,
+    ticket_budget_usd: input.ticketBudgetUsd,
   })
   const board = getBoard(id)
   if (board.agentEnabled && !board.githubRepo) {

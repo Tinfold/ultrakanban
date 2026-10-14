@@ -163,6 +163,16 @@ the week, and any per-model weekly limit, as `/usage` in claude shows them) ever
 with the claude login in `~/.claude/.credentials.json` (or `$CLAUDE_CONFIG_DIR`), and the overview shows it as bars of
 the usage left and when each resets. The board itself can't read it: it runs in a container, without your login.
 
+**Usage reserve.** Agents share your Claude plan with you, and left alone they can use up the whole week. Set the
+**Usage reserve** under the Claude usage on the overview (one setting for the account, not per board), e.g. from 80% of
+the week: once the most used weekly limit (all models, or a per-model one such as Opus; not the current session)
+reaches it, `claim-next` hands out no new tickets, so every loop on every board stops claiming without any change to
+it. The loop logs it once (`not claiming new tickets: ...`, and again when it lifts) and idles; the overview marks the
+reserve on the weekly bars and says when agents paused new tickets. Tickets the agents already hold still get runs for
+their feedback, on purpose: a pull request in review whose reviewer asks for a change shouldn't wait a week, and those
+runs are usually small. When the week does run out, Claude's own limit stops them (see below). The reserve only goes by
+a report from the last 30 minutes: when the supervisor stops reporting, agents claim as usual rather than stop with it.
+
 **Disk usage.** Every 30 minutes (`DISK_USAGE_SECONDS`) the supervisor also measures, at low priority and in the
 background, how much disk space each board's agent folder (`~/.local/share/ultrakanban-agent/boards/<board>`) takes:
 its clone, the worktrees of its parallel runs, and the rest (loop state and the runs' scratch files). The overview's
@@ -238,6 +248,16 @@ medium and large ones, or every ticket: the run stops after posting the plan, an
 with an **Awaiting approval** badge (and in the overview's waiting list) until you press **Approve plan** on the ticket.
 That starts the next run, which does the work. Comment on the ticket instead to ask for a different plan: the agent
 answers and posts a revised one, and waits again. Move the ticket back to Backlog or cancel it to drop it.
+
+**Budgets.** Set **Budget per ticket** in Board settings (`ticketBudgetUsd`) to cap what the agent runs on any one
+ticket may cost, and give a ticket a budget of its own under **Budget** in its properties (`budgetUsd`). Once a
+ticket's runs cost that much, `claim-next` skips it, and before each run on a ticket it holds the loop checks the
+ticket's `budget`: while it is used up the loop starts no runs on it, not even for feedback, and says so on the ticket
+once (with what it cost and how to let it go on). Raise or clear the budget and the next round runs the ticket, with
+the feedback that came meanwhile. The board also sends its `budget` notification when a run uses a budget up. Costs
+are only known once a run ends (claude's `total_cost_usd`, an estimate at API prices, also on a subscription plan), so
+the budget is checked before each run, and the run that uses it up can go over it by its own cost. The card shows a
+ticket's cost against its budget, amber from 80% and red once it is used up.
 
 **Names.** The board's **Agent name** (default `claude`) names the loop, which controls the work; its notes on
 tickets come from `<agent>-loop`. The runs it starts claim tickets as `<agent>/<model>/<effort>`, from the board's

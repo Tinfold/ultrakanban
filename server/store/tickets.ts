@@ -16,6 +16,7 @@ import {
   needsApproval,
   QUESTION_TAG,
   type Ticket,
+  ticketBudget,
   type TicketSize,
 } from '../../shared/domain.ts'
 import { BLOCKED_TAG, parseBlockers } from '../../shared/blockers.ts'
@@ -40,6 +41,7 @@ import { newId, now, reorder, sql, touchBoard, updateRow } from '../db.ts'
 import { badRequest, conflict, HttpError, notFound } from '../errors.ts'
 import { publish } from '../events.ts'
 import { logActivity } from './activity.ts'
+import { getClaudeUsage } from './claude-usage.ts'
 import { getColumn, listColumns, resolveColumn, workflowColumns } from './columns.ts'
 import { resolveEpic } from './epics.ts'
 import { resolveTags } from './tags.ts'
@@ -57,6 +59,7 @@ interface TicketRow {
   agent_effort: AgentEffort | null
   agent_model: string | null
   agent_docker: number | null
+  budget_usd: number | null
   pr_url: string | null
   pr_state: string
   pr_title: string | null
@@ -91,6 +94,7 @@ interface TicketRow {
   usage_runs: number
   usage_tokens: number | null
   usage_cost: number | null
+  board_budget_usd: number | null
   waiting_since: string | null
 }
 
@@ -112,6 +116,16 @@ const SUBTICKETS = `
   WHERE c.parent_id = t.id
     AND c.column_id NOT IN (SELECT id FROM columns WHERE board_id = t.board_id AND lower(name) = '${CANCELLED_COLUMN}')`
 
+/**
+ * Whether the ticket `t` has used up its budget (see `TicketBudget`): its runs cost its own `budget_usd`, or else its
+ * board's `ticket_budget_usd`, or more. False when neither sets one.
+ */
+const OVER_BUDGET = `
+  coalesce(
+    coalesce((SELECT sum(cost_usd) FROM token_usage WHERE ticket_id = t.id), 0)
+      >= coalesce(t.budget_usd, (SELECT ticket_budget_usd FROM boards WHERE id = t.board_id)),
+    0)`
+
 /** Whether the sub-ticket `c` is finished: merged, or in the board's done column (its last column if it has none). */
 const SUBTICKET_DONE = `
   (c.pr_state = 'merged' OR c.column_id = coalesce(
@@ -127,6 +141,7 @@ const SELECT_TICKETS = `
     (SELECT sum(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) FROM token_usage
       WHERE ticket_id = t.id) AS usage_tokens,
     (SELECT sum(cost_usd) FROM token_usage WHERE ticket_id = t.id) AS usage_cost,
+    (SELECT ticket_budget_usd FROM boards WHERE id = t.board_id) AS board_budget_usd,
     ${WAITING_SINCE} AS waiting_since,
     (SELECT count(*) ${SUBTICKETS}) AS subtickets_total,
     (SELECT count(*) ${SUBTICKETS} AND ${SUBTICKET_DONE}) AS subtickets_done,
@@ -195,6 +210,8 @@ const toTicket = (row: TicketRow): Ticket => ({
   commentCount: row.comment_count,
   attachmentCount: row.attachment_count,
   usage: { runs: row.usage_runs, tokens: row.usage_tokens ?? 0, costUsd: row.usage_cost },
+  budgetUsd: row.budget_usd,
+  budget: ticketBudget(row.budget_usd ?? row.board_budget_usd, row.usage_cost),
   run: runOf(row),
   waitingSince: row.waiting_since,
   estimate: row.estimate,
@@ -221,6 +238,7 @@ const EDITABLE_FIELDS = [
   'agentEffort',
   'agentModel',
   'agentDocker',
+  'budgetUsd',
 ] as const
 
 /** Actor recorded for changes caused by GitHub pull request updates. */
@@ -433,8 +451,9 @@ export function createTicket(boardId: string, input: CreateTicketInput, actor: s
   const timestamp = now()
   sql.run(
     `INSERT INTO tickets (id, board_id, column_id, number, title, description, priority, assignee, due_date,
-       agent_effort, agent_model, agent_docker, parent_id, epic_id, position, moved_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       agent_effort, agent_model, agent_docker, budget_usd, parent_id, epic_id, position, moved_at, created_at,
+       updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     boardId,
     column.id,
@@ -447,6 +466,7 @@ export function createTicket(boardId: string, input: CreateTicketInput, actor: s
     input.agentEffort ?? null,
     input.agentModel ?? null,
     input.agentDocker == null ? null : Number(input.agentDocker),
+    input.budgetUsd ?? null,
     parentId,
     epicId,
     count,
@@ -478,6 +498,7 @@ export function updateTicket(id: string, input: UpdateTicketInput, actor: string
     agent_effort: has('agentEffort') ? input.agentEffort : undefined,
     agent_model: has('agentModel') ? input.agentModel : undefined,
     agent_docker: has('agentDocker') ? (input.agentDocker == null ? null : Number(input.agentDocker)) : undefined,
+    budget_usd: has('budgetUsd') ? input.budgetUsd : undefined,
   })
 
   if (input.tags) {
@@ -673,16 +694,36 @@ export function releaseIdleTickets(columnId: string, input: ReleaseIdleInput, ac
 }
 
 /**
+ * Turns down claiming new tickets while the usage reserve holds agents back (see `ClaudeUsage.reserveReached`), so the
+ * rest of the week's Claude usage is left for the user. Only new tickets: those agents already hold go on getting runs.
+ */
+function assertBelowUsageReserve() {
+  const { reserveReached: limit, reservePercent } = getClaudeUsage()
+  if (!limit) return
+  const resets = limit.resetsAt ? ` It resets at ${limit.resetsAt}.` : ''
+  throw new HttpError(
+    404,
+    'usage_reserve_reached',
+    `Agents claim no new tickets while the rest of the week's Claude usage is kept for people's own sessions: ` +
+      `${limit.label} is at ${Math.round(limit.percent)}%, and the usage reserve starts at ${reservePercent}%. ` +
+      `Tickets agents already hold can still be worked.${resets}`,
+    { limit, reservePercent },
+  )
+}
+
+/**
  * Atomically claims the most important unassigned ticket of a column:
  * highest priority first, then earliest due date, then board order.
  * Blocked tickets are skipped: tagged `blocked`, waiting for an unfinished ticket (`blocked by #12`), or with
- * unfinished sub-tickets.
+ * unfinished sub-tickets. So are tickets whose runs used up their budget (see `TicketBudget`). Nothing is claimed
+ * while the usage reserve holds agents back.
  */
 export function claimNextTicket(boardId: string, input: ClaimNextInput): Ticket {
   touchBoard(boardId)
   const column = resolveColumn(boardId, input.column)
   // Checked even with nothing to claim, so a missing column shows before there is a ticket that can't be claimed.
   if (input.moveTo) resolveColumn(boardId, input.moveTo)
+  assertBelowUsageReserve()
   const tagIds = resolveTags(boardId, input.tags ?? [], { create: false })
   const tagFilter = tagIds.map(() => 'AND EXISTS (SELECT 1 FROM ticket_tags WHERE ticket_id = t.id AND tag_id = ?)')
   const candidates = sql.all<{ id: string; number: number; description: string }>(
@@ -691,6 +732,7 @@ export function claimNextTicket(boardId: string, input: ClaimNextInput): Ticket 
        AND NOT EXISTS (SELECT 1 FROM ticket_tags tt JOIN tags g ON g.id = tt.tag_id
                        WHERE tt.ticket_id = t.id AND lower(g.name) = ?)
        AND NOT EXISTS (SELECT 1 ${SUBTICKETS} AND NOT ${SUBTICKET_DONE})
+       AND NOT ${OVER_BUDGET}
      ORDER BY t.priority DESC, t.due_date IS NULL, t.due_date, t.position`,
     column.id,
     ...tagIds,

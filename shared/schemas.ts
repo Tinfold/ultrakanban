@@ -62,6 +62,8 @@ const notifyUrl = z
   .nullable()
 /** Skips the merged-pull-request requirement of the board's done column. Meant for humans, not agents. */
 const force = z.boolean().optional()
+/** A spending cap in estimated US dollars (see `TicketBudget`), from a cent up; `null` for none. */
+const budgetUsd = z.number().min(0.01).max(1_000_000).nullable()
 
 export const createBoardSchema = z.object({
   name,
@@ -83,6 +85,7 @@ export const createBoardSchema = z.object({
   archiveDoneDays: archiveDoneDays.optional(),
   approvalSize: ticketSize.nullable().optional(),
   notifyUrl: notifyUrl.optional(),
+  ticketBudgetUsd: budgetUsd.optional(),
 })
 
 export const updateBoardSchema = z.object({
@@ -104,6 +107,7 @@ export const updateBoardSchema = z.object({
   archiveDoneDays: archiveDoneDays.optional(),
   approvalSize: ticketSize.nullable().optional(),
   notifyUrl: notifyUrl.optional(),
+  ticketBudgetUsd: budgetUsd.optional(),
 })
 
 /** Creates a repository on GitHub and links it to the board. */
@@ -169,6 +173,7 @@ export const createTicketSchema = z.object({
   agentEffort: agentEffort.optional(),
   agentModel: agentModel.optional(),
   agentDocker: z.boolean().nullable().optional(),
+  budgetUsd: budgetUsd.optional(),
   pullRequest: pullRequestUrl.nullable().optional(),
   position: position.optional(),
   /** The ticket it is a sub-ticket of: its id or number (`12` or `#12`). */
@@ -191,6 +196,8 @@ export const updateTicketSchema = z.object({
   agentEffort: agentEffort.optional(),
   agentModel: agentModel.optional(),
   agentDocker: z.boolean().nullable().optional(),
+  /** Its own spending cap, or with `null` the board's (`ticketBudgetUsd`). */
+  budgetUsd: budgetUsd.optional(),
   pullRequest: pullRequestUrl.nullable().optional(),
   /** Makes it a sub-ticket of another ticket (its id or number), or with `null` a ticket of its own again. */
   parent: ref.nullable().optional(),
@@ -306,6 +313,9 @@ export const reportClaudeUsageSchema = z.object({
   usage: z.record(z.string(), z.unknown()).optional(),
   error: z.string().trim().max(4000).nullable().optional(),
 })
+
+/** Setting the usage reserve (see `ClaudeUsage.reservePercent`): a whole percent of the week, or `null` for off. */
+export const setUsageReserveSchema = z.object({ reservePercent: z.int().min(1).max(100).nullable() })
 
 const bytes = z.number().int().nonnegative()
 
@@ -511,6 +521,7 @@ export const boardExportSchema = z.object({
       agentEffort: agentEffort.default(null),
       agentModel: agentModel.default(null),
       agentDocker: z.boolean().nullable().default(null),
+      budgetUsd: budgetUsd.default(null),
       pullRequest: z
         .object({
           url: pullRequestUrl,
@@ -551,6 +562,7 @@ export type SubmitForReviewInput = z.input<typeof submitForReviewSchema>
 export type ReportAppUpdateInput = z.input<typeof reportAppUpdateSchema>
 export type RequestAppUpdateInput = z.input<typeof requestAppUpdateSchema>
 export type ReportClaudeUsageInput = z.input<typeof reportClaudeUsageSchema>
+export type SetUsageReserveInput = z.input<typeof setUsageReserveSchema>
 export type ReportDiskUsageInput = z.input<typeof reportDiskUsageSchema>
 export type AttachmentCleanupInput = z.input<typeof attachmentCleanupSchema>
 export type ReportAgentHostInput = z.input<typeof reportAgentHostSchema>
