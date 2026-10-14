@@ -5,45 +5,55 @@ import { toast } from 'sonner'
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { agentsSwitching, queryKeys, useAgentServices } from '@/hooks/queries'
+import { queryKeys, useAgentServices, useBoards } from '@/hooks/queries'
 import { useNow } from '@/hooks/use-now'
+import { agentsSwitchState } from '@/lib/agents-switch'
 import { api, errorMessage } from '@/lib/api'
 import { formatRelative } from '@/lib/format'
 
-/** The supervisor reports every 30 seconds; after this long without it, nothing starts or stops the agents. */
-const SUPERVISOR_OFFLINE_MS = 3 * 60_000
-
 const boards = (count: number) => `${count} board${count === 1 ? '' : 's'}`
+const list = (names: string[]) =>
+  names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
 
 /**
  * Every board's agents at once: green while each board whose agent is on has its loop running, a warning otherwise.
- * Clicking it stops them all (with the containers their runs use), or starts them again. The agent supervisor does it on
- * the host, so this shows once it has reported.
+ * Clicking it stops them all (with the containers their runs use), or starts them again; while they are on, it starts
+ * the boards' loops that stopped now, rather than after the supervisor's wait between retries. The agent supervisor does
+ * it on the host, so this shows once it has reported.
  */
 export function AgentsSwitch() {
   const queryClient = useQueryClient()
-  const { data: services } = useAgentServices()
+  const { data: services, dataUpdatedAt } = useAgentServices()
+  const { data: boardList } = useBoards()
   const now = useNow()
   const [confirming, setConfirming] = useState(false)
   const [sending, setSending] = useState(false)
   if (!services?.reportedAt) return null
 
-  const offline = now - Date.parse(services.reportedAt) > SUPERVISOR_OFFLINE_MS
-  const switching = !offline && agentsSwitching(services)
-  const missing = services.wanted.filter((id) => !services.running.includes(id)).length
-  const up = !services.paused && !offline && missing === 0
+  // The server's time now: it stamped the report, and its clock can be off from this browser's (see the Setup page).
+  const serverNow = Math.max(now, dataUpdatedAt) + Date.parse(services.serverTime) - dataUpdatedAt
+  const state = agentsSwitchState(services, serverNow, (id) => boardList?.find((board) => board.id === id)?.name)
+  const up = state.kind === 'up'
 
-  const status = offline
-    ? `The agent supervisor last reported ${formatRelative(services.reportedAt)}, so nothing starts or stops the agents. Start it with: systemctl --user start ultrakanban-agent`
-    : switching
-      ? services.paused
-        ? 'Stopping the agents…'
-        : 'Starting the agents…'
-      : services.paused
-        ? 'Agents are switched off. Click to start them.'
-        : missing > 0
-          ? `Agents aren’t running on ${missing} of ${boards(services.wanted.length)}. Click to start them.`
-          : `Agents are running on ${boards(services.wanted.length)}. Click to stop them.`
+  let status: string
+  switch (state.kind) {
+    case 'offline':
+      status = `The agent supervisor last reported ${formatRelative(services.reportedAt)}, so nothing starts or stops the agents. Start it with: systemctl --user start ultrakanban-agent`
+      break
+    case 'switching':
+      status = state.paused ? 'Stopping the agents…' : 'Starting the agents…'
+      break
+    case 'paused':
+      status = 'Agents are switched off. Click to start them.'
+      break
+    case 'missing':
+      status = `Agents aren’t running on ${list(state.boards)}. The supervisor starts them again after a wait; click to start them now.`
+      break
+    case 'up':
+      status = state.boards
+        ? `Agents are running on ${boards(state.boards)}. Click to stop them.`
+        : 'Agents are on, but no board has its agent switched on. Click to switch them off.'
+  }
 
   const switchTo = async (paused: boolean) => {
     setSending(true)
@@ -64,10 +74,10 @@ export function AgentsSwitch() {
             variant="ghost"
             size="icon-sm"
             aria-label={up ? 'Stop the agents' : 'Start the agents'}
-            disabled={switching || sending}
-            onClick={() => (offline ? toast.error(status) : setConfirming(true))}
+            disabled={state.kind === 'switching' || sending}
+            onClick={() => (state.kind === 'offline' ? toast.error(status) : setConfirming(true))}
           >
-            {switching ? (
+            {state.kind === 'switching' ? (
               <Loader2Icon className="animate-spin" />
             ) : up ? (
               <BotIcon className="text-emerald-600 dark:text-emerald-400" />
@@ -86,6 +96,15 @@ export function AgentsSwitch() {
           description="Every board's agent loop stops, along with the containers their runs use, and none starts until you start them again here. Runs in progress stop too, and carry on where they left off once the agents are back. The board itself keeps running."
           confirmLabel="Stop agents"
           onConfirm={() => switchTo(true)}
+        />
+      ) : state.kind === 'missing' ? (
+        <ConfirmDialog
+          open={confirming}
+          onOpenChange={setConfirming}
+          title="Start the stopped agents now?"
+          description={`The agent loop of ${list(state.boards)} isn't running, and the supervisor starts it again after a wait. This starts it now instead. If it keeps stopping, its log says why: journalctl --user -u 'ultrakanban-agent@*'`}
+          confirmLabel="Start now"
+          onConfirm={() => switchTo(false)}
         />
       ) : (
         <ConfirmDialog

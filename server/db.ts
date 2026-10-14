@@ -337,6 +337,7 @@ const MIGRATIONS = [
   ALTER TABLE setup ADD COLUMN agents_changed_by TEXT;
   ALTER TABLE setup ADD COLUMN agents_running TEXT;
   ALTER TABLE setup ADD COLUMN agents_reported_at TEXT;
+  ALTER TABLE setup ADD COLUMN agents_handled_at TEXT;
   `,
 ]
 

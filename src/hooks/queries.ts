@@ -1,5 +1,6 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import type { AgentServices, OverviewRange } from '@shared/domain'
+import type { OverviewRange } from '@shared/domain'
+import { agentsSwitching } from '@/lib/agents-switch'
 import { api } from '@/lib/api'
 import { withoutPendingDeletes } from '@/lib/board-updates'
 
@@ -101,10 +102,6 @@ export const useAgentServices = () =>
       return services && agentsSwitching(services) ? 2000 : 30_000
     },
   })
-
-/** Switched off or on since the supervisor last reported, so it hasn't seen to it yet. */
-export const agentsSwitching = ({ changedAt, reportedAt }: AgentServices) =>
-  !!changedAt && !!reportedAt && changedAt > reportedAt
 
 /** The supervisor reports Claude usage every few minutes. */
 export const useClaudeUsage = () =>

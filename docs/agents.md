@@ -215,7 +215,8 @@ whole Todo or Backlog column into progress. Changing the
 setting restarts the board's loops, which stops runs in progress (they are resumed, see below). The button left of the
 update button in the header switches every board's agents off and on at once: it is green while each board whose
 agent is on has its loop running, and a warning sign when one doesn't (or they are switched off). Switched off, the
-supervisor stops all the loops and the containers their runs use, until they are switched on again. The boards themselves
+supervisor stops all the loops and the containers their runs use, until they are switched on again; clicking the
+warning sign while they are on starts the loops that stopped now, rather than after the supervisor's wait. The boards themselves
 also run side by side, with no limit across boards: three enabled boards with two parallel runs each can mean six
 agents working at once, all on your `claude` login and its usage limits.
 

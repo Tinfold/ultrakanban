@@ -350,7 +350,11 @@ export const reportAgentHostSchema = z.object({
 export const setAgentServicesSchema = z.object({ paused: z.boolean() })
 
 /** The agent supervisor reporting the boards whose loop runs. */
-export const reportAgentServicesSchema = z.object({ running: z.array(z.string().trim().min(1).max(100)).max(10_000) })
+export const reportAgentServicesSchema = z.object({
+  running: z.array(z.string().trim().min(1).max(100)).max(10_000),
+  /** The switch's `changedAt` it saw to. */
+  handledAt: z.string().max(100).nullable().optional(),
+})
 
 /** Asking the agent supervisor to run a login. */
 export const requestAgentLoginSchema = z.object({ kind: z.enum(AGENT_LOGIN_KINDS) })

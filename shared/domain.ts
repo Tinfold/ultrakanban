@@ -970,6 +970,10 @@ export interface AgentServices {
   running: string[]
   /** When the supervisor last reported them; null if it never has, so nothing would act on the switch. */
   reportedAt: string | null
+  /** The switch (its `changedAt`) the supervisor had seen to when it reported; until it is `changedAt`, it is on its way. */
+  handledAt: string | null
+  /** The server's time when it answered, to judge `reportedAt` by: the browser's clock can be off from it. */
+  serverTime: string
 }
 
 /** What the Setup page shows: the board's GitHub access and the agents'. */
