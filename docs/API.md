@@ -34,7 +34,9 @@ for a model that has none (`gemini/gemini-2.5-pro/default`). The model is everyt
 (`opencode/qwen3-coder:30b/default`).
 
 1. `GET /api/boards` and pick a board. `GET /api/boards/:boardId` shows its columns, tags, tickets and workflow
-   (`board.reviewColumnId`, `board.doneColumnId`).
+   (`board.reviewColumnId`, `board.doneColumnId`). Read `board.description`: it says what the board is for and holds
+   conventions for every ticket on it, which agents follow unless a ticket says otherwise. The agent loop puts it in
+   each run's prompt.
 2. Claim work atomically: `POST /api/boards/:boardId/tickets/claim-next` with
    `{ "agent": "claude/claude-opus-5-5/high", "column": "Todo", "moveTo": "In progress" }`.
    Only one agent can ever win a given ticket. Repeat on `404 no_ticket_available` later.

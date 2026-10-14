@@ -12,6 +12,9 @@ agents can work the same board safely.
 
 - `KANBAN` — the board's base URL, e.g. `http://localhost:8080`. Ask the user if you don't have it.
 - `BOARD` — the board id. List boards with `curl -s $KANBAN/api/boards`; ask the user which one if several.
+- Read the board's description once (`curl -s $KANBAN/api/boards/$BOARD | jq -r .board.description`): it is where
+  people put what the board is for and the conventions every ticket on it should follow. Follow them unless a ticket
+  says otherwise. The board's agent loop puts it in your prompt, so there you needn't fetch it.
 - Send `-H "X-Actor: <your name>"` on every write so the activity log shows who did what. Use the same name
   as the `agent` field.
 - Your name is `<agent>/<model>/<effort>`: the agent, then your exact model and effort level, e.g.
