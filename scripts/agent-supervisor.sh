@@ -566,9 +566,9 @@ report_services() {
     loop_state "$id"
     [[ $state == @(active|reloading) ]] && running+=("$id")
   done
-  jq -nc --arg handledAt "$changed_at" \
-    '{running: $ARGS.positional, handledAt: (if $handledAt == "" then null else $handledAt end)}' \
-    --args ${running[@]+"${running[@]}"} |
+  # The ids go in as lines, not arguments: one starting with "-" (board ids can) would be taken for an option.
+  printf '%s\n' ${running[@]+"${running[@]}"} | jq -Rnc --arg handledAt "$changed_at" \
+    '{running: [inputs | select(. != "")], handledAt: (if $handledAt == "" then null else $handledAt end)}' |
     curl -sf -X POST "$KANBAN/api/system/agents/services/status" -H 'Content-Type: application/json' \
       -H 'X-Actor: agent-supervisor' -d @- >/dev/null || echo "couldn't report the running loops to $KANBAN"
 }
