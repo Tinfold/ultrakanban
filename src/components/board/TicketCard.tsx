@@ -167,7 +167,9 @@ export function TicketCard({ ticket, overlay, selecting, selected }: TicketCardP
           {ticket.pullRequest && (
             <span className="flex items-center gap-1 tabular-nums" title={ticket.pullRequest.title ?? undefined}>
               <PullRequestIcon state={ticket.pullRequest.state} />#{ticket.pullRequest.number}
-              {ticket.pullRequest.checks && <CheckStatusIcon status={ticket.pullRequest.checks} />}
+              {ticket.pullRequest.checks && (
+                <CheckStatusIcon status={ticket.pullRequest.checks} failingChecks={ticket.pullRequest.failingChecks} />
+              )}
             </span>
           )}
           {ticket.pullRequest?.conflicts && (

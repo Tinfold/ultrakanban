@@ -368,6 +368,12 @@ const MIGRATIONS = [
   );
   CREATE INDEX run_records_ticket ON run_records(ticket_id, id);
   `,
+  `
+  -- The head commit of the ticket's pull request that pr_checks is about, and its checks that didn't pass (a JSON array
+  -- of FailingCheck), as GitHub last reported. Their details are only read again when either changes.
+  ALTER TABLE tickets ADD COLUMN pr_head_sha TEXT;
+  ALTER TABLE tickets ADD COLUMN pr_failing_checks TEXT NOT NULL DEFAULT '[]';
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

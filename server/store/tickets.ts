@@ -6,6 +6,7 @@ import {
   type AgentRun,
   type CheckStatus,
   type Column,
+  type FailingCheck,
   parsePullRequestUrl,
   PRIORITIES,
   type Priority,
@@ -60,6 +61,8 @@ interface TicketRow {
   pr_title: string | null
   pr_conflicts: number
   pr_checks: string | null
+  pr_head_sha: string | null
+  pr_failing_checks: string
   pr_checked_at: string | null
   agent_seen_at: string | null
   run_started_at: string | null
@@ -136,6 +139,7 @@ function toPullRequest(url: string, row: TicketRow): PullRequest {
     title: row.pr_title,
     conflicts: Boolean(row.pr_conflicts),
     checks: row.pr_checks as CheckStatus | null,
+    failingChecks: row.pr_checks === 'failing' ? (JSON.parse(row.pr_failing_checks) as FailingCheck[]) : [],
     checkedAt: row.pr_checked_at,
   }
 }
@@ -374,7 +378,9 @@ function linkPullRequest(ticket: Ticket, url: string | null, actor: string) {
   const current = ticket.pullRequest?.url ?? null
   if (next === current) return false
   sql.run(
-    "UPDATE tickets SET pr_url = ?, pr_state = 'unknown', pr_title = NULL, pr_conflicts = 0, pr_checked_at = NULL WHERE id = ?",
+    `UPDATE tickets SET pr_url = ?, pr_state = 'unknown', pr_title = NULL, pr_conflicts = 0, pr_checks = NULL,
+       pr_head_sha = NULL, pr_failing_checks = '[]', pr_checked_at = NULL
+     WHERE id = ?`,
     next,
     ticket.id,
   )
@@ -786,25 +792,65 @@ export interface PullRequestStatus {
    * which keeps the last known answer.
    */
   conflicts?: boolean | null
-  /** Combined status of its checks; `null` (or left out) when it has none, or while GitHub is still running them. */
+  /**
+   * Combined status of the checks of its head commit; `null` (or left out) keeps the last known one while the head
+   * commit stays the same, as GitHub may not list a commit's checks yet, or they couldn't be read.
+   */
   checks?: CheckStatus | null
+  /** Its checks that didn't pass, stored along with `checks` (and only kept while they fail). */
+  failingChecks?: FailingCheck[]
+  /** The head commit its checks are of; another one than before drops the last known checks. */
+  headSha?: string | null
 }
 
-/** Stores a pull request's state without side effects (used when importing). */
-export function setPullRequestStatus(ticketId: string, { state, title, conflicts, checks }: PullRequestStatus) {
-  const open = state === 'open' || state === 'draft'
+/**
+ * Stores a pull request's state without side effects (used when importing). A closed or merged pull request has no
+ * conflicts or checks.
+ */
+export function setPullRequestStatus(
+  ticketId: string,
+  { state, title, conflicts, checks, failingChecks, headSha }: PullRequestStatus,
+) {
+  const open = Number(state === 'open' || state === 'draft')
+  const sha = headSha ?? null
+  // Known checks stay while the head commit does; a new commit's checks start over.
+  const newCommit = '? IS NOT NULL AND pr_head_sha IS NOT ?'
   sql.run(
     `UPDATE tickets SET pr_state = ?, pr_title = ?, pr_conflicts = coalesce(?, pr_conflicts),
-       pr_checks = CASE WHEN ? THEN coalesce(?, pr_checks) ELSE NULL END, pr_checked_at = ?
+       pr_checks = CASE WHEN NOT ? THEN NULL WHEN ? IS NOT NULL THEN ? WHEN ${newCommit} THEN NULL ELSE pr_checks END,
+       pr_failing_checks = CASE WHEN NOT ? THEN '[]' WHEN ? IS NOT NULL THEN ? WHEN ${newCommit} THEN '[]'
+         ELSE pr_failing_checks END,
+       pr_head_sha = CASE WHEN ? THEN coalesce(?, pr_head_sha) END,
+       pr_checked_at = ?
      WHERE id = ? AND pr_url IS NOT NULL`,
     state,
     title,
     open ? (conflicts == null ? null : Number(conflicts)) : 0,
-    Number(open),
+    open,
     checks ?? null,
+    checks ?? null,
+    sha,
+    sha,
+    open,
+    checks ?? null,
+    JSON.stringify(checks === 'failing' ? (failingChecks ?? []) : []),
+    sha,
+    sha,
+    open,
+    sha,
     now(),
     ticketId,
   )
+}
+
+/** What the board knows of the checks of a ticket's pull request: the head commit they are of, and those failing. */
+export function pullRequestChecks(ticketId: string): { headSha: string | null; failingChecks: FailingCheck[] } {
+  const row = sql.get<Pick<TicketRow, 'pr_head_sha' | 'pr_failing_checks'>>(
+    'SELECT pr_head_sha, pr_failing_checks FROM tickets WHERE id = ?',
+    ticketId,
+  )
+  if (!row) throw notFound('Ticket', ticketId)
+  return { headSha: row.pr_head_sha, failingChecks: JSON.parse(row.pr_failing_checks) as FailingCheck[] }
 }
 
 /**
@@ -818,12 +864,13 @@ export function applyPullRequestStatus(ticketId: string, url: string, status: Pu
   if (previous?.url !== url || previous.state === 'merged') return ticket
 
   setPullRequestStatus(ticketId, status)
-  const { conflicts, checks } = getTicket(ticketId).pullRequest!
+  const { conflicts, checks, failingChecks } = getTicket(ticketId).pullRequest!
   if (
     previous.state === status.state &&
     previous.title === status.title &&
     previous.conflicts === conflicts &&
-    previous.checks === checks
+    previous.checks === checks &&
+    JSON.stringify(previous.failingChecks) === JSON.stringify(failingChecks)
   ) {
     return ticket
   }

@@ -2,23 +2,43 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach } from 'node:test'
-import { type Ticket } from '../shared/domain.ts'
+import { parsePullRequestUrl, type Ticket } from '../shared/domain.ts'
 import { createApp } from './app.ts'
 import { createAttachmentFiles } from './attachment-files.ts'
 import { createMergeQueue } from './merge-queue.ts'
 import { createNotifier, type Notification } from './notifications.ts'
-import { type GitHubAuth, GitHubError, type GitHubPullRequest, type NewRepository } from './github.ts'
+import {
+  type GitHubAnnotation,
+  type GitHubAuth,
+  type GitHubCheckRun,
+  type GitHubCommitStatus,
+  GitHubError,
+  type GitHubPullRequest,
+  type GitHubPullRequestStatus,
+  type NewRepository,
+} from './github.ts'
 import { createPullRequestSync } from './pull-request-sync.ts'
 import { getStoredGitHubToken } from './store/setup.ts'
-import type { PullRequestStatus } from './store/tickets.ts'
 
 /**
  * The app the server tests run against, with a fake GitHub, and helpers for calling its API. Importing it gives each test
  * a new board (`boardId`); each test file runs in its own process, with its own in-memory database.
  */
 
-/** Fake GitHub: pull requests are open unless a test says otherwise. */
-export const pullRequestStatuses = new Map<string, PullRequestStatus>()
+/**
+ * Fake GitHub: pull requests are open unless a test says otherwise. Their head commit is the one in `pulls` when they
+ * are there, otherwise `head` unless a test says otherwise.
+ */
+export const pullRequestStatuses = new Map<
+  string,
+  Omit<GitHubPullRequestStatus, 'conflicts' | 'headSha'> & { conflicts?: boolean | null; headSha?: string }
+>()
+/** Fake GitHub check runs and commit statuses of commits, by `owner/name@sha`; a commit has none unless set. */
+export const checkRuns = new Map<string, GitHubCheckRun[]>()
+export const commitStatuses = new Map<string, GitHubCommitStatus[]>()
+/** Fake GitHub annotations of check runs, by check run id; and the check runs whose annotations were read, in order. */
+export const annotations = new Map<number, GitHubAnnotation[]>()
+export const annotationReads: number[] = []
 /** Fake GitHub signed in as "octocat"; repositories it has created, as owner/name. */
 export const github = { auth: 'env' as GitHubAuth, repos: new Set<string>(), created: [] as NewRepository[] }
 /** Fake GitHub pull requests for merging, by `owner/name#number`; their head is in the same repository unless set. */
@@ -55,7 +75,21 @@ const pullRequests = createPullRequestSync({
     return 'octocat'
   },
   resetAuth: () => {},
-  fetchPullRequestStatus: async (url) => pullRequestStatuses.get(url) ?? { state: 'open', title: 'Some PR' },
+  async fetchPullRequestStatus(url) {
+    const { repo, number } = parsePullRequestUrl(url)!
+    const headSha = pulls.get(`${repo}#${number}`)?.headSha ?? 'head'
+    return {
+      conflicts: null,
+      headSha,
+      ...(pullRequestStatuses.get(url) ?? { state: 'open' as const, title: 'Some PR' }),
+    }
+  },
+  listCheckRuns: async (repo, sha) => checkRuns.get(`${repo}@${sha}`) ?? [],
+  listCommitStatuses: async (repo, sha) => commitStatuses.get(`${repo}@${sha}`) ?? [],
+  async listCheckRunAnnotations(_repo, checkRunId) {
+    annotationReads.push(checkRunId)
+    return annotations.get(checkRunId) ?? []
+  },
   createRepository: async (input) => {
     const repo = `${input.owner ?? 'octocat'}/${input.name}`
     if (github.repos.has(repo)) {

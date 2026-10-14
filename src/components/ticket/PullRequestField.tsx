@@ -1,6 +1,7 @@
-import { GitMergeConflictIcon, GitPullRequestIcon, MoreHorizontalIcon, RefreshCwIcon } from 'lucide-react'
+import { CircleXIcon, GitMergeConflictIcon, GitPullRequestIcon, MoreHorizontalIcon, RefreshCwIcon } from 'lucide-react'
 import { type FormEvent, useState } from 'react'
-import { parsePullRequestUrl, type Ticket } from '@shared/domain'
+import { type FailingCheck, parsePullRequestUrl, type Ticket } from '@shared/domain'
+import { CheckStatusIcon } from '@/components/common/CheckStatusIcon'
 import { PullRequestIcon } from '@/components/common/PullRequestIcon'
 import { Button } from '@/components/ui/button'
 import {
@@ -13,10 +14,48 @@ import {
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { formatRelative } from '@/lib/format'
-import { CONFLICTS_HINT, PULL_REQUEST_STATE_LABELS } from '@/lib/pull-request'
+import { CHECK_CONCLUSION_LABELS, CONFLICTS_HINT, PULL_REQUEST_STATE_LABELS } from '@/lib/pull-request'
 import { useBoardContext } from '../board/board-context'
 
-/** Shows the ticket's GitHub pull request and lets people link, refresh or unlink it. */
+/** The pull request's checks that didn't pass, each linking to its details, with why it failed when GitHub says. */
+function FailingChecks({ checks }: { checks: FailingCheck[] }) {
+  return (
+    <ul aria-label="Failing checks" className="grid gap-1.5 px-2 pb-1 text-xs">
+      {checks.map((check) => (
+        <li key={check.name} className="grid min-w-0 gap-0.5">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <CircleXIcon aria-hidden className="size-3.5 shrink-0 text-red-600 dark:text-red-400" />
+            {check.url ? (
+              <a
+                href={check.url}
+                target="_blank"
+                rel="noreferrer"
+                title={`Open ${check.name} on GitHub`}
+                className="truncate font-medium hover:underline"
+              >
+                {check.name}
+              </a>
+            ) : (
+              <span className="truncate font-medium">{check.name}</span>
+            )}
+            {CHECK_CONCLUSION_LABELS[check.conclusion] && (
+              <span className="shrink-0 text-muted-foreground">{CHECK_CONCLUSION_LABELS[check.conclusion]}</span>
+            )}
+          </div>
+          {check.excerpt && (
+            <pre className="ml-5 max-h-28 overflow-auto rounded-sm bg-muted px-1.5 py-1 font-mono text-[11px] break-words whitespace-pre-wrap text-muted-foreground">
+              {check.excerpt}
+            </pre>
+          )}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/**
+ * Shows the ticket's GitHub pull request, and its failing checks, and lets people link, refresh or unlink it.
+ */
 export function PullRequestField({ ticket }: { ticket: Ticket }) {
   const { actions } = useBoardContext()
   const [editing, setEditing] = useState(false)
@@ -39,92 +78,98 @@ export function PullRequestField({ ticket }: { ticket: Ticket }) {
   }
 
   return (
-    <Popover
-      open={editing}
-      onOpenChange={(open) => {
-        setEditing(open)
-        setError(null)
-      }}
-    >
-      <PopoverAnchor asChild>
-        {pullRequest ? (
-          <div className="flex min-h-7 items-center gap-1 rounded-md pl-2 hover:bg-muted">
-            <a
-              href={pullRequest.url}
-              target="_blank"
-              rel="noreferrer"
-              title={`${pullRequest.repo}#${pullRequest.number} (${PULL_REQUEST_STATE_LABELS[pullRequest.state]})${pullRequest.title ? `: ${pullRequest.title}` : ''}`}
-              className="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-sm"
-            >
-              <PullRequestIcon state={pullRequest.state} />
-              <span className="truncate">
-                {pullRequest.repo.split('/')[1]}#{pullRequest.number}
-              </span>
-            </a>
-            {pullRequest.conflicts && (
-              <GitMergeConflictIcon
-                role="img"
-                aria-label={CONFLICTS_HINT}
-                className="size-4 shrink-0 text-amber-600 dark:text-amber-400"
+    <div className="grid gap-1">
+      <Popover
+        open={editing}
+        onOpenChange={(open) => {
+          setEditing(open)
+          setError(null)
+        }}
+      >
+        <PopoverAnchor asChild>
+          {pullRequest ? (
+            <div className="flex min-h-7 items-center gap-1 rounded-md pl-2 hover:bg-muted">
+              <a
+                href={pullRequest.url}
+                target="_blank"
+                rel="noreferrer"
+                title={`${pullRequest.repo}#${pullRequest.number} (${PULL_REQUEST_STATE_LABELS[pullRequest.state]})${pullRequest.title ? `: ${pullRequest.title}` : ''}`}
+                className="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-sm"
               >
-                <title>{CONFLICTS_HINT}</title>
-              </GitMergeConflictIcon>
-            )}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon-xs" aria-label="Pull request actions">
-                  <MoreHorizontalIcon />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-52">
-                <DropdownMenuItem disabled={syncing} onSelect={refresh}>
-                  <RefreshCwIcon className={syncing ? 'animate-spin' : undefined} />
-                  Check status now
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setEditing(true)}>Change link</DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem variant="destructive" onSelect={() => actions.linkPullRequest(ticket.id, null)}>
-                  Unlink
-                </DropdownMenuItem>
-                {pullRequest.checkedAt && (
-                  <p className="px-1.5 pt-1.5 pb-1 text-xs text-muted-foreground">
-                    Checked {formatRelative(pullRequest.checkedAt)}
-                  </p>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        ) : (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-auto min-h-7 w-full justify-start px-2 py-1 font-normal text-muted-foreground"
-            onClick={() => setEditing(true)}
-          >
-            <GitPullRequestIcon />
-            Link pull request
-          </Button>
-        )}
-      </PopoverAnchor>
-      <PopoverContent align="start" className="w-80 p-2">
-        <form onSubmit={submit} className="grid gap-1.5">
-          <div className="flex gap-1.5">
-            <Input
-              name="url"
-              autoFocus
-              defaultValue={pullRequest?.url}
-              placeholder="https://github.com/owner/repo/pull/123"
-              aria-invalid={!!error}
-              className="h-7"
-              onChange={() => setError(null)}
-            />
-            <Button type="submit" size="sm">
-              Link
+                <PullRequestIcon state={pullRequest.state} />
+                <span className="truncate">
+                  {pullRequest.repo.split('/')[1]}#{pullRequest.number}
+                </span>
+              </a>
+              {pullRequest.checks && (
+                <CheckStatusIcon status={pullRequest.checks} failingChecks={pullRequest.failingChecks} />
+              )}
+              {pullRequest.conflicts && (
+                <GitMergeConflictIcon
+                  role="img"
+                  aria-label={CONFLICTS_HINT}
+                  className="size-4 shrink-0 text-amber-600 dark:text-amber-400"
+                >
+                  <title>{CONFLICTS_HINT}</title>
+                </GitMergeConflictIcon>
+              )}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon-xs" aria-label="Pull request actions">
+                    <MoreHorizontalIcon />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52">
+                  <DropdownMenuItem disabled={syncing} onSelect={refresh}>
+                    <RefreshCwIcon className={syncing ? 'animate-spin' : undefined} />
+                    Check status now
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setEditing(true)}>Change link</DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem variant="destructive" onSelect={() => actions.linkPullRequest(ticket.id, null)}>
+                    Unlink
+                  </DropdownMenuItem>
+                  {pullRequest.checkedAt && (
+                    <p className="px-1.5 pt-1.5 pb-1 text-xs text-muted-foreground">
+                      Checked {formatRelative(pullRequest.checkedAt)}
+                    </p>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-auto min-h-7 w-full justify-start px-2 py-1 font-normal text-muted-foreground"
+              onClick={() => setEditing(true)}
+            >
+              <GitPullRequestIcon />
+              Link pull request
             </Button>
-          </div>
-          {error && <p className="px-0.5 text-xs text-destructive">{error}</p>}
-        </form>
-      </PopoverContent>
-    </Popover>
+          )}
+        </PopoverAnchor>
+        <PopoverContent align="start" className="w-80 p-2">
+          <form onSubmit={submit} className="grid gap-1.5">
+            <div className="flex gap-1.5">
+              <Input
+                name="url"
+                autoFocus
+                defaultValue={pullRequest?.url}
+                placeholder="https://github.com/owner/repo/pull/123"
+                aria-invalid={!!error}
+                className="h-7"
+                onChange={() => setError(null)}
+              />
+              <Button type="submit" size="sm">
+                Link
+              </Button>
+            </div>
+            {error && <p className="px-0.5 text-xs text-destructive">{error}</p>}
+          </form>
+        </PopoverContent>
+      </Popover>
+      {pullRequest && pullRequest.failingChecks.length > 0 && <FailingChecks checks={pullRequest.failingChecks} />}
+    </div>
   )
 }

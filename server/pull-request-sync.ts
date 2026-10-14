@@ -1,14 +1,15 @@
 import { parsePullRequestUrl, type Ticket } from '../shared/domain.ts'
+import { fetchCommitChecks } from './checks.ts'
 import { transaction } from './db.ts'
 import type { GitHubClient } from './github.ts'
 import { getBoard } from './store/boards.ts'
-import { applyPullRequestStatus, getTicket, listPendingPullRequests } from './store/tickets.ts'
+import { applyPullRequestStatus, getTicket, listPendingPullRequests, pullRequestChecks } from './store/tickets.ts'
 
 export type PullRequestSync = ReturnType<typeof createPullRequestSync>
 
 /**
- * Keeps tickets' pull request states in sync with GitHub, moving merged tickets to the done column and, on boards with
- * `deleteMergedBranches`, deleting their branches.
+ * Keeps tickets' pull request states in sync with GitHub, along with the checks of open ones, moving merged tickets to
+ * the done column and, on boards with `deleteMergedBranches`, deleting their branches.
  */
 export function createPullRequestSync(github: GitHubClient) {
   let running: Promise<void> | null = null
@@ -29,11 +30,26 @@ export function createPullRequestSync(github: GitHubClient) {
     await github.deleteBranch(repo, pullRequest.head)
   }
 
+  /**
+   * The checks of an open pull request's head commit (see `fetchCommitChecks`); none when they can't be read, which
+   * keeps the last known ones rather than failing the whole sync.
+   */
+  async function readChecks(ticketId: string, url: string, headSha: string) {
+    try {
+      return await fetchCommitChecks(github, parsePullRequestUrl(url)!.repo, headSha, pullRequestChecks(ticketId))
+    } catch (error) {
+      console.warn(`Reading the checks of ticket ${ticketId}'s pull request failed: ${(error as Error).message}`)
+      return {}
+    }
+  }
+
   async function sync(ticketId: string, url: string) {
     try {
       const status = await github.fetchPullRequestStatus(url)
+      const open = status.state === 'open' || status.state === 'draft'
+      const checks = open ? await readChecks(ticketId, url, status.headSha) : {}
       const wasMerged = getTicket(ticketId).pullRequest?.state === 'merged'
-      const ticket = transaction(() => applyPullRequestStatus(ticketId, url, status))
+      const ticket = transaction(() => applyPullRequestStatus(ticketId, url, { ...status, ...checks }))
       if (!wasMerged && ticket.pullRequest?.state === 'merged' && getBoard(ticket.boardId).deleteMergedBranches) {
         await deleteBranch(url).catch((error: unknown) =>
           console.warn(`Deleting the branch of ticket ${ticketId}'s pull request failed: ${(error as Error).message}`),

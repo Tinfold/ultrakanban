@@ -86,6 +86,11 @@ Boards without a review/done column (see board settings) have no pull request re
 - The server checks linked pull requests on GitHub every minute (and right after one is linked), authenticated with
   the token set on the Setup page (see [Setup](#setup)), `GITHUB_TOKEN`/`GH_TOKEN` or the `gh` CLI login, in that order.
   `GET /api/github` returns `{ "auth": "board" | "env" | "gh" | null }`.
+- For an open or draft pull request it also reads the checks of its head commit: check runs (GitHub Actions and other
+  GitHub apps; the latest run of each name) and commit statuses (older CI integrations) together, as `checks` and
+  `failingChecks` (see `PullRequest`), counting them the way the agent loop does (`scripts/agent-loop/ci.sh`). Why the
+  first 3 failing check runs failed (their annotations, or their output's title and summary) is only read again when
+  the head commit or its set of failing checks changes, to spare GitHub's rate limit.
 - When a pull request is merged, its ticket moves to the done column (actor `github`). Closed pull requests are noted
   in the activity log; the ticket stays where it is.
 - Moving a ticket into the done column without a merged pull request fails with `409 pull_request_not_merged`,
@@ -247,7 +252,13 @@ interface PullRequest {
   state: 'unknown' | 'open' | 'draft' | 'merged' | 'closed' // unknown until GitHub has been checked
   title: string | null
   conflicts: boolean // GitHub last found merge conflicts with its base branch (open and draft pull requests only)
-  checks: 'pending' | 'passing' | 'failing' | null // combined status of its checks; null when it has none, or isn't open or draft
+  // Combined status of its head commit's check runs (GitHub Actions, other apps) and commit statuses (older CI): failing
+  // once any didn't pass, else pending while any runs, else passing; null when it has none, or isn't open or draft
+  checks: 'pending' | 'passing' | 'failing' | null
+  // The checks that didn't pass, by name (at most 20; empty unless checks is failing). conclusion is the check run's
+  // (failure, timed_out, startup_failure, action_required) or the commit status's state (failure, error); excerpt says
+  // why, from the annotations or output of the first 3 failing check runs, or a commit status's description
+  failingChecks: { name: string; conclusion: string; url: string | null; excerpt: string | null }[]
   checkedAt: string | null
 }
 

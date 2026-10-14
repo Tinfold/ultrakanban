@@ -1,13 +1,12 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import {
-  type CheckStatus,
   type GitHubAuthSource,
   MERGE_METHODS,
   type MergeMethod,
   parsePullRequestUrl,
+  type PullRequestState,
 } from '../shared/domain.ts'
-import type { PullRequestStatus } from './store/tickets.ts'
 
 export type GitHubAuth = GitHubAuthSource | null
 
@@ -36,6 +35,51 @@ export interface GitHubPullRequest {
   headSha: string
 }
 
+/** A pull request's state as the board tracks it; the checks of its head commit are read on their own (see checks.ts). */
+export interface GitHubPullRequestStatus {
+  state: Exclude<PullRequestState, 'unknown'>
+  title: string | null
+  /** Whether it has merge conflicts with its base branch; `null` while GitHub is still working it out. */
+  conflicts: boolean | null
+  /** Its head commit, whose checks count. */
+  headSha: string
+}
+
+/** A check run on a commit: a GitHub Actions job, or another GitHub app's check. */
+export interface GitHubCheckRun {
+  id: number
+  name: string
+  /** `queued`, `in_progress`, `completed`, `waiting`, `requested` or `pending`. */
+  status: string
+  /**
+   * How it ended, once completed: `success`, `failure`, `neutral`, `cancelled`, `skipped`, `timed_out`,
+   * `action_required`, `startup_failure` or `stale`.
+   */
+  conclusion: string | null
+  /** Its page on GitHub, or on the service that ran it. */
+  detailsUrl: string | null
+  /** What it reported about itself (the summary is Markdown), and how many annotations it left on the code. */
+  output: { title: string | null; summary: string | null; annotationsCount: number }
+}
+
+/** A commit status, as older CI integrations report them: the latest one of each context. */
+export interface GitHubCommitStatus {
+  context: string
+  state: 'error' | 'failure' | 'pending' | 'success'
+  description: string | null
+  targetUrl: string | null
+}
+
+/** A note a check run left on the code, such as a failing test or a compiler error. */
+export interface GitHubAnnotation {
+  /** `notice`, `warning` or `failure`. */
+  level: string
+  title: string | null
+  message: string
+  path: string | null
+  line: number | null
+}
+
 export interface GitHubClient {
   /** Where the API token comes from; `null` means unauthenticated (public repos only, 60 requests/hour). */
   auth: () => Promise<GitHubAuth>
@@ -45,7 +89,13 @@ export interface GitHubClient {
   verifyToken: (token: string) => Promise<string>
   /** Looks for the token again, after it was changed on the Setup page. */
   resetAuth: () => void
-  fetchPullRequestStatus: (url: string) => Promise<PullRequestStatus>
+  fetchPullRequestStatus: (url: string) => Promise<GitHubPullRequestStatus>
+  /** The latest check runs on a commit (at most the first 300); GitHub may still list earlier runs of a re-run check. */
+  listCheckRuns: (repo: string, sha: string) => Promise<GitHubCheckRun[]>
+  /** The latest commit status of each context on a commit. */
+  listCommitStatuses: (repo: string, sha: string) => Promise<GitHubCommitStatus[]>
+  /** The annotations a check run left (at most the first 50). */
+  listCheckRunAnnotations: (repo: string, checkRunId: number) => Promise<GitHubAnnotation[]>
   /** Creates a repository with an initial commit, so it has a default branch to clone and branch from. */
   createRepository: (input: NewRepository) => Promise<{ repo: string; url: string }>
   getPullRequest: (repo: string, number: number) => Promise<GitHubPullRequest>
@@ -104,6 +154,31 @@ interface PullRequestResponse {
   head: { ref: string; sha: string; repo: { full_name: string } | null }
 }
 
+interface CheckRunResponse {
+  id: number
+  name: string
+  status: string
+  conclusion: string | null
+  details_url: string | null
+  html_url: string | null
+  output?: { title: string | null; summary: string | null; annotations_count: number } | null
+}
+
+interface CommitStatusResponse {
+  context: string
+  state: GitHubCommitStatus['state']
+  description: string | null
+  target_url: string | null
+}
+
+interface AnnotationResponse {
+  annotation_level: string | null
+  title: string | null
+  message: string | null
+  path: string | null
+  start_line: number | null
+}
+
 /** A branch name for a path, keeping its slashes. */
 const branchPath = (branch: string) => branch.split('/').map(encodeURIComponent).join('/')
 
@@ -158,17 +233,6 @@ export function createGitHubClient(storedToken: () => string | null = () => null
       },
     ))
 
-  async function getCombinedStatus(repo: string, sha: string): Promise<CheckStatus | null> {
-    const data = await request<{ state: 'success' | 'pending' | 'failure'; total_count: number }>(
-      'GET',
-      `/repos/${repo}/commits/${sha}/status`,
-    )
-    if (data.total_count === 0) return null
-    if (data.state === 'success') return 'passing'
-    if (data.state === 'pending') return 'pending'
-    return 'failing'
-  }
-
   async function getPullRequest(repo: string, number: number): Promise<GitHubPullRequest> {
     const data = await request<PullRequestResponse>('GET', `/repos/${repo}/pulls/${number}`)
     return {
@@ -209,9 +273,65 @@ export function createGitHubClient(storedToken: () => string | null = () => null
       if (!pullRequest) throw new Error(`Not a pull request URL: ${url}`)
       const data = await getPullRequest(pullRequest.repo, pullRequest.number)
       const state = data.merged ? 'merged' : data.state === 'closed' ? 'closed' : data.draft ? 'draft' : 'open'
-      const open = state === 'open' || state === 'draft'
-      const checks = open ? await getCombinedStatus(pullRequest.repo, data.headSha) : null
-      return { state, title: data.title, conflicts: data.mergeable === null ? null : !data.mergeable, checks }
+      return {
+        state,
+        title: data.title,
+        conflicts: data.mergeable === null ? null : !data.mergeable,
+        headSha: data.headSha,
+      }
+    },
+
+    async listCheckRuns(repo, sha) {
+      const runs: GitHubCheckRun[] = []
+      for (let page = 1; page <= 3; page++) {
+        const batch = await request<{ check_runs: CheckRunResponse[] }>(
+          'GET',
+          `/repos/${repo}/commits/${sha}/check-runs?filter=latest&per_page=100&page=${page}`,
+        )
+        runs.push(
+          ...batch.check_runs.map((run) => ({
+            id: run.id,
+            name: run.name,
+            status: run.status,
+            conclusion: run.conclusion,
+            detailsUrl: run.details_url ?? run.html_url,
+            output: {
+              title: run.output?.title ?? null,
+              summary: run.output?.summary ?? null,
+              annotationsCount: run.output?.annotations_count ?? 0,
+            },
+          })),
+        )
+        if (batch.check_runs.length < 100) break
+      }
+      return runs
+    },
+
+    async listCommitStatuses(repo, sha) {
+      const data = await request<{ statuses: CommitStatusResponse[] }>(
+        'GET',
+        `/repos/${repo}/commits/${sha}/status?per_page=100`,
+      )
+      return data.statuses.map((status) => ({
+        context: status.context,
+        state: status.state,
+        description: status.description,
+        targetUrl: status.target_url,
+      }))
+    },
+
+    async listCheckRunAnnotations(repo, checkRunId) {
+      const data = await request<AnnotationResponse[]>(
+        'GET',
+        `/repos/${repo}/check-runs/${checkRunId}/annotations?per_page=50`,
+      )
+      return data.map((annotation) => ({
+        level: annotation.annotation_level ?? 'notice',
+        title: annotation.title || null,
+        message: annotation.message ?? '',
+        path: annotation.path || null,
+        line: annotation.start_line,
+      }))
     },
 
     async createRepository({ owner, name, description, private: isPrivate }) {

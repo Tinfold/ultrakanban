@@ -90,6 +90,7 @@ export function linkPullRequest(detail: BoardDetail, ticketId: string, url: stri
               title: null,
               conflicts: false,
               checks: null,
+              failingChecks: [],
               checkedAt: null,
             },
           }

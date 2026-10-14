@@ -154,8 +154,39 @@ export const PULL_REQUEST_STATES = ['unknown', 'open', 'draft', 'merged', 'close
 export type PullRequestState = (typeof PULL_REQUEST_STATES)[number]
 
 export const CHECK_STATUSES = ['pending', 'passing', 'failing'] as const
-/** GitHub's combined status for the pull request's head commit. */
+/**
+ * The combined status of the checks on the pull request's head commit: its check runs (GitHub Actions and other GitHub
+ * apps) and its commit statuses (older CI integrations) together. `failing` once any of them didn't pass, otherwise
+ * `pending` while any is still running, otherwise `passing`.
+ */
 export type CheckStatus = (typeof CHECK_STATUSES)[number]
+
+/** Most failing checks a pull request keeps (see `PullRequest.failingChecks`). */
+export const MAX_FAILING_CHECKS = 20
+/** Failing check runs whose details (annotations or output) are fetched for an excerpt, the first ones by name. */
+export const FAILING_CHECK_EXCERPTS = 3
+/** Longest excerpt kept of why a check failed. */
+export const FAILING_CHECK_EXCERPT_MAX = 600
+
+/**
+ * A check on the pull request's head commit that didn't pass, counted the way the agent loop counts them
+ * (scripts/agent-loop/ci.sh): a check run that completed as `failure`, `timed_out`, `startup_failure` or
+ * `action_required`, or a commit status in `failure` or `error`. Cancelled, skipped, neutral and stale ones aren't.
+ */
+export interface FailingCheck {
+  /** The check run's name (e.g. a GitHub Actions job's) or the commit status's context. */
+  name: string
+  /** How it ended: the check run's conclusion, or the commit status's state. */
+  conclusion: string
+  /** Where to see it: the check run's or commit status's details page; null when it has none. */
+  url: string | null
+  /**
+   * A short excerpt of why it failed, from the check run's failure annotations or its output's title and summary, at
+   * most `FAILING_CHECK_EXCERPT_MAX` characters. Only the first `FAILING_CHECK_EXCERPTS` failing check runs have one
+   * (to spare GitHub's rate limit), and commit statuses give their description. Null when there is none.
+   */
+  excerpt: string | null
+}
 
 export interface PullRequest {
   url: string
@@ -166,8 +197,13 @@ export interface PullRequest {
   title: string | null
   /** Whether GitHub last found that it can't merge cleanly into its base branch (only open and draft ones). */
   conflicts: boolean
-  /** Combined status of its checks; `null` when it has none, or isn't open or draft. */
+  /** Combined status of its checks (see `CheckStatus`); `null` when it has none, or isn't open or draft. */
   checks: CheckStatus | null
+  /**
+   * The checks of its head commit that didn't pass, by name, at most `MAX_FAILING_CHECKS`; empty unless `checks` is
+   * `failing`.
+   */
+  failingChecks: FailingCheck[]
   checkedAt: string | null
 }
 

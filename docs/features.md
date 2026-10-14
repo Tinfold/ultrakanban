@@ -11,6 +11,8 @@
 - **Pull request workflow**: agents submit tickets for review with their GitHub pull request; tickets only enter
   Done once the pull request is merged and move there automatically when it is. Questions (tickets tagged
   `question`) are answered in a comment instead, and you close them yourself by moving them to Done
+- **Checks**: a pull request's card shows whether its checks pass, from GitHub Actions or other CI; hover the icon to
+  see which fail, and the ticket lists the failing checks with links and an excerpt of why they failed
 - **Sub-tickets**: agents split a big ticket into sub-tickets that link back to it; its card shows how many are done,
   and the agent comes back to it only once they all are
 - **Epics**: group the tickets of a larger feature, sub-tickets included, in a bar above the columns with each epic's
