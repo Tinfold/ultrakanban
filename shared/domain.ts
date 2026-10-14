@@ -954,6 +954,28 @@ export interface AgentHost {
   login: AgentLogin | null
 }
 
+/**
+ * Every board's agents at once, as the header shows them: switched off (`paused`) or on there, and which loops the agent
+ * supervisor last found running. Switched off, the supervisor stops every loop and the containers their runs use, and
+ * starts none; switched on again, it starts the loop of every board whose agent is on, as before.
+ */
+export interface AgentServices {
+  paused: boolean
+  /** When it was last switched on or off, and by whom; null if it never has been. */
+  changedAt: string | null
+  changedBy: string | null
+  /** The boards whose agent is on (with a repository): each should have a loop running unless paused. */
+  wanted: string[]
+  /** The boards whose loop the supervisor last found running. */
+  running: string[]
+  /** When the supervisor last reported them; null if it never has, so nothing would act on the switch. */
+  reportedAt: string | null
+  /** The switch (its `changedAt`) the supervisor had seen to when it reported; until it is `changedAt`, it is on its way. */
+  handledAt: string | null
+  /** The server's time when it answered, to judge `reportedAt` by: the browser's clock can be off from it. */
+  serverTime: string
+}
+
 /** What the Setup page shows: the board's GitHub access and the agents'. */
 export interface SetupStatus {
   github: {

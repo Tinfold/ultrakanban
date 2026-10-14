@@ -1,5 +1,6 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import type { OverviewRange } from '@shared/domain'
+import { agentsSwitching } from '@/lib/agents-switch'
 import { api } from '@/lib/api'
 import { withoutPendingDeletes } from '@/lib/board-updates'
 
@@ -20,6 +21,7 @@ export const queryKeys = {
   appUpdate: ['app-update'] as const,
   claudeUsage: ['claude-usage'] as const,
   setup: ['setup'] as const,
+  agentServices: ['agent-services'] as const,
 }
 
 export const useBoards = () => useQuery({ queryKey: queryKeys.boards, queryFn: api.listBoards })
@@ -87,6 +89,17 @@ export const useAppUpdate = () =>
     refetchInterval: (query) => {
       const state = query.state.data?.state
       return state === 'requested' || state === 'running' ? 3000 : 60_000
+    },
+  })
+
+/** Checked every few seconds after switching the agents off or on, until the supervisor has seen to it. */
+export const useAgentServices = () =>
+  useQuery({
+    queryKey: queryKeys.agentServices,
+    queryFn: api.agentServices,
+    refetchInterval: (query) => {
+      const services = query.state.data
+      return services && agentsSwitching(services) ? 2000 : 30_000
     },
   })
 

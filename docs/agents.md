@@ -212,7 +212,11 @@ work it, so two runs never work the same ticket, and when one runs out of Claude
 that many new tickets at a time, too: a claimed ticket whose run fails stays in progress to be retried, and until its
 run succeeds (or someone moves it back to Todo) it takes up one of the slots, so runs that keep failing don't drag the
 whole Todo or Backlog column into progress. Changing the
-setting restarts the board's loops, which stops runs in progress (they are resumed, see below). The boards themselves
+setting restarts the board's loops, which stops runs in progress (they are resumed, see below). The button left of the
+update button in the header switches every board's agents off and on at once: it is green while each board whose
+agent is on has its loop running, and a warning sign when one doesn't (or they are switched off). Switched off, the
+supervisor stops all the loops and the containers their runs use, until they are switched on again; clicking the
+warning sign while they are on starts the loops that stopped now, rather than after the supervisor's wait. The boards themselves
 also run side by side, with no limit across boards: three enabled boards with two parallel runs each can mean six
 agents working at once, all on your `claude` login and its usage limits.
 
