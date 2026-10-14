@@ -16,7 +16,7 @@ const queryClient = new QueryClient({
 function Routes() {
   useLiveUpdates()
   return (
-    <div className="flex h-dvh flex-col">
+    <div className="flex h-dvh flex-col overflow-x-hidden">
       <Switch>
         <Route path="/" component={HomePage} />
         <Route path="/overview" component={OverviewPage} />
