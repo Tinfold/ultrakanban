@@ -1145,7 +1145,8 @@ export interface AgentServices {
   running: string[]
   /**
    * Running loops that can't take any ticket: the boards where claiming one last failed, why (e.g. its in-progress
-   * column is gone) and since when. Each stays until a claim there goes through or finds nothing to do.
+   * column is gone) and since when. Each stays until a claim there goes through or finds nothing to do. The usage
+   * reserve holding agents back (`usage_reserve_reached`) doesn't count as failing.
    */
   claimErrors: AgentClaimError[]
   /** When the supervisor last reported them; null if it never has, so nothing would act on the switch. */

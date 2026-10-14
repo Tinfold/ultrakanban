@@ -874,7 +874,8 @@ starts the loop of every board whose agent is on, as before. The boards' own age
   wanted: string[] // the boards whose agent is on (with a repository): each should have a loop running unless paused
   running: string[] // the boards whose loop the supervisor last found running
   // boards where claim-next last failed (e.g. its moveTo column is gone), why, and since when; each stays until a
-  // claim there goes through or finds nothing to do, or the supervisor reports its loop stopped
+  // claim there goes through or finds nothing to do, or the supervisor reports its loop stopped; the usage reserve
+  // holding agents back (usage_reserve_reached, see Claude usage) doesn't count as failing
   claimErrors: { boardId: string, message: string, since: string }[]
   reportedAt: string | null // when the supervisor last reported them; null if it never has
   handledAt: string | null // the changedAt it had seen to then: until it equals changedAt, the switch is on its way
