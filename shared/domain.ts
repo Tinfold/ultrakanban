@@ -833,6 +833,14 @@ export interface AppUpdate {
   version: string | null
   /** Commits the checkout's default branch is behind origin, as of the supervisor's last fetch. */
   behind: number | null
+  /** Its commits that aren't on origin: the update fails to fast-forward over them, so it has to merge. */
+  ahead: number | null
+  /** The checkout's full commit sha. */
+  commit: string | null
+  /** The commit the running board was built from (`ULTRAKANBAN_COMMIT` at build time); null when unknown. */
+  runningCommit: string | null
+  /** Whether the requested (or last) update merges origin with `git pull --no-ff` instead of fast-forwarding. */
+  merge: boolean
 }
 
 /** One of the Claude plan's usage limits: the current session, the week, or the week for one model. */

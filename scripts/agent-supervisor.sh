@@ -18,7 +18,7 @@
 # nothing.
 #
 # And it updates ultrakanban itself when someone asks for it in the app (the update button in the header): it pulls
-# that checkout's default branch, rebuilds and restarts the board (ultrakanban.service's compose project), and reports
+# that checkout's default branch (fast-forward only, or merging origin with --no-ff when asked to), rebuilds and restarts the board (ultrakanban.service's compose project), and reports
 # how it went. Every poll it checks in with the checkout's version and how many commits it is behind origin (fetched
 # every UPDATE_FETCH_SECONDS), which the app shows next to the button.
 #
@@ -117,12 +117,15 @@ report() {
     -H 'X-Actor: agent-supervisor' -d "$1"
 }
 
-# The checkout's version and how far its default branch is behind origin, as report fields.
+# The checkout's version and commit, and how far its default branch is behind and ahead of origin, as report fields.
 checkout_state() {
-  local checkout=$1 branch=$2 behind
+  local checkout=$1 branch=$2 behind ahead
   behind=$(git -C "$checkout" rev-list --count "$branch..origin/$branch" 2>/dev/null) || behind=null
+  ahead=$(git -C "$checkout" rev-list --count "origin/$branch..$branch" 2>/dev/null) || ahead=null
   jq -nc --arg version "$(git -C "$checkout" log -1 --format='%h %s' 2>/dev/null)" --argjson behind "$behind" \
-    '{version: (if $version == "" then null else $version end), behind: $behind}'
+    --argjson ahead "$ahead" --arg commit "$(git -C "$checkout" rev-parse HEAD 2>/dev/null)" \
+    '{version: (if $version == "" then null else $version end), behind: $behind, ahead: $ahead,
+      commit: (if $commit == "" then null else $commit end)}'
 }
 
 last_fetch=
@@ -144,12 +147,13 @@ check_in() {
     report '{"state":"failed","message":"The agent supervisor stopped during the update. Ask for it again."}' >/dev/null
   fi
   interrupted=
-  [[ $(jq -r .state <<<"$status") == requested ]] && update_board "$checkout" "$branch"
+  [[ $(jq -r .state <<<"$status") == requested ]] && update_board "$checkout" "$branch" "$(jq -r .merge <<<"$status")"
 }
 
-# Pulls the checkout's default branch, then rebuilds and restarts the board on it.
+# Pulls the checkout's default branch (merging origin into it with --no-ff when merge is true), then rebuilds and
+# restarts the board on it: `update_board <checkout> <branch> <merge>`.
 update_board() {
-  local checkout=$1 branch=$2 current output compose waited=0
+  local checkout=$1 branch=$2 merge=$3 current output compose running commit waited=0 pull=(--ff-only)
   update_failed() {
     echo "update failed: $1"
     report "$(jq -nc --arg message "$1" --argjson fields "$(checkout_state "$checkout" "$branch")" \
@@ -169,8 +173,11 @@ update_board() {
     update_failed "$checkout has local changes. Commit or stash them to update."
     return
   fi
-  if ! output=$(GIT_TERMINAL_PROMPT=0 timeout 300 git -C "$checkout" pull --ff-only --quiet origin "$branch" 2>&1); then
-    update_failed "git pull failed: $(tail -c 1500 <<<"$output")"
+  [[ $merge == true ]] && pull=(--no-ff --no-edit)
+  if ! output=$(GIT_TERMINAL_PROMPT=0 timeout 300 git -C "$checkout" pull "${pull[@]}" --quiet origin "$branch" 2>&1); then
+    [[ $merge == true ]] && git -C "$checkout" merge --abort 2>/dev/null
+    update_failed "git pull ${pull[*]} failed: $(tail -c 1500 <<<"$output")$([[ $merge == true ]] ||
+      echo " If $branch has commits of its own, update with a merge instead.")"
     return
   fi
   last_fetch=$SECONDS
@@ -189,15 +196,25 @@ update_board() {
     return
   fi
   echo "rebuilding and restarting the board"
-  if ! output=$("${compose[@]}" -f "$checkout/docker-compose.yml" up -d --build 2>&1); then
+  # --force-recreate: podman-compose builds the new image with a plain --build but keeps the old container running.
+  # ULTRAKANBAN_COMMIT: the commit the app is built from, so the app and this script can tell it runs this one.
+  commit=$(git -C "$checkout" rev-parse HEAD)
+  if ! output=$(ULTRAKANBAN_COMMIT=$commit "${compose[@]}" -f "$checkout/docker-compose.yml" up -d --build \
+    --force-recreate 2>&1); then
     update_failed "Rebuilding the board failed: $(tail -c 1500 <<<"$output")"
     return
   fi
   # The app restarts with the new build; wait for it to answer again, so the report gets through.
-  until curl -sf "$KANBAN/api/system/update" >/dev/null || ((waited >= 300)); do
+  until running=$(curl -sf "$KANBAN/api/system/update") || ((waited >= 300)); do
     sleep 5
     ((waited += 5))
   done
+  running=$(jq -r '.runningCommit // empty' <<<"$running" 2>/dev/null)
+  if [[ -n $running && $running != "$commit" ]]; then
+    update_failed "Rebuilt the board on ${commit:0:7}, but it still runs ${running:0:7}. Restart it yourself: \
+${compose[*]} -f $checkout/docker-compose.yml up -d --force-recreate"
+    return
+  fi
   echo "updated ultrakanban to $(git -C "$checkout" log -1 --format='%h %s')"
   report "$(jq -nc --arg message "Updated to $(git -C "$checkout" log -1 --format='%h %s')" \
     --argjson fields "$(checkout_state "$checkout" "$branch")" '$fields + {state: "done", message: $message}')" \

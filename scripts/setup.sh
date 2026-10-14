@@ -129,6 +129,8 @@ port=${port:-4317}
 # Without the agent services on this machine, the updater container acts on the app's update button. It runs docker
 # compose through the Docker socket, so not with podman.
 profiles=()
+# The commit the board is built from, which the app's update button compares with the checkout's.
+ULTRAKANBAN_COMMIT=$(git rev-parse HEAD 2>/dev/null) && export ULTRAKANBAN_COMMIT
 ((systemd)) || [[ ${compose[0]} != docker ]] || profiles+=(--profile updater)
 ((!container)) || profiles+=(--profile agents)
 

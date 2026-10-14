@@ -149,9 +149,12 @@ sends it back.
 
 **Updating from the app.** Once the supervisor runs, the header shows an update button, with the version the board runs
 and how many commits it is behind origin (fetched every 15 minutes). **Update & restart** asks the supervisor to
-`git pull --ff-only` the checkout's default branch, rebuild and restart the board (`compose up -d --build`, as
+`git pull --ff-only` the checkout's default branch (or, with **Merge with `git pull --no-ff`** ticked, merge origin
+into it, keeping commits of its own; it starts ticked when the checkout has some), rebuild and restart the board (`compose up -d --build --force-recreate`, as
 `ultrakanban.service` runs it) and install the new agent scripts. It refuses, and says why, when the checkout has
-another branch checked out or local changes. To keep everything running while you
+another branch checked out or local changes. The board is built with the checkout's commit (`ULTRAKANBAN_COMMIT`), so
+the button also says when the board runs an older build than the checkout, and the update fails if the restarted board
+doesn't run the commit it built. To keep everything running while you
 are logged out, also run `loginctl enable-linger`.
 
 **Claude usage.** The supervisor also reads how much of your Claude plan's usage limits is used (the current session,

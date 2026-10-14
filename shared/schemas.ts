@@ -318,7 +318,17 @@ export const reportAppUpdateSchema = z.object({
   message: z.string().trim().max(4000).nullable().optional(),
   version: z.string().trim().max(300).nullable().optional(),
   behind: z.int().min(0).nullable().optional(),
+  ahead: z.int().min(0).nullable().optional(),
+  commit: z
+    .string()
+    .trim()
+    .regex(/^[0-9a-f]{7,64}$/)
+    .nullable()
+    .optional(),
 })
+
+/** Asking for an update; `merge` merges origin with `git pull --no-ff` instead of only fast-forwarding. */
+export const requestAppUpdateSchema = z.object({ merge: z.boolean().optional() })
 
 /** A GitHub token for the board, set on the Setup page. */
 export const setGitHubTokenSchema = z.object({ token: z.string().trim().min(1).max(500) })
@@ -475,6 +485,7 @@ export type HeartbeatInput = z.input<typeof heartbeatSchema>
 export type ReleaseIdleInput = z.input<typeof releaseIdleSchema>
 export type SubmitForReviewInput = z.input<typeof submitForReviewSchema>
 export type ReportAppUpdateInput = z.input<typeof reportAppUpdateSchema>
+export type RequestAppUpdateInput = z.input<typeof requestAppUpdateSchema>
 export type ReportClaudeUsageInput = z.input<typeof reportClaudeUsageSchema>
 export type ReportDiskUsageInput = z.input<typeof reportDiskUsageSchema>
 export type ReportAgentHostInput = z.input<typeof reportAgentHostSchema>
