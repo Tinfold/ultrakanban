@@ -4,8 +4,9 @@
 # are no systemd user services: Windows and macOS with Docker Desktop, Linux without systemd. It does what the
 # supervisor's check_in and update_board do (scripts/agent-supervisor.sh): every POLL_SECONDS it checks in with the
 # checkout's version and how many commits it is behind origin (fetched every UPDATE_FETCH_SECONDS), and when an update
-# has been asked for it pulls the checkout's default branch (merging origin with --no-ff when asked to), then rebuilds and restarts the compose project's running
-# containers with the compose files they were started with (e.g. deploy/compose.gpu.yml), and reports how it went.
+# has been asked for it moves the checkout to origin's default branch (keeping its local changes in a stash and commits
+# of its own on a backup branch), then rebuilds and restarts the compose project's running containers with the compose
+# files they were started with (e.g. deploy/compose.gpu.yml), and reports how it went.
 #
 # The checkout is mounted at /repo and the Docker socket at /var/run/docker.sock. It runs from the checkout and starts
 # again after an update, so it always runs the version it pulled; its own container isn't rebuilt (that would stop it
@@ -58,7 +59,7 @@ check_in() {
     report '{"state":"failed","message":"The updater stopped during the update. Ask for it again."}' >/dev/null
   fi
   interrupted=
-  [[ $(jq -r .state <<<"$status") == requested ]] && update_board "$branch" "$(jq -r .merge <<<"$status")"
+  [[ $(jq -r .state <<<"$status") == requested ]] && update_board "$branch"
 }
 
 # The docker compose command for this container's project: its name, the checkout, and the compose files it was started
@@ -89,46 +90,70 @@ compose_command() {
   done
 }
 
-# Pulls the checkout's default branch (merging origin into it with --no-ff when merge is true), then rebuilds and
-# restarts the board on it: `update_board <branch> <merge>`.
+# Before update_board moves the checkout to origin's branch, keeps what that would drop: local changes in a git stash,
+# and commits that would be on no branch any more (the default branch's own, or a detached HEAD's) on a backup branch.
+# Adds where to update_board's kept: `keep_local_work <git command for the checkout...>`.
+keep_local_work() {
+  local stamp output count identity=()
+  stamp=$(date -u +%Y%m%d-%H%M%S)
+  # The stash commit needs an author.
+  "$@" config user.email >/dev/null ||
+    identity=(-c user.name=ultrakanban-updater -c user.email=updater@ultrakanban.invalid)
+  if [[ -n $("$@" status --porcelain --untracked-files=no) ]]; then
+    if ! output=$("$@" ${identity[@]+"${identity[@]}"} stash push --quiet --message "ultrakanban update $stamp" 2>&1)
+    then
+      update_failed "Couldn't stash the checkout's local changes: $(tail -c 1500 <<<"$output")"
+      return 1
+    fi
+    kept+="${kept:+, and }its local changes in the git stash \"ultrakanban update $stamp\""
+  fi
+  count=$("$@" rev-list --count "origin/$branch..refs/heads/$branch" 2>/dev/null) || count=0
+  if ((count > 0)); then
+    "$@" branch "ultrakanban-backup-$stamp" "refs/heads/$branch" || {
+      update_failed "Couldn't keep $branch's own commits on the branch ultrakanban-backup-$stamp."
+      return 1
+    }
+    kept+="${kept:+, and }$count commit(s) of $branch's own on the branch ultrakanban-backup-$stamp"
+  fi
+  "$@" symbolic-ref --quiet HEAD >/dev/null && return
+  count=$("$@" rev-list --count HEAD --not --branches --remotes 2>/dev/null) || count=0
+  if ((count > 0)); then
+    "$@" branch "ultrakanban-backup-$stamp-detached" HEAD || {
+      update_failed "Couldn't keep the detached HEAD's commits on the branch ultrakanban-backup-$stamp-detached."
+      return 1
+    }
+    kept+="${kept:+, and }the detached HEAD's $count commit(s) on the branch ultrakanban-backup-$stamp-detached"
+  fi
+}
+
+# Moves the checkout to origin's default branch, whatever it had checked out, then rebuilds and restarts the board on
+# it: `update_board <branch>`. It keeps what that would drop (see keep_local_work), and says where.
 update_board() {
-  local branch=$1 merge=$2 current output error project service compose services running commit waited=0
-  local pull=(--ff-only) identity=()
+  local branch=$1 output error project service compose services running commit waited=0 kept=
   update_failed() {
     echo "update failed: $1"
-    report "$(jq -nc --arg message "$1" --argjson fields "$(checkout_state "$branch")" \
+    report "$(jq -nc --arg message "$1${kept:+ Kept $kept.}" --argjson fields "$(checkout_state "$branch")" \
       '$fields + {state: "failed", message: $message}')" >/dev/null
   }
   # Taking the request fails when it was withdrawn meanwhile.
-  report "$(jq -nc --arg message "Pulling $branch" '{state: "running", message: $message}')" >/dev/null || return 0
-  echo "updating ultrakanban: pulling $branch"
+  report "$(jq -nc --arg message "Updating to origin/$branch" '{state: "running", message: $message}')" >/dev/null ||
+    return 0
+  echo "updating ultrakanban: moving to origin/$branch"
 
-  current=$(git symbolic-ref --quiet --short HEAD 2>/dev/null)
-  if [[ $current != "$branch" ]]; then
-    update_failed "The checkout has ${current:-a detached HEAD} checked out, not $branch. Switch it back to $branch to update."
-    return
-  fi
-  if [[ -n $(git status --porcelain --untracked-files=no) ]]; then
-    update_failed "The checkout has local changes. Commit or stash them to update."
-    return
-  fi
-  if [[ $merge == true ]]; then
-    pull=(--no-ff --no-edit)
-    # The merge commit needs an author; git runs with HOME=/tmp here, so only the checkout's own config has one.
-    git config user.email >/dev/null ||
-      identity=(-c user.name=ultrakanban-updater -c user.email=updater@ultrakanban.invalid)
-  fi
-  if ! output=$(as_owner timeout 300 git ${identity[@]+"${identity[@]}"} -C "$REPO" pull "${pull[@]}" --quiet \
-    origin "$branch" 2>&1); then
-    [[ $merge == true ]] && git merge --abort 2>/dev/null
-    update_failed "git pull ${pull[*]} failed: $(tail -c 1500 <<<"$output")$([[ $merge == true ]] ||
-      echo " If $branch has commits of its own, update with a merge instead.")"
+  if ! output=$(as_owner timeout 300 git -C "$REPO" fetch --quiet origin "$branch" 2>&1); then
+    update_failed "git fetch origin $branch failed: $(tail -c 1500 <<<"$output")"
     return
   fi
   last_fetch=$SECONDS
+  # git runs with HOME=/tmp here, so only the checkout's own config has an author for the stash.
+  keep_local_work git || return
+  if ! output=$(git checkout --quiet -B "$branch" "origin/$branch" 2>&1); then
+    update_failed "git checkout -B $branch origin/$branch failed: $(tail -c 1500 <<<"$output")"
+    return
+  fi
 
   if ! compose_command; then
-    update_failed "Pulled $(git log -1 --format='%h %s'), but $error, so restart the board yourself."
+    update_failed "Moved to $(git log -1 --format='%h %s'), but $error, so restart the board yourself."
     return
   fi
   # The containers running now, except this one.
@@ -153,7 +178,7 @@ docker compose up -d --force-recreate."
     return
   fi
   echo "updated ultrakanban to $(git log -1 --format='%h %s')"
-  report "$(jq -nc --arg message "Updated to $(git log -1 --format='%h %s')" \
+  report "$(jq -nc --arg message "Updated to $(git log -1 --format='%h %s')${kept:+; kept $kept}" \
     --argjson fields "$(checkout_state "$branch")" '$fields + {state: "done", message: $message}')" \
     >/dev/null || echo "couldn't report the update to $KANBAN"
   echo "restarting with the new deploy/updater.sh"

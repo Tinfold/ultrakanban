@@ -119,9 +119,9 @@ in it (there is no Docker inside). Logs: `docker compose logs -f agents`.
 The app's update button needs the **updater container** there instead of the services (`--profile updater`, which
 `scripts/setup.sh` adds where there are no systemd user services, with docker compose;
 [`deploy/updater.sh`](../deploy/updater.sh)). It mounts the checkout and the Docker socket: when someone asks for an
-update it pulls the checkout's default branch and runs `docker compose up -d --build` on the containers that run (the
-board, nginx and the agents), with the compose files they were started with, so `deploy/compose.gpu.yml` stays. Agent
-runs stopped by the restart are picked up again. It doesn't rebuild its own container: run the `up` command yourself
+update it moves the checkout to origin's default branch the same way as the supervisor (see below) and runs
+`docker compose up -d --build` on the containers that run (the board, nginx and the agents), with the compose files they
+were started with, so `deploy/compose.gpu.yml` stays. Agent runs stopped by the restart are picked up again. It doesn't rebuild its own container: run the `up` command yourself
 when `deploy/updater.Dockerfile` changes. Logs: `docker compose logs -f updater`.
 
 When the agents need the machine itself (a Mac's GPU, its apps or devices), run the supervisor there without systemd:
@@ -150,10 +150,11 @@ sends it back.
 
 **Updating from the app.** Once the supervisor runs, the header shows an update button, with the version the board runs
 and how many commits it is behind origin (fetched every 15 minutes). **Update & restart** asks the supervisor to
-`git pull --ff-only` the checkout's default branch (or, with **Merge with `git pull --no-ff`** ticked, merge origin
-into it, keeping commits of its own; it starts ticked when the checkout has some), rebuild and restart the board (`compose up -d --build --force-recreate`, as
-`ultrakanban.service` runs it) and install the new agent scripts. It refuses, and says why, when the checkout has
-another branch checked out or local changes. The board is built with the checkout's commit (`ULTRAKANBAN_COMMIT`), so
+move the checkout to origin's default branch, whatever it has checked out (`git checkout -B main origin/main`), rebuild
+and restart the board (`compose up -d --build --force-recreate`, as `ultrakanban.service` runs it) and install the new
+agent scripts. Nothing is lost on the way, and there are no merge conflicts to resolve: the checkout's local changes go
+into a git stash and commits of its own that aren't on origin onto a branch `ultrakanban-backup-<time>`, and the update
+says which. The board is built with the checkout's commit (`ULTRAKANBAN_COMMIT`), so
 the button also says when the board runs an older build than the checkout, and the update fails if the restarted board
 doesn't run the commit it built. To keep everything running while you
 are logged out, also run `loginctl enable-linger`.

@@ -730,16 +730,16 @@ The app can't update itself from its container; the updater does it when asked: 
   updaterSeenAt: string | null // when the supervisor last checked in; null if it never has
   version: string | null // the checkout's commit, as "<short sha> <subject>"
   behind: number | null // commits its default branch is behind origin, as of the supervisor's last fetch
-  ahead: number | null // its commits that aren't on origin: only a merge updates over them
+  ahead: number | null // its commits that aren't on origin: the update keeps them on a backup branch
   commit: string | null // the checkout's full commit sha
   runningCommit: string | null // the commit the running board was built from (ULTRAKANBAN_COMMIT); null if unknown
-  merge: boolean // whether the requested (or last) update merges origin with git pull --no-ff
 }
 ```
 
-`POST /system/update` (202) asks for an update: the supervisor pulls its checkout's default branch, rebuilds and
-restarts the board, and reports how it went. It only fast-forwards, unless the body is `{ "merge": true }`: then it
-merges origin into the branch with `git pull --no-ff`, keeping the checkout's own commits. Once the board answers
+`POST /system/update` (202, no body) asks for an update: the supervisor moves its checkout to origin's default branch
+(`git checkout -B main origin/main`, whatever it had checked out), rebuilds and restarts the board, and reports how it
+went. It keeps the checkout's local changes in a git stash and its own commits on a backup branch, and its message says
+where. Once the board answers
 again, the supervisor checks it runs the commit it built (`runningCommit`), and fails the update if not. `409 update_in_progress` while one is requested or running.
 `DELETE /system/update` withdraws a request the supervisor hasn't taken yet (`409 update_running` once it has).
 
