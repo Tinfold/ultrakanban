@@ -5,6 +5,10 @@ import {
   AGENT_IDLE_MINUTES,
   type ApiErrorBody,
   type BoardDetail,
+  RUN_MAX_STEPS,
+  RUN_MESSAGE_MAX,
+  RUN_RECORDS_KEPT,
+  type RunRecord,
   type Ticket,
 } from '../shared/domain.ts'
 import { subscribe } from './events.ts'
@@ -440,5 +444,97 @@ describe('archiving done tickets', () => {
     for (const archiveDoneDays of [0, 1.5, -1, '7']) {
       assert.equal((await call('PATCH', `/boards/${boardId}`, { archiveDoneDays })).status, 400)
     }
+  })
+})
+
+describe('run records', () => {
+  const run = (overrides: Record<string, unknown> = {}) => ({
+    agent: 'claude/opus/high',
+    outcome: 'finished',
+    exitCode: 0,
+    durationMs: 1_380_000,
+    turns: 41,
+    costUsd: 1.2,
+    message: 'Opened the pull request.',
+    steps: [
+      { tool: 'Bash', summary: 'npm test' },
+      { tool: 'Edit', summary: 'src/app.ts', error: true },
+    ],
+    ...overrides,
+  })
+
+  test('records each run on the ticket and lists them newest first', async () => {
+    const ticket = await addTicket({ title: 'A' })
+    const first = await call<RunRecord>('POST', `/tickets/${ticket.id}/runs`, run())
+    const second = await call<RunRecord>('POST', `/tickets/${ticket.id}/runs`, {
+      agent: 'claude/opus/high',
+      outcome: 'timed_out',
+      exitCode: 124,
+    })
+    const { body: runs } = await call<RunRecord[]>('GET', `/tickets/${ticket.id}/runs`)
+
+    assert.equal(first.status, 201)
+    assert.deepEqual(first.body.steps, [
+      { tool: 'Bash', summary: 'npm test', error: false },
+      { tool: 'Edit', summary: 'src/app.ts', error: true },
+    ])
+    assert.equal(first.body.omittedSteps, null)
+    // A run that ended without a result has little more to say.
+    assert.deepEqual(
+      { ...second.body, id: 0, createdAt: '' },
+      {
+        id: 0,
+        ticketId: ticket.id,
+        agent: 'claude/opus/high',
+        outcome: 'timed_out',
+        exitCode: 124,
+        durationMs: null,
+        turns: null,
+        costUsd: null,
+        message: '',
+        steps: [],
+        omittedSteps: null,
+        createdAt: '',
+      },
+    )
+    assert.deepEqual(
+      runs.map((entry) => entry.outcome),
+      ['timed_out', 'finished'],
+    )
+    assert.equal((await call<RunRecord[]>('GET', `/tickets/${ticket.id}/runs?limit=1`)).body.length, 1)
+  })
+
+  test('keeps records small: clips the message and keeps only the newest runs', async () => {
+    const ticket = await addTicket({ title: 'A' })
+    const long = await call<RunRecord>('POST', `/tickets/${ticket.id}/runs`, run({ message: 'x'.repeat(5000) }))
+    for (let i = 0; i < RUN_RECORDS_KEPT; i++) {
+      await call('POST', `/tickets/${ticket.id}/runs`, run({ turns: i }))
+    }
+    const { body: runs } = await call<RunRecord[]>('GET', `/tickets/${ticket.id}/runs?limit=${RUN_RECORDS_KEPT}`)
+
+    assert.equal(long.body.message.length, RUN_MESSAGE_MAX)
+    assert.equal(long.body.message.at(-1), '…')
+    assert.equal(runs.length, RUN_RECORDS_KEPT)
+    assert.ok(runs.every((entry) => entry.id !== long.body.id))
+  })
+
+  test('validates runs', async () => {
+    const ticket = await addTicket({ title: 'A' })
+    const tooMany = Array.from({ length: RUN_MAX_STEPS + 1 }, () => ({ tool: 'Read', summary: 'a.ts' }))
+    const omitted = await call<RunRecord>(
+      'POST',
+      `/tickets/${ticket.id}/runs`,
+      run({ omittedSteps: { after: 1, count: 300 } }),
+    )
+
+    assert.deepEqual(omitted.body.omittedSteps, { after: 1, count: 300 })
+    assert.equal((await call('POST', `/tickets/${ticket.id}/runs`, run({ outcome: 'exploded' }))).status, 400)
+    assert.equal((await call('POST', `/tickets/${ticket.id}/runs`, run({ steps: tooMany }))).status, 400)
+    assert.equal(
+      (await call('POST', `/tickets/${ticket.id}/runs`, run({ omittedSteps: { after: 5, count: 1 } }))).status,
+      400,
+    )
+    assert.equal((await call('POST', '/tickets/nope/runs', run())).status, 404)
+    assert.equal((await call('GET', `/tickets/${ticket.id}/runs?limit=0`)).status, 400)
   })
 })

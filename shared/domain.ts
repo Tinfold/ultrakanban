@@ -559,6 +559,67 @@ export interface TokenUsage extends TokenCounts {
   createdAt: string
 }
 
+export const RUN_OUTCOMES = ['finished', 'failed', 'timed_out', 'killed', 'stopped', 'usage_limit'] as const
+/**
+ * How an agent run ended: `finished` (the agent exited successfully), `failed` (it exited with an error), `timed_out`
+ * (it ran longer than the agent loop's TICKET_TIMEOUT), `killed` (by a signal, most likely the kernel's for running out
+ * of memory), `stopped` (the loop stopped it because someone took the ticket away from the agent) or `usage_limit` (the
+ * account ran out of Claude usage, so the loop waits for it to reset and then resumes the run).
+ */
+export type RunOutcome = (typeof RUN_OUTCOMES)[number]
+
+/** Longest final message a run record keeps (see `RunRecord`); longer ones are clipped. */
+export const RUN_MESSAGE_MAX = 4000
+/** Most steps a run record holds (see `RunRecord`): a long run keeps its first and last ones. */
+export const RUN_MAX_STEPS = 150
+/** Run records kept per ticket: older ones are deleted as new ones arrive. */
+export const RUN_RECORDS_KEPT = 50
+
+/** One tool call of an agent run, condensed for people to skim (see `RunRecord`). */
+export interface RunStep {
+  /** The tool's name, e.g. `Bash`, `Edit` or `mcp__github__create_pull_request`. */
+  tool: string
+  /** What it was called on: a command's first line, a file's path, a search pattern. Empty when nothing fits. */
+  summary: string
+  /** Whether the tool reported an error, e.g. a command that failed or an edit that didn't apply. */
+  error: boolean
+}
+
+/**
+ * What one agent run on a ticket did and how it ended (`POST /tickets/:id/runs`), so people can see what an agent did
+ * and why it is stuck without reading the agent loop's logs. The loop reports every run it starts, finished or not,
+ * even when the run printed no result (it timed out or was killed).
+ */
+export interface RunRecord {
+  id: number
+  ticketId: string
+  /** Who ran, e.g. `claude/opus/high`. */
+  agent: string
+  outcome: RunOutcome
+  /** The agent process's exit status; null when the agent doesn't say. */
+  exitCode: number | null
+  /** How long the run took, start to end. */
+  durationMs: number | null
+  /** How many turns (responses of the model) the run took. */
+  turns: number | null
+  /** Estimated cost in US dollars, when the agent reports one. */
+  costUsd: number | null
+  /**
+   * The run's final message (Markdown), or what it last said or printed when it ended without one; at most
+   * `RUN_MESSAGE_MAX` characters. Empty when there was nothing.
+   */
+  message: string
+  /** Its tool calls in order (not its subagents'), at most `RUN_MAX_STEPS`. */
+  steps: RunStep[]
+  /**
+   * Tool calls left out of a long run to keep the record small: `count` of them, which came between `steps[after - 1]`
+   * and `steps[after]`. Null when none were.
+   */
+  omittedSteps: { after: number; count: number } | null
+  /** When the run was reported, as it ended. */
+  createdAt: string
+}
+
 /** Token counts added up over several runs. */
 export interface UsageCounts extends TokenCounts {
   /**

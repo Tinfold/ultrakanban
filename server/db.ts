@@ -347,6 +347,27 @@ const MIGRATIONS = [
   -- Whether the last switch on (agents_changed_at) asked for the running loops to be restarted too.
   ALTER TABLE setup ADD COLUMN agents_restart INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  -- What each agent run on a ticket did and how it ended (POST /tickets/:id/runs, see RunRecord), the newest
+  -- RUN_RECORDS_KEPT per ticket. steps is a JSON array of { tool, summary, error }; omitted_after and omitted_count
+  -- say how many steps of a long run were left out, and where.
+  CREATE TABLE run_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    agent TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    exit_code INTEGER,
+    duration_ms INTEGER,
+    turns INTEGER,
+    cost_usd REAL,
+    message TEXT NOT NULL DEFAULT '',
+    steps TEXT NOT NULL DEFAULT '[]',
+    omitted_after INTEGER,
+    omitted_count INTEGER,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX run_records_ticket ON run_records(ticket_id, id);
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

@@ -19,6 +19,9 @@
 - **Plans and approval**: agents post a short plan with a size estimate (S, M or L) when they start a ticket;
   optionally, per board, tickets estimated at a given size or larger wait for you to approve the plan on the ticket
   before the agent spends more tokens on them
+- **Run records**: every agent run leaves a record in its ticket's activity: how long it took, its turns and cost, and
+  how it ended (finished, failed, timed out, killed, stopped, out of Claude usage), opening to its final message and
+  the tool calls it made, so you can see what an agent did and why it's stuck; failed runs stand out
 - **Merge all**: merge every pull request in review with one click, one at a time and in an order that avoids
   conflicts (stacked pull requests after the ones they build on); any that conflict after earlier merges are skipped
   for their agent to resolve

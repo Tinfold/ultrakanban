@@ -443,8 +443,9 @@ ticket can be in one epic, sub-tickets included.
 ## Token usage
 
 Agents report the tokens each run used on a ticket, and the [overview](#overview) adds them up per agent, board and
-day. `scripts/agent-loop.sh` reports every `claude -p` run it starts (from `--output-format json`, all models the run
-called, subagents included); other agents can report theirs the same way. Runs that weren't on a ticket (an assistant
+day. `scripts/agent-loop.sh` reports every `claude -p` run it starts that leaves a result (from the result at the end of
+its `--output-format stream-json` output, all models the run called, subagents included); other agents can report
+theirs the same way. Runs that weren't on a ticket (an assistant
 answering a question, say) are reported to the board instead, and count toward the agent's and the board's totals just
 the same, with `ticketId: null`. Every ticket carries its runs' totals in `usage`.
 
@@ -476,6 +477,45 @@ interface TokenUsage {
   // The same split by model (e.g. claude-opus-5-5), most tokens first; empty if the agent didn't report it
   models: { model; inputTokens; outputTokens; cacheReadTokens; cacheWriteTokens; costUsd: number | null }[]
   createdAt: string
+}
+```
+
+### Run records
+
+Agents also record what each run on a ticket did and how it ended, so people can see why an agent is stuck without
+reading its logs: the ticket's activity shows each run, collapsed to how long it took and how it ended, opening to its
+final message and the tool calls it made. `scripts/agent-loop.sh` records every run it starts, whether it finished,
+failed, timed out or was killed, from claude's `--output-format stream-json` output (see [Agents](agents.md)). Unlike
+token usage, a run is recorded even when it ended without a result.
+
+| Method | Path                      | Body / query                                                                                                                                    | Returns                                       |
+| ------ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| POST   | `/tickets/:ticketId/runs` | `{ agent, outcome, exitCode?, durationMs?, turns?, costUsd?, message?, steps?: { tool, summary?, error? }[], omittedSteps?: { after, count } }` | `RunRecord` (201)                             |
+| GET    | `/tickets/:ticketId/runs` | `?limit=20` (1 to 50)                                                                                                                           | `RunRecord[]` (newest first, at most `limit`) |
+
+Records stay small: `message` is clipped to 4000 characters, `steps` holds at most 150 tool calls (send the first and
+last ones of a longer run, and say how many were left out between them with `omittedSteps`), and each ticket keeps its
+newest 50 records.
+
+```ts
+interface RunRecord {
+  id: number
+  ticketId: string
+  agent: string // who ran, e.g. claude/opus/high
+  // finished: exited successfully; failed: exited with an error; timed_out: ran past the loop's TICKET_TIMEOUT;
+  // killed: by a signal (exit status 137 is most likely the kernel, out of memory); stopped: the loop stopped it as
+  // someone took the ticket away; usage_limit: the account ran out of Claude usage (the run is resumed later)
+  outcome: 'finished' | 'failed' | 'timed_out' | 'killed' | 'stopped' | 'usage_limit'
+  exitCode: number | null
+  durationMs: number | null
+  turns: number | null // responses of the model
+  costUsd: number | null
+  message: string // the final message (markdown), or what the run last said or printed; '' when there was nothing
+  // Its tool calls in order (not its subagents'): summary is a short target for people, e.g. a command's first line,
+  // a file's path or a search pattern; error says whether the tool reported one
+  steps: { tool: string; summary: string; error: boolean }[]
+  omittedSteps: { after: number; count: number } | null // count steps left out between steps[after - 1] and steps[after]
+  createdAt: string // when it was recorded, as the run ended
 }
 ```
 

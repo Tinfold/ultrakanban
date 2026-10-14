@@ -9,6 +9,8 @@ export const queryKeys = {
   board: (boardId: string) => ['board', boardId] as const,
   activity: (ticketId: string) => ['activity', ticketId] as const,
   allActivity: ['activity'] as const,
+  runs: (ticketId: string) => ['runs', ticketId] as const,
+  allRuns: ['runs'] as const,
   attachments: (ticketId: string) => ['attachments', ticketId] as const,
   allAttachments: ['attachments'] as const,
   github: ['github'] as const,
@@ -37,6 +39,10 @@ export const useBoard = (boardId: string) =>
 
 export const useTicketActivity = (ticketId: string) =>
   useQuery({ queryKey: queryKeys.activity(ticketId), queryFn: () => api.listActivity(ticketId) })
+
+/** What the agent's runs on the ticket did and how they ended (see `RunRecord`), newest first. */
+export const useTicketRuns = (ticketId: string) =>
+  useQuery({ queryKey: queryKeys.runs(ticketId), queryFn: () => api.listRuns(ticketId) })
 
 export const useGitHubStatus = () =>
   useQuery({ queryKey: queryKeys.github, queryFn: api.githubStatus, staleTime: 5 * 60_000 })

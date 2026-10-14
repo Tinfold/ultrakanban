@@ -10,6 +10,10 @@ import {
   parsePullRequestUrl,
   PRIORITIES,
   PULL_REQUEST_STATES,
+  RUN_MAX_STEPS,
+  RUN_MESSAGE_MAX,
+  RUN_OUTCOMES,
+  RUN_RECORDS_KEPT,
   TICKET_SIZES,
 } from './domain.ts'
 
@@ -385,7 +389,7 @@ const tokenCounts = {
   costUsd: cost,
 }
 
-/** Tokens an agent run used on a ticket or board, e.g. from `claude -p --output-format json`. */
+/** Tokens an agent run used on a ticket or board, e.g. from the result of `claude -p --output-format stream-json`. */
 export const recordUsageSchema = z.object({
   agent: name,
   ...tokenCounts,
@@ -396,6 +400,47 @@ export const recordUsageSchema = z.object({
     .max(50)
     .refine((models) => new Set(models.map((entry) => entry.model)).size === models.length, 'Models must be unique')
     .default([]),
+})
+
+/**
+ * A string of at most `max` characters, longer ones clipped and ended with "…" rather than turned down: a run's
+ * record shouldn't be lost over a long message.
+ */
+const clipped = (max: number) =>
+  z.string().transform((text) => (text.length > max ? `${text.slice(0, max - 1)}…` : text))
+
+/** What an agent run on a ticket did and how it ended (see `RunRecord`). */
+export const recordRunSchema = z
+  .object({
+    agent: name,
+    outcome: z.enum(RUN_OUTCOMES),
+    exitCode: z.int().nullable().default(null),
+    durationMs: tokens.nullable().default(null),
+    turns: tokens.nullable().default(null),
+    costUsd: cost,
+    message: clipped(RUN_MESSAGE_MAX).default(''),
+    steps: z
+      .array(
+        z.object({
+          tool: z.string().trim().min(1).max(200),
+          summary: clipped(300).default(''),
+          error: z.boolean().default(false),
+        }),
+      )
+      .max(RUN_MAX_STEPS)
+      .default([]),
+    omittedSteps: z
+      .object({ after: z.int().min(0), count: z.int().min(1) })
+      .nullable()
+      .default(null),
+  })
+  .refine(
+    (run) => !run.omittedSteps || run.omittedSteps.after <= run.steps.length,
+    'omittedSteps.after must be at most the number of steps',
+  )
+
+export const listRunsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(RUN_RECORDS_KEPT).default(20),
 })
 
 export const commentSchema = z.object({
@@ -519,4 +564,5 @@ export type MergeTicketInput = z.input<typeof mergeTicketSchema>
 export type ListTicketsQuery = z.output<typeof listTicketsQuerySchema>
 export type AgentSuggestionQuery = z.output<typeof agentSuggestionQuerySchema>
 export type RecordUsage = z.output<typeof recordUsageSchema>
+export type RecordRun = z.output<typeof recordRunSchema>
 export type BoardExport = z.output<typeof boardExportSchema>

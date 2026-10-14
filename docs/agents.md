@@ -55,7 +55,8 @@ effort levels, or `default` for a model that has none:
 
 The overview then counts its work and tokens under that model. It can report the tokens of its runs with
 `POST /tickets/:id/usage` (see [Token usage](API.md#token-usage)), without `costUsd` when it doesn't know the cost:
-the overview then shows its tokens but no cost, rather than $0. Model and effort suggestions for new tickets come only
+the overview then shows its tokens but no cost, rather than $0. It can record what each run did and how it ended with
+`POST /tickets/:id/runs` (see [Run records](API.md#run-records)). Model and effort suggestions for new tickets come only
 from the board's own agent's runs, so a model only another agent can run is never suggested to it.
 
 ## Running agents unattended
@@ -271,6 +272,16 @@ someone takes the ticket away: moves it back to the queue like that, to Cancelle
 or deletes it. Moving a ticket back into In progress asks for more work (see above). Moving one into Review changes
 nothing, and the loop leaves tickets it doesn't hold alone, so dragging a Todo ticket to In progress yourself keeps it
 away from the agent.
+
+Every run leaves a record on its ticket, so you can see what the agent did and why it's stuck without reading the
+loop's logs. The loop runs claude with `--output-format stream-json --verbose`, which writes each message and tool call
+as the run goes, and once the run ends posts a record of it (`POST /tickets/:id/runs`): how it ended (finished, failed,
+timed out, killed, stopped because the ticket was taken away, or out of Claude usage), its exit status, how long it
+took, its turns and cost, its final message (or what it last said, for a run cut short) and each tool call with a short
+target: a command's first line, a file's path, a search pattern. A run of more than 150 tool calls keeps its first and
+last 75. The ticket's activity shows the records among its other events: open one to see the steps, with failed ones
+in red. Runs that time out or are killed are recorded too, though they leave no token usage; only a run cut short by
+the loop itself stopping (a restart) leaves none, and the next run resumes it.
 
 Nothing is missed, even while a run is going: before each run the loop notes the newest ticket activity id,
 pull request comment, review and inline comment ids, and the head commit's checks and conflict state. It saves

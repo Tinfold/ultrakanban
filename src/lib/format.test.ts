@@ -1,6 +1,22 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import { formatBytes, formatModel } from './format.ts'
+import { formatBytes, formatModel, formatRunOutcome, formatRunTotals } from './format.ts'
+
+describe('run records', () => {
+  test('say what a run took, leaving out what it did not report', () => {
+    assert.equal(formatRunTotals({ durationMs: 23 * 60_000, turns: 41, costUsd: 1.2 }), '23m · 41 turns · $1.20')
+    assert.equal(formatRunTotals({ durationMs: 30_000, turns: 1, costUsd: null }), '<1m · 1 turn')
+    assert.equal(formatRunTotals({ durationMs: null, turns: null, costUsd: null }), '')
+  })
+
+  test('say how a run ended', () => {
+    assert.equal(formatRunOutcome({ outcome: 'finished', exitCode: 0 }), 'finished')
+    assert.equal(formatRunOutcome({ outcome: 'failed', exitCode: 1 }), 'failed: exit status 1')
+    assert.equal(formatRunOutcome({ outcome: 'timed_out', exitCode: 124 }), 'failed: timed out')
+    assert.equal(formatRunOutcome({ outcome: 'killed', exitCode: 137 }), 'failed: killed (out of memory?)')
+    assert.equal(formatRunOutcome({ outcome: 'usage_limit', exitCode: 1 }), 'stopped: out of Claude usage')
+  })
+})
 
 describe('formatModel', () => {
   test('reads Claude, GPT and Gemini model names, and shows others as they are', () => {
