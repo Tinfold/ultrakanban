@@ -82,9 +82,9 @@ The **Setup page** (`/setup`, the gear in the header) shows what's left and does
    switch on **Run the agent on this board**. The agent then works the board's Todo tickets.
 
 To update: the update button in the header. On Linux it shows once the agents run as services; on macOS and Windows
-the updater container that `scripts/setup.sh` starts does the update (it pulls this checkout and rebuilds the board and
-the agents container). In PowerShell, add `--profile updater` to the `up` command above for it. Or `git pull`, then
-run the same command again.
+the updater container that `scripts/setup.sh` starts does the update (it moves this checkout to origin's default branch
+and rebuilds the board and the agents container). In PowerShell, add `--profile updater` to the `up` command above for
+it. Or `git pull`, then run the same command again.
 
 ## Docs
 

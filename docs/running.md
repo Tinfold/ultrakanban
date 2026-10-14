@@ -22,9 +22,10 @@ docker compose cp ./data/attachments app:/app/data/
 docker compose start app
 ```
 
-The update button in the header pulls this checkout and rebuilds the board for you once something acts on it: the
-agent services on Linux, or elsewhere the updater container, `docker compose --profile updater up -d --build` (it gets
-the Docker socket; see [Agents](agents.md#running-agents-unattended)). Changes to `deploy/nginx.conf` take effect after
+The update button in the header moves this checkout to origin's default branch and rebuilds the board for you once
+something acts on it: the agent services on Linux, or elsewhere the updater container,
+`docker compose --profile updater up -d --build` (it gets the Docker socket; see
+[Agents](agents.md#running-agents-unattended)). Changes to `deploy/nginx.conf` take effect after
 `docker compose up -d --build` too, since it is built into the nginx image.
 
 There is no authentication, so only publish it on a network you trust. To put it on the internet, terminate

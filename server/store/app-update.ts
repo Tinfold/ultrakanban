@@ -1,5 +1,5 @@
 import type { AppUpdate, AppUpdateState } from '../../shared/domain.ts'
-import type { ReportAppUpdateInput, RequestAppUpdateInput } from '../../shared/schemas.ts'
+import type { ReportAppUpdateInput } from '../../shared/schemas.ts'
 import { now, sql } from '../db.ts'
 import { conflict } from '../errors.ts'
 
@@ -14,7 +14,6 @@ interface AppUpdateRow {
   behind: number | null
   ahead: number | null
   commit_sha: string | null
-  merge: number
 }
 
 const toAppUpdate = (row: AppUpdateRow): AppUpdate => ({
@@ -29,22 +28,20 @@ const toAppUpdate = (row: AppUpdateRow): AppUpdate => ({
   ahead: row.ahead,
   commit: row.commit_sha,
   runningCommit: process.env.ULTRAKANBAN_COMMIT || null,
-  merge: !!row.merge,
 })
 
 export const getAppUpdate = () => toAppUpdate(sql.get<AppUpdateRow>('SELECT * FROM app_update WHERE id = 1')!)
 
 /** Asks the agent supervisor to update and restart ultrakanban; one update at a time. */
-export function requestAppUpdate(actor: string, input: RequestAppUpdateInput = {}): AppUpdate {
+export function requestAppUpdate(actor: string): AppUpdate {
   const { state } = getAppUpdate()
   if (state === 'requested' || state === 'running') {
     throw conflict('update_in_progress', 'An update has already been asked for')
   }
   sql.run(
-    "UPDATE app_update SET state = 'requested', requested_at = ?, requested_by = ?, message = NULL, merge = ? WHERE id = 1",
+    "UPDATE app_update SET state = 'requested', requested_at = ?, requested_by = ?, message = NULL WHERE id = 1",
     now(),
     actor,
-    input.merge ? 1 : 0,
   )
   return getAppUpdate()
 }

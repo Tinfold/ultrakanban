@@ -1002,8 +1002,8 @@ export interface Overview {
 
 /**
  * Updating ultrakanban itself, done on the host by the agent supervisor (`scripts/agent-supervisor.sh`): someone asks
- * for it in the app (`requested`), the supervisor picks it up (`running`), pulls the checkout, rebuilds and restarts
- * the board, and reports how it went (`done` or `failed`).
+ * for it in the app (`requested`), the supervisor picks it up (`running`), moves the checkout to origin's default
+ * branch, rebuilds and restarts the board, and reports how it went (`done` or `failed`).
  */
 export const APP_UPDATE_STATES = ['idle', 'requested', 'running', 'done', 'failed'] as const
 export type AppUpdateState = (typeof APP_UPDATE_STATES)[number]
@@ -1022,14 +1022,12 @@ export interface AppUpdate {
   version: string | null
   /** Commits the checkout's default branch is behind origin, as of the supervisor's last fetch. */
   behind: number | null
-  /** Its commits that aren't on origin: the update fails to fast-forward over them, so it has to merge. */
+  /** Its commits that aren't on origin: the update keeps them on a backup branch and leaves them out. */
   ahead: number | null
   /** The checkout's full commit sha. */
   commit: string | null
   /** The commit the running board was built from (`ULTRAKANBAN_COMMIT` at build time); null when unknown. */
   runningCommit: string | null
-  /** Whether the requested (or last) update merges origin with `git pull --no-ff` instead of fast-forwarding. */
-  merge: boolean
 }
 
 /** One of the Claude plan's usage limits: the current session, the week, or the week for one model. */
