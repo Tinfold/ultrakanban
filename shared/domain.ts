@@ -455,6 +455,12 @@ export interface Ticket {
   movedAt: string
   /** Whether it has been in the board's done column for longer than the board's `archiveDoneDays`. */
   archived: boolean
+  /**
+   * Why the board's auto-merge hasn't merged its pull request yet (see `AutoMergeWait`): only while the board has
+   * auto-merge on, the ticket is in the review column and its pull request is open. Null when it is ready, and merges
+   * at auto-merge's next round.
+   */
+  autoMergeWait: AutoMergeWait | null
   /** The ticket this one is a sub-ticket of; null when it isn't one. */
   parentId: string | null
   /**
@@ -466,6 +472,26 @@ export interface Ticket {
   epicId: string | null
   createdAt: string
   updatedAt: string
+}
+
+/**
+ * Why the board's auto-merge (`BoardSummary.autoMerge`) isn't merging a ticket's pull request yet, as its latest round
+ * found: what keeps it from being ready, or that merging it failed. Auto-merge looks again every minute.
+ */
+export interface AutoMergeWait {
+  /**
+   * For people, e.g. "Waiting for checks", "2 checklist items unchecked", "Waits for #41 to merge first", "Branch
+   * protection needs an approving review", "Merge conflicts", or "Merging failed: …" with GitHub's answer.
+   */
+  reason: string
+  /**
+   * Whether auto-merge tried to merge it and failed (GitHub turned the merge down, or auto-merge itself couldn't run),
+   * rather than it not being ready. It is tried again each round, and stays failed until it merges or something else
+   * keeps it waiting, so a merge that keeps failing shows.
+   */
+  failed: boolean
+  /** Since when this has been the reason. */
+  since: string
 }
 
 /** A ticket's token usage added up over all the agent runs on it. */

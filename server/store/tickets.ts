@@ -2,6 +2,7 @@ import {
   AGENT_IDLE_MINUTES,
   type AgentEffort,
   type Approval,
+  type AutoMergeWait,
   CANCELLED_COLUMN,
   type AgentRun,
   type CheckStatus,
@@ -64,6 +65,11 @@ interface TicketRow {
   pr_head_sha: string | null
   pr_failing_checks: string
   pr_checked_at: string | null
+  auto_merge_wait: string | null
+  auto_merge_failed: number
+  auto_merge_since: string | null
+  /** The board's auto_merge setting while the ticket is in its review column; null elsewhere. */
+  auto_merge_on: number | null
   agent_seen_at: string | null
   run_started_at: string | null
   run_step: string | null
@@ -124,7 +130,8 @@ const SELECT_TICKETS = `
     ${WAITING_SINCE} AS waiting_since,
     (SELECT count(*) ${SUBTICKETS}) AS subtickets_total,
     (SELECT count(*) ${SUBTICKETS} AND ${SUBTICKET_DONE}) AS subtickets_done,
-    (SELECT archive_done_days FROM boards WHERE id = t.board_id AND done_column_id = t.column_id) AS archive_days
+    (SELECT archive_done_days FROM boards WHERE id = t.board_id AND done_column_id = t.column_id) AS archive_days,
+    (SELECT auto_merge FROM boards WHERE id = t.board_id AND review_column_id = t.column_id) AS auto_merge_on
   FROM tickets t`
 
 const BOARD_ORDER = 'ORDER BY (SELECT position FROM columns WHERE id = t.column_id), t.position'
@@ -153,6 +160,21 @@ function runOf(row: RunRow): AgentRun | null {
   return { startedAt, seenAt, step }
 }
 
+/**
+ * Why auto-merge waits on the ticket's pull request, as its latest round found, only while that can still apply: the
+ * board has auto-merge on, the ticket is in its review column and the pull request is open. So a ticket that moves on,
+ * or a board that switches auto-merge off, stops showing it at once, before the next round forgets it.
+ */
+function autoMergeWaitOf(row: TicketRow): AutoMergeWait | null {
+  const open = row.pr_state === 'unknown' || row.pr_state === 'open' || row.pr_state === 'draft'
+  if (!row.auto_merge_wait || !row.auto_merge_on || !row.pr_url || !open) return null
+  return {
+    reason: row.auto_merge_wait,
+    failed: row.auto_merge_failed === 1,
+    since: row.auto_merge_since ?? row.updated_at,
+  }
+}
+
 const toTicket = (row: TicketRow): Ticket => ({
   id: row.id,
   boardId: row.board_id,
@@ -179,6 +201,7 @@ const toTicket = (row: TicketRow): Ticket => ({
   approval: row.approval,
   movedAt: row.moved_at,
   archived: row.archive_days !== null && Date.parse(row.moved_at) < Date.now() - row.archive_days * DAY_MS,
+  autoMergeWait: autoMergeWaitOf(row),
   parentId: row.parent_id,
   subtickets: row.subtickets_total ? { done: row.subtickets_done, total: row.subtickets_total } : null,
   epicId: row.epic_id,

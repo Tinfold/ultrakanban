@@ -1,6 +1,7 @@
 import { CircleXIcon, GitMergeConflictIcon, GitPullRequestIcon, MoreHorizontalIcon, RefreshCwIcon } from 'lucide-react'
 import { type FormEvent, useState } from 'react'
 import { type FailingCheck, parsePullRequestUrl, type Ticket } from '@shared/domain'
+import { AutoMergeHint } from '@/components/common/AutoMergeHint'
 import { CheckStatusIcon } from '@/components/common/CheckStatusIcon'
 import { PullRequestIcon } from '@/components/common/PullRequestIcon'
 import { Button } from '@/components/ui/button'
@@ -54,7 +55,8 @@ function FailingChecks({ checks }: { checks: FailingCheck[] }) {
 }
 
 /**
- * Shows the ticket's GitHub pull request, and its failing checks, and lets people link, refresh or unlink it.
+ * Shows the ticket's GitHub pull request, its failing checks and why auto-merge hasn't merged it yet, and lets people
+ * link, refresh or unlink it.
  */
 export function PullRequestField({ ticket }: { ticket: Ticket }) {
   const { actions } = useBoardContext()
@@ -170,6 +172,13 @@ export function PullRequestField({ ticket }: { ticket: Ticket }) {
         </PopoverContent>
       </Popover>
       {pullRequest && pullRequest.failingChecks.length > 0 && <FailingChecks checks={pullRequest.failingChecks} />}
+      {ticket.autoMergeWait && (
+        <AutoMergeHint
+          wait={ticket.autoMergeWait}
+          label="Auto-merge: "
+          className="px-2 pb-1 text-xs [&_svg]:size-3.5"
+        />
+      )}
     </div>
   )
 }

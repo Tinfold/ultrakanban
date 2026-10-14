@@ -374,6 +374,13 @@ const MIGRATIONS = [
   ALTER TABLE tickets ADD COLUMN pr_head_sha TEXT;
   ALTER TABLE tickets ADD COLUMN pr_failing_checks TEXT NOT NULL DEFAULT '[]';
   `,
+  `
+  -- Why the board's auto-merge isn't merging the ticket's pull request, as its latest round found (see AutoMergeWait):
+  -- the reason for people, whether a merge attempt failed, and since when. NULL when it's ready or auto-merge is off.
+  ALTER TABLE tickets ADD COLUMN auto_merge_wait TEXT;
+  ALTER TABLE tickets ADD COLUMN auto_merge_failed INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE tickets ADD COLUMN auto_merge_since TEXT;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

@@ -130,7 +130,12 @@ app), or one ticket's (the merge button on its card). Agents should not: merging
   GitHub's `mergeable_state` `clean` (every check passed, nothing blocking), every checklist item of the ticket
   checked, and building only on pull requests that are ready too. It runs as a `MergeRun` by `auto-merge`, in the
   same order as "merge all", with the first merge method every repository allows, and only when a run has anything
-  to merge and no other run is going.
+  to merge and no other run is going. Each round also records why each pull request in review isn't merged yet, as
+  the ticket's `autoMergeWait` (shown on its card and in its pull request field): "Still a draft", "Merge
+  conflicts", "2 checklist items unchecked", "Waiting for checks", "Checks failing: lint, test", "Branch protection
+  blocks it, e.g. it needs an approving review", "Waits for #41 to merge first", and so on. A merge GitHub turns down,
+  or a round that can't run (no GitHub token, say), is recorded the same way with `failed: true` ("Merging failed:
+  …"), and stays until the pull request merges or waits for something else, so a merge that keeps failing shows.
 - Merged tickets move to the done column right away. Merging needs a GitHub token with write access (`400` without
   one).
 - **Deleting branches:** with the board's `deleteMergedBranches` on, the server deletes a pull request's branch on
@@ -214,6 +219,10 @@ interface Ticket {
   approval: 'pending' | 'approved' | null // its plan waits for approval, or has it; null when it needs none
   movedAt: string // when it entered its current column
   archived: boolean // in the done column for longer than the board's archiveDoneDays (see Boards)
+  // Why the board's auto-merge hasn't merged its pull request yet, as its latest round found (see Auto-merge): only
+  // while the board has autoMerge on, the ticket is in the review column and the pull request is open; null when ready.
+  // failed: a merge attempt (or the round itself) failed, rather than the pull request not being ready
+  autoMergeWait: { reason: string; failed: boolean; since: string } | null
   parentId: string | null // the ticket it is a sub-ticket of (see Sub-tickets)
   subtickets: { done: number; total: number } | null // its finished sub-tickets out of all but cancelled ones; null without any
   epicId: string | null // the epic it belongs to (see Epics)
