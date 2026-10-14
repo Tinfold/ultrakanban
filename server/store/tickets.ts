@@ -652,6 +652,8 @@ export function releaseIdleTickets(columnId: string, input: ReleaseIdleInput, ac
 export function claimNextTicket(boardId: string, input: ClaimNextInput): Ticket {
   touchBoard(boardId)
   const column = resolveColumn(boardId, input.column)
+  // Checked even with nothing to claim, so a missing column shows before there is a ticket that can't be claimed.
+  if (input.moveTo) resolveColumn(boardId, input.moveTo)
   const tagIds = resolveTags(boardId, input.tags ?? [], { create: false })
   const tagFilter = tagIds.map(() => 'AND EXISTS (SELECT 1 FROM ticket_tags WHERE ticket_id = t.id AND tag_id = ?)')
   const candidates = sql.all<{ id: string; number: number; description: string }>(

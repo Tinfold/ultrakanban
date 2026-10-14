@@ -13,13 +13,15 @@ export const agentsSwitching = ({ changedAt, handledAt, reportedAt }: AgentServi
 /**
  * What the header's agents button shows, in this order: the supervisor hasn't reported for a while (`offline`), a switch
  * it hasn't seen to yet (`switching`), switched off (`paused`), boards whose loop isn't running (`missing`, by name),
- * or all of them running (`up`). `serverNow` is the server's time now, since `reportedAt` is by its clock.
+ * boards whose loop runs but can't claim a ticket (`failing`, by name, with why), or all of them running and claiming
+ * (`up`). `serverNow` is the server's time now, since `reportedAt` is by its clock.
  */
 export type AgentsSwitchState =
   | { kind: 'offline' }
-  | { kind: 'switching'; paused: boolean }
+  | { kind: 'switching'; paused: boolean; restart: boolean }
   | { kind: 'paused' }
   | { kind: 'missing'; boards: string[] }
+  | { kind: 'failing'; boards: { name: string; message: string; since: string }[] }
   | { kind: 'up'; boards: number }
 
 export function agentsSwitchState(
@@ -30,9 +32,17 @@ export function agentsSwitchState(
   if (!services.reportedAt || serverNow - Date.parse(services.reportedAt) > SUPERVISOR_OFFLINE_MS) {
     return { kind: 'offline' }
   }
-  if (agentsSwitching(services)) return { kind: 'switching', paused: services.paused }
+  if (agentsSwitching(services)) return { kind: 'switching', paused: services.paused, restart: services.restart }
   if (services.paused) return { kind: 'paused' }
   const missing = services.wanted.filter((id) => !services.running.includes(id))
   if (missing.length) return { kind: 'missing', boards: missing.map((id) => boardName(id) ?? id) }
+  // Only the wanted boards' loops: a board switched off or deleted since keeps its last error until it is reported gone.
+  const failing = services.claimErrors.filter(({ boardId }) => services.wanted.includes(boardId))
+  if (failing.length) {
+    return {
+      kind: 'failing',
+      boards: failing.map(({ boardId, message, since }) => ({ name: boardName(boardId) ?? boardId, message, since })),
+    }
+  }
   return { kind: 'up', boards: services.wanted.length }
 }

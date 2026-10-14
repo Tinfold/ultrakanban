@@ -347,7 +347,11 @@ export const reportAgentHostSchema = z.object({
 })
 
 /** Switching every board's agents off or on again (see `AgentServices`). */
-export const setAgentServicesSchema = z.object({ paused: z.boolean() })
+export const setAgentServicesSchema = z.object({
+  paused: z.boolean(),
+  /** Switching on: restart the loops that run, too, rather than only starting the ones that don't. */
+  restart: z.boolean().optional(),
+})
 
 /** The agent supervisor reporting the boards whose loop runs. */
 export const reportAgentServicesSchema = z.object({

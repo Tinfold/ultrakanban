@@ -339,6 +339,14 @@ const MIGRATIONS = [
   ALTER TABLE setup ADD COLUMN agents_reported_at TEXT;
   ALTER TABLE setup ADD COLUMN agents_handled_at TEXT;
   `,
+  `
+  -- Why claiming a ticket on the board last failed, and since when (see AgentServices). Cleared by a claim there that
+  -- goes through or finds nothing to do, and when the supervisor reports the board's loop stopped.
+  ALTER TABLE boards ADD COLUMN claim_error TEXT;
+  ALTER TABLE boards ADD COLUMN claim_error_at TEXT;
+  -- Whether the last switch on (agents_changed_at) asked for the running loops to be restarted too.
+  ALTER TABLE setup ADD COLUMN agents_restart INTEGER NOT NULL DEFAULT 0;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

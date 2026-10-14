@@ -160,6 +160,7 @@ export const api = {
   sendAgentLoginCode: (code: string) => request<AgentHost>('POST', '/system/agents/login/code', { code }),
   agentServices: () => request<AgentServices>('GET', '/system/agents/services'),
   setAgentsPaused: (paused: boolean) => request<AgentServices>('PUT', '/system/agents/services', { paused }),
+  restartAgents: () => request<AgentServices>('PUT', '/system/agents/services', { paused: false, restart: true }),
 }
 
 export const errorMessage = (error: unknown) => (error instanceof Error ? error.message : 'Something went wrong')
