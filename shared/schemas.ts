@@ -346,6 +346,12 @@ export const reportAgentHostSchema = z.object({
   gitIdentity: z.string().trim().max(300).nullable().optional(),
 })
 
+/** Switching every board's agents off or on again (see `AgentServices`). */
+export const setAgentServicesSchema = z.object({ paused: z.boolean() })
+
+/** The agent supervisor reporting the boards whose loop runs. */
+export const reportAgentServicesSchema = z.object({ running: z.array(z.string().trim().min(1).max(100)).max(10_000) })
+
 /** Asking the agent supervisor to run a login. */
 export const requestAgentLoginSchema = z.object({ kind: z.enum(AGENT_LOGIN_KINDS) })
 
@@ -496,6 +502,7 @@ export type ReportDiskUsageInput = z.input<typeof reportDiskUsageSchema>
 export type AttachmentCleanupInput = z.input<typeof attachmentCleanupSchema>
 export type ReportAgentHostInput = z.input<typeof reportAgentHostSchema>
 export type ReportAgentLoginInput = z.input<typeof reportAgentLoginSchema>
+export type ReportAgentServicesInput = z.input<typeof reportAgentServicesSchema>
 export type PostPlanInput = z.input<typeof postPlanSchema>
 export type ApprovePlanInput = z.input<typeof approvePlanSchema>
 export type ClaimNextInput = z.input<typeof claimNextSchema>

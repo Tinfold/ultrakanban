@@ -1,6 +1,7 @@
 import type {
   Activity,
   AgentHost,
+  AgentServices,
   AgentLoginKind,
   AgentSuggestion,
   AppUpdate,
@@ -157,6 +158,8 @@ export const api = {
   requestAgentLogin: (kind: AgentLoginKind) => request<AgentHost>('POST', '/system/agents/login', { kind }),
   cancelAgentLogin: () => request<AgentHost>('DELETE', '/system/agents/login'),
   sendAgentLoginCode: (code: string) => request<AgentHost>('POST', '/system/agents/login/code', { code }),
+  agentServices: () => request<AgentServices>('GET', '/system/agents/services'),
+  setAgentsPaused: (paused: boolean) => request<AgentServices>('PUT', '/system/agents/services', { paused }),
 }
 
 export const errorMessage = (error: unknown) => (error instanceof Error ? error.message : 'Something went wrong')

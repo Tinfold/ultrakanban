@@ -25,6 +25,10 @@
 # And every CLAUDE_USAGE_SECONDS it reads how much of the Claude plan's usage limits is used, with your claude login (as
 # /usage in claude does), and reports it to the board for the overview. The board can't: it runs in a container.
 #
+# And it switches every board's agents off and on again from the header: switched off, it stops all the loops (and the
+# containers their runs used) and starts none, until they are switched on again. It checks for that every few seconds,
+# and reports which loops run after each poll, which the header shows.
+#
 # And every DISK_USAGE_SECONDS it measures the disk space each board's agent folder takes (its clone, worktrees and loop
 # state, in AGENT_HOME/boards/<board>), and reports it to the board for the overview.
 #
@@ -40,6 +44,12 @@ CLAUDE_USAGE_SECONDS=${CLAUDE_USAGE_SECONDS:-300}
 DISK_USAGE_SECONDS=${DISK_USAGE_SECONDS:-1800}
 AGENT_HOME=${ULTRAKANBAN_AGENT_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/ultrakanban-agent}
 self=$(readlink -f "$0")
+# What agent runs start their containers with, as in agent-loop.sh; empty when there is neither.
+if [[ -z ${DOCKER:-} ]]; then
+  DOCKER=docker
+  command -v docker >/dev/null || ! command -v podman >/dev/null || DOCKER=podman
+fi
+command -v "$DOCKER" >/dev/null || DOCKER=
 systemd=1
 [[ -z ${NO_SYSTEMD:-} ]] && systemctl --user show-environment >/dev/null 2>&1 || systemd=
 # The installed files and where they come from in the checkout.
@@ -456,7 +466,7 @@ after_github_login() {
 # Waits POLL_SECONDS, but starts a login asked for on the Setup page within a few seconds, and checks in again as soon
 # as one finishes.
 wait_poll() {
-  local waited=0
+  local waited=0 switched
   while ((waited < POLL_SECONDS)); do
     sleep 3 &
     wait $!
@@ -470,13 +480,21 @@ wait_poll() {
     elif [[ $(curl -sf "$KANBAN/api/system/agents/login" | jq -r '.state // empty' 2>/dev/null) == requested ]]; then
       start_login
     fi
+    # Switched off or on in the header meanwhile: see to it now rather than at the next poll.
+    switched=$(curl -sf "$KANBAN/api/system/agents/services" | jq -r '.paused | select(. != null)' 2>/dev/null)
+    [[ -z $switched || $switched == "$paused" ]] || return 0
   done
 }
 
+# Whether every board's agents are switched off in the header, as reconcile last found.
+paused=
 reconcile() {
-  local boards wanted id repo agent model effort concurrency settings unit state units
+  local boards services wanted= id repo agent model effort concurrency settings unit state units
   boards=$(curl -sf "$KANBAN/api/boards") || { echo "can't reach $KANBAN; leaving the loops as they are"; return; }
-  wanted=$(jq -r '.[] | select(.agentEnabled and .githubRepo != null)
+  # A board older than the switch has no answer here: its agents are on.
+  services=$(curl -sf "$KANBAN/api/system/agents/services") || services='{}'
+  paused=$(jq -r '.paused // false' <<<"$services")
+  [[ $paused == true ]] || wanted=$(jq -r '.[] | select(.agentEnabled and .githubRepo != null)
     | [.id, .githubRepo, .agentName // "claude", .agentModel // "opus", .agentEffort // "medium", .agentConcurrency // 1]
     | @tsv' <<<"$boards")
 
@@ -508,10 +526,39 @@ reconcile() {
     [[ $'\n'$wanted == *$'\n'"$id"$'\t'* ]] && continue
     loop_state "$id"
     [[ $state == inactive ]] && continue
-    echo "board $id: agent switched off or board deleted; stopping its loop"
+    if [[ $paused == true ]]; then
+      echo "board $id: every board's agents are switched off; stopping its loop"
+    else
+      echo "board $id: agent switched off or board deleted; stopping its loop"
+    fi
     loop_stop "$id"
     rm -f "$AGENT_HOME/boards/$id/settings"
   done
+}
+
+# Tells the board which boards' loops run, for the header.
+report_services() {
+  local id state running=()
+  for id in $(loop_list); do
+    loop_state "$id"
+    [[ $state == @(active|reloading) ]] && running+=("$id")
+  done
+  jq -nc '{running: $ARGS.positional}' --args ${running[@]+"${running[@]}"} |
+    curl -sf -X POST "$KANBAN/api/system/agents/services/status" -H 'Content-Type: application/json' \
+      -H 'X-Actor: agent-supervisor' -d @- >/dev/null || echo "couldn't report the running loops to $KANBAN"
+}
+
+# The containers the board's runs used (see use_docker in agent-loop/run.sh): a run stopped along with its loop leaves
+# its container running.
+stop_containers() {
+  local name
+  [[ -n $DOCKER ]] || return 0
+  while read -r name; do
+    if [[ $name == "ultrakanban-$1-"* ]]; then
+      echo "board $1: removing its run's container $name"
+      "$DOCKER" rm --force "$name" >/dev/null 2>&1
+    fi
+  done < <("$DOCKER" ps --all --format '{{.Names}}' 2>/dev/null)
 }
 
 # The loops: systemd units, or this script's child processes without systemd (see the top).
@@ -561,6 +608,7 @@ loop_stop() {
   if [[ -n $systemd ]]; then
     systemctl --user stop "ultrakanban-agent@$1.service"
     systemctl --user reset-failed "ultrakanban-agent@$1.service" 2>/dev/null
+    stop_containers "$1"
     return
   fi
   if [[ -n ${pids[$1]:-} ]]; then
@@ -569,6 +617,7 @@ loop_stop() {
     kill -KILL "${pids[$1]}" 2>/dev/null
   fi
   unset 'pids[$1]' 'failures[$1]' 'not_before[$1]'
+  stop_containers "$1"
 }
 loop_restart() {
   if [[ -n $systemd ]]; then
@@ -594,5 +643,6 @@ while true; do
   report_agents
   update_scripts
   reconcile
+  report_services
   wait_poll
 done

@@ -770,6 +770,27 @@ what to show, `checking` takes the code, `done` and `failed` end it (`409 login_
 running, e.g. it was cancelled or ran out of time). A supervisor that checks in while a login is `waiting` or `checking`
 but runs none (it restarted) reports it `failed`.
 
+## Switching the agents off and on
+
+Every board's agents at once, from the button left of the update button in the header. Switched off, the agent
+supervisor stops every board's loop and removes the containers their runs used, and starts none; switched on again, it
+starts the loop of every board whose agent is on, as before. The boards' own agent settings stay as they are.
+`GET /system/agents/services` returns:
+
+```ts
+{
+  paused: boolean // switched off
+  changedAt: string | null, changedBy: string | null // when it was last switched, and by whom
+  wanted: string[] // the boards whose agent is on (with a repository): each should have a loop running unless paused
+  running: string[] // the boards whose loop the supervisor last found running
+  reportedAt: string | null // when the supervisor last reported them; null if it never has
+}
+```
+
+`PUT /system/agents/services` with `{ paused }` switches them off or on; the supervisor sees to it within a few
+seconds. It reports the running loops after each poll with `POST /system/agents/services/status` and
+`{ running: string[] }`.
+
 ## Live updates
 
 `GET /events?board=:boardId` is a server-sent event stream. It emits `change` events with data `{ "boardId": "..." }`

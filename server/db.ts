@@ -329,6 +329,15 @@ const MIGRATIONS = [
   -- When someone last asked the board's agent loops to clear their checkouts' build output (see BoardSummary).
   ALTER TABLE boards ADD COLUMN agent_cleanup_requested_at TEXT;
   `,
+  `
+  -- Every board's agents switched off at once from the header (see AgentServices), and the boards whose agent loop the
+  -- agent supervisor last found running there, as a JSON array of board ids.
+  ALTER TABLE setup ADD COLUMN agents_paused INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE setup ADD COLUMN agents_changed_at TEXT;
+  ALTER TABLE setup ADD COLUMN agents_changed_by TEXT;
+  ALTER TABLE setup ADD COLUMN agents_running TEXT;
+  ALTER TABLE setup ADD COLUMN agents_reported_at TEXT;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'
