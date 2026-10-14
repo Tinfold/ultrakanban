@@ -189,7 +189,8 @@ update_board() {
     return
   fi
   echo "rebuilding and restarting the board"
-  if ! output=$("${compose[@]}" -f "$checkout/docker-compose.yml" up -d --build 2>&1); then
+  # --force-recreate: podman-compose builds the new image with a plain --build but keeps the old container running.
+  if ! output=$("${compose[@]}" -f "$checkout/docker-compose.yml" up -d --build --force-recreate 2>&1); then
     update_failed "Rebuilding the board failed: $(tail -c 1500 <<<"$output")"
     return
   fi
