@@ -86,6 +86,11 @@ Boards without a review/done column (see board settings) have no pull request re
 - The server checks linked pull requests on GitHub every minute (and right after one is linked), authenticated with
   the token set on the Setup page (see [Setup](#setup)), `GITHUB_TOKEN`/`GH_TOKEN` or the `gh` CLI login, in that order.
   `GET /api/github` returns `{ "auth": "board" | "env" | "gh" | null }`.
+- For an open or draft pull request it also reads the checks of its head commit: check runs (GitHub Actions and other
+  GitHub apps; the latest run of each name) and commit statuses (older CI integrations) together, as `checks` and
+  `failingChecks` (see `PullRequest`), counting them the way the agent loop does (`scripts/agent-loop/ci.sh`). Why the
+  first 3 failing check runs failed (their annotations, or their output's title and summary) is only read again when
+  the head commit or its set of failing checks changes, to spare GitHub's rate limit.
 - When a pull request is merged, its ticket moves to the done column (actor `github`). Closed pull requests are noted
   in the activity log; the ticket stays where it is.
 - Moving a ticket into the done column without a merged pull request fails with `409 pull_request_not_merged`,
@@ -125,7 +130,12 @@ app), or one ticket's (the merge button on its card). Agents should not: merging
   GitHub's `mergeable_state` `clean` (every check passed, nothing blocking), every checklist item of the ticket
   checked, and building only on pull requests that are ready too. It runs as a `MergeRun` by `auto-merge`, in the
   same order as "merge all", with the first merge method every repository allows, and only when a run has anything
-  to merge and no other run is going.
+  to merge and no other run is going. Each round also records why each pull request in review isn't merged yet, as
+  the ticket's `autoMergeWait` (shown on its card and in its pull request field): "Still a draft", "Merge
+  conflicts", "2 checklist items unchecked", "Waiting for checks", "Checks failing: lint, test", "Branch protection
+  blocks it, e.g. it needs an approving review", "Waits for #41 to merge first", and so on. A merge GitHub turns down,
+  or a round that can't run (no GitHub token, say), is recorded the same way with `failed: true` ("Merging failed:
+  …"), and stays until the pull request merges or waits for something else, so a merge that keeps failing shows.
 - Merged tickets move to the done column right away. Merging needs a GitHub token with write access (`400` without
   one).
 - **Deleting branches:** with the board's `deleteMergedBranches` on, the server deletes a pull request's branch on
@@ -209,6 +219,10 @@ interface Ticket {
   approval: 'pending' | 'approved' | null // its plan waits for approval, or has it; null when it needs none
   movedAt: string // when it entered its current column
   archived: boolean // in the done column for longer than the board's archiveDoneDays (see Boards)
+  // Why the board's auto-merge hasn't merged its pull request yet, as its latest round found (see Auto-merge): only
+  // while the board has autoMerge on, the ticket is in the review column and the pull request is open; null when ready.
+  // failed: a merge attempt (or the round itself) failed, rather than the pull request not being ready
+  autoMergeWait: { reason: string; failed: boolean; since: string } | null
   parentId: string | null // the ticket it is a sub-ticket of (see Sub-tickets)
   subtickets: { done: number; total: number } | null // its finished sub-tickets out of all but cancelled ones; null without any
   epicId: string | null // the epic it belongs to (see Epics)
@@ -247,7 +261,13 @@ interface PullRequest {
   state: 'unknown' | 'open' | 'draft' | 'merged' | 'closed' // unknown until GitHub has been checked
   title: string | null
   conflicts: boolean // GitHub last found merge conflicts with its base branch (open and draft pull requests only)
-  checks: 'pending' | 'passing' | 'failing' | null // combined status of its checks; null when it has none, or isn't open or draft
+  // Combined status of its head commit's check runs (GitHub Actions, other apps) and commit statuses (older CI): failing
+  // once any didn't pass, else pending while any runs, else passing; null when it has none, or isn't open or draft
+  checks: 'pending' | 'passing' | 'failing' | null
+  // The checks that didn't pass, by name (at most 20; empty unless checks is failing). conclusion is the check run's
+  // (failure, timed_out, startup_failure, action_required) or the commit status's state (failure, error); excerpt says
+  // why, from the annotations or output of the first 3 failing check runs, or a commit status's description
+  failingChecks: { name: string; conclusion: string; url: string | null; excerpt: string | null }[]
   checkedAt: string | null
 }
 
@@ -443,8 +463,9 @@ ticket can be in one epic, sub-tickets included.
 ## Token usage
 
 Agents report the tokens each run used on a ticket, and the [overview](#overview) adds them up per agent, board and
-day. `scripts/agent-loop.sh` reports every `claude -p` run it starts (from `--output-format json`, all models the run
-called, subagents included); other agents can report theirs the same way. Runs that weren't on a ticket (an assistant
+day. `scripts/agent-loop.sh` reports every `claude -p` run it starts that leaves a result (from the result at the end of
+its `--output-format stream-json` output, all models the run called, subagents included); other agents can report
+theirs the same way. Runs that weren't on a ticket (an assistant
 answering a question, say) are reported to the board instead, and count toward the agent's and the board's totals just
 the same, with `ticketId: null`. Every ticket carries its runs' totals in `usage`.
 
@@ -476,6 +497,45 @@ interface TokenUsage {
   // The same split by model (e.g. claude-opus-5-5), most tokens first; empty if the agent didn't report it
   models: { model; inputTokens; outputTokens; cacheReadTokens; cacheWriteTokens; costUsd: number | null }[]
   createdAt: string
+}
+```
+
+### Run records
+
+Agents also record what each run on a ticket did and how it ended, so people can see why an agent is stuck without
+reading its logs: the ticket's activity shows each run, collapsed to how long it took and how it ended, opening to its
+final message and the tool calls it made. `scripts/agent-loop.sh` records every run it starts, whether it finished,
+failed, timed out or was killed, from claude's `--output-format stream-json` output (see [Agents](agents.md)). Unlike
+token usage, a run is recorded even when it ended without a result.
+
+| Method | Path                      | Body / query                                                                                                                                    | Returns                                       |
+| ------ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| POST   | `/tickets/:ticketId/runs` | `{ agent, outcome, exitCode?, durationMs?, turns?, costUsd?, message?, steps?: { tool, summary?, error? }[], omittedSteps?: { after, count } }` | `RunRecord` (201)                             |
+| GET    | `/tickets/:ticketId/runs` | `?limit=20` (1 to 50)                                                                                                                           | `RunRecord[]` (newest first, at most `limit`) |
+
+Records stay small: `message` is clipped to 4000 characters, `steps` holds at most 150 tool calls (send the first and
+last ones of a longer run, and say how many were left out between them with `omittedSteps`), and each ticket keeps its
+newest 50 records.
+
+```ts
+interface RunRecord {
+  id: number
+  ticketId: string
+  agent: string // who ran, e.g. claude/opus/high
+  // finished: exited successfully; failed: exited with an error; timed_out: ran past the loop's TICKET_TIMEOUT;
+  // killed: by a signal (exit status 137 is most likely the kernel, out of memory); stopped: the loop stopped it as
+  // someone took the ticket away; usage_limit: the account ran out of Claude usage (the run is resumed later)
+  outcome: 'finished' | 'failed' | 'timed_out' | 'killed' | 'stopped' | 'usage_limit'
+  exitCode: number | null
+  durationMs: number | null
+  turns: number | null // responses of the model
+  costUsd: number | null
+  message: string // the final message (markdown), or what the run last said or printed; '' when there was nothing
+  // Its tool calls in order (not its subagents'): summary is a short target for people, e.g. a command's first line,
+  // a file's path or a search pattern; error says whether the tool reported one
+  steps: { tool: string; summary: string; error: boolean }[]
+  omittedSteps: { after: number; count: number } | null // count steps left out between steps[after - 1] and steps[after]
+  createdAt: string // when it was recorded, as the run ended
 }
 ```
 

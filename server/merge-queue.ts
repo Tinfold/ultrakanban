@@ -13,6 +13,7 @@ import { badRequest, conflict, HttpError } from './errors.ts'
 import type { GitHubPullRequest } from './github.ts'
 import type { Notifier } from './notifications.ts'
 import type { PullRequestSync } from './pull-request-sync.ts'
+import { type AutoMergeFinding, setAutoMergeWaits } from './store/auto-merge.ts'
 import { getBoard, listBoards } from './store/boards.ts'
 import { getTicket, listTickets } from './store/tickets.ts'
 
@@ -68,6 +69,61 @@ export const AUTO_MERGE_ACTOR = 'auto-merge'
 
 /** Whether every step of the ticket's checklist is checked (true when it has none). */
 const checklistDone = (ticket: Ticket) => parseChecklist(ticket.description).every((item) => item.checked)
+
+/** `1 checklist item`, `2 checklist items`. */
+const counted = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`
+
+/** Names for people: the first few, and how many more. */
+const someNames = (names: string[]) =>
+  names.length > 3 ? `${names.slice(0, 3).join(', ')} and ${names.length - 3} more` : names.join(', ')
+
+/**
+ * Why auto-merge can't merge a ticket's pull request, going by what the board knows without asking GitHub (see
+ * `mergeCandidates`): it is a draft, has conflicts, or its ticket's checklist isn't done. Null when it could be ready.
+ * The same reasons, in the same order, as `autoMerge` gives once it asks GitHub.
+ */
+function knownWait(ticket: Ticket): AutoMergeFinding {
+  if (ticket.pullRequest?.state === 'draft') return { reason: 'Still a draft', failed: false }
+  if (ticket.pullRequest?.conflicts) return { reason: 'Merge conflicts', failed: false }
+  const unchecked = parseChecklist(ticket.description).filter((item) => !item.checked).length
+  if (unchecked) return { reason: `${counted(unchecked, 'checklist item')} unchecked`, failed: false }
+  return null
+}
+
+/** What the board last read of the ticket's checks, as a reason to wait: failing ones by name, or running ones. */
+function checksWait(ticket: Ticket) {
+  const pullRequest = ticket.pullRequest
+  if (pullRequest?.checks === 'failing') {
+    const names = pullRequest.failingChecks.map((check) => check.name)
+    return names.length ? `Checks failing: ${someNames(names)}` : 'Checks failing'
+  }
+  return pullRequest?.checks === 'pending' ? 'Waiting for checks' : null
+}
+
+/**
+ * Why GitHub doesn't find a pull request ready to merge (see `readyToMerge`), for people. GitHub only says that branch
+ * protection blocks it, so the checks the board knows of tell whether it waits for them; otherwise it most likely
+ * waits for a required review.
+ */
+function notReadyReason(pullRequest: GitHubPullRequest, ticket: Ticket) {
+  if (pullRequest.mergeable === null || pullRequest.mergeableState === 'unknown') {
+    return 'GitHub is still working out whether it can be merged'
+  }
+  switch (pullRequest.mergeableState) {
+    case 'blocked':
+      return checksWait(ticket) ?? 'Branch protection blocks it, e.g. it needs an approving review'
+    case 'behind':
+      return `Behind ${pullRequest.base}, and branch protection needs it up to date`
+    case 'unstable':
+      return checksWait(ticket) ?? 'Some checks are not passing'
+    case 'dirty':
+      return 'Merge conflicts'
+    case 'draft':
+      return 'Still a draft'
+    default:
+      return `GitHub doesn't find it ready to merge (${pullRequest.mergeableState})`
+  }
+}
 
 /** Whether a pull request is ready to merge without anyone looking: no conflicts and every check passed. */
 const readyToMerge = (pullRequest: GitHubPullRequest | null) =>
@@ -302,24 +358,85 @@ export function createMergeQueue(
   }
 
   /**
+   * Why auto-merge won't merge an item of the plan this round, given the items found ready before it in merge order;
+   * null when it is ready. In the order the board can tell without GitHub (see `knownWait`), then what GitHub says,
+   * then the pull requests it builds on.
+   */
+  function waitFor(
+    item: MergePlanItem,
+    pullRequest: GitHubPullRequest | null,
+    ticket: Ticket,
+    byTicket: Map<string, MergePlanItem>,
+    ready: Set<string>,
+  ): AutoMergeFinding {
+    if (item.skip) {
+      // It couldn't be read from GitHub: auto-merge itself failed.
+      if (!pullRequest) return { reason: item.skip, failed: true }
+      const own = skipReason(pullRequest)
+      if (!own) {
+        const parent = item.after.map((id) => byTicket.get(id)).find((other) => other?.skip)
+        return { reason: `Waits for #${parent?.ticketNumber}, which can't be merged yet`, failed: false }
+      }
+      return { reason: pullRequest.mergeable === false && !pullRequest.draft ? 'Merge conflicts' : own, failed: false }
+    }
+    if (!checklistDone(ticket)) return knownWait(ticket)
+    if (!pullRequest || !readyToMerge(pullRequest)) {
+      return { reason: pullRequest ? notReadyReason(pullRequest, ticket) : 'Not found on GitHub', failed: false }
+    }
+    const waiting = item.after.find((id) => !ready.has(id))
+    if (waiting) return { reason: `Waits for #${byTicket.get(waiting)?.ticketNumber} to merge first`, failed: false }
+    return null
+  }
+
+  /**
    * Merges the board's pull requests that are ready: in the review column, open, not a draft, without conflicts,
    * with every check passed and every checklist item of their ticket checked, and building only on others that are
    * ready too. Returns the run, or null when none were ready (or another run is going), without starting one.
+   *
+   * Each round also records why each of the review column's pull requests isn't merged (see `AutoMergeWait`): what
+   * keeps it from being ready, or that merging it failed, including when the round itself couldn't run. A ready one
+   * whose merge failed before keeps that failure until this round's merge says otherwise, so a merge that keeps failing
+   * shows.
    */
   async function autoMerge(boardId: string) {
+    const tickets = reviewTickets(boardId)
+    const findings = new Map<string, AutoMergeFinding>(tickets.map((ticket) => [ticket.id, knownWait(ticket)]))
     // Asks GitHub only when a ticket could be ready: most of the time none is.
-    if (!mergeCandidates(boardId).length) return null
+    if (tickets.every((ticket) => findings.get(ticket.id))) {
+      setAutoMergeWaits(boardId, findings)
+      return null
+    }
     const current = runs.get(boardId)
     if (starting.has(boardId) || current?.status === 'running') return null
 
     return exclusive(boardId, async () => {
-      const { items, methods, pullRequestOf } = await planEntries(boardId)
-      const ready = new Set<string>()
-      for (const item of items) {
-        if (item.skip || !readyToMerge(pullRequestOf.get(item.ticketId) ?? null)) continue
-        if (!checklistDone(getTicket(item.ticketId))) continue
-        if (item.after.every((id) => ready.has(id))) ready.add(item.ticketId)
+      let planned: Awaited<ReturnType<typeof planEntries>>
+      try {
+        planned = await planEntries(boardId)
+      } catch (error) {
+        for (const ticket of tickets) {
+          if (findings.get(ticket.id)) continue
+          findings.set(ticket.id, { reason: `Auto-merge couldn't run: ${errorMessage(error)}`, failed: true })
+        }
+        setAutoMergeWaits(boardId, findings)
+        throw error
       }
+      const { items, methods, pullRequestOf } = planned
+      const byTicket = new Map(items.map((item) => [item.ticketId, item]))
+      const ready = new Set<string>()
+      findings.clear()
+      for (const item of items) {
+        const ticket = getTicket(item.ticketId)
+        const wait = waitFor(item, pullRequestOf.get(item.ticketId) ?? null, ticket, byTicket, ready)
+        if (wait) {
+          findings.set(item.ticketId, wait)
+          continue
+        }
+        ready.add(item.ticketId)
+        const failure = ticket.autoMergeWait?.failed ? ticket.autoMergeWait : null
+        findings.set(item.ticketId, failure && { reason: failure.reason, failed: true })
+      }
+      setAutoMergeWaits(boardId, findings)
       if (!ready.size) return null
       const run = newRun(
         boardId,
@@ -328,21 +445,32 @@ export function createMergeQueue(
         items.filter((item) => ready.has(item.ticketId)),
       )
       await execute(run)
+      for (const step of run.steps) {
+        if (step.status === 'merged') findings.set(step.ticketId, null)
+        else if (step.status === 'failed') {
+          const reason = `Merging failed: ${step.message ?? 'GitHub turned it down'}`
+          findings.set(step.ticketId, { reason, failed: true })
+        } else if (step.status === 'skipped') {
+          findings.set(step.ticketId, { reason: step.message ?? 'Skipped this round', failed: false })
+        }
+      }
+      setAutoMergeWaits(boardId, findings)
       return run
     })
   }
 
-  /** The review column's tickets whose pull request could be ready to merge, going by what the board knows. */
-  function mergeCandidates(boardId: string) {
+  /** The review column's tickets with a pull request that isn't merged or closed, going by what the board knows. */
+  function reviewTickets(boardId: string) {
     const reviewColumnId = getBoard(boardId).reviewColumnId
     if (!reviewColumnId) return []
     return listTickets(boardId, { column: reviewColumnId }).filter(
-      (ticket) =>
-        ticket.pullRequest &&
-        !['merged', 'closed'].includes(ticket.pullRequest.state) &&
-        !ticket.pullRequest.conflicts &&
-        checklistDone(ticket),
+      (ticket) => ticket.pullRequest && !['merged', 'closed'].includes(ticket.pullRequest.state),
     )
+  }
+
+  /** The review column's tickets whose pull request could be ready to merge, going by what the board knows. */
+  function mergeCandidates(boardId: string) {
+    return reviewTickets(boardId).filter((ticket) => !ticket.pullRequest!.conflicts && checklistDone(ticket))
   }
 
   /**
@@ -371,7 +499,11 @@ export function createMergeQueue(
         await autoMerge(board.id).catch((error) =>
           console.warn(`Auto-merge failed for board ${board.id}: ${errorMessage(error)}`),
         )
-      } else if (board.notifyUrl && notifier) {
+        continue
+      }
+      // With auto-merge off, none of its tickets wait for it.
+      setAutoMergeWaits(board.id, new Map())
+      if (board.notifyUrl && notifier) {
         await notifyReady(board.id).catch((error) =>
           console.warn(`Checking for ready pull requests failed for board ${board.id}: ${errorMessage(error)}`),
         )

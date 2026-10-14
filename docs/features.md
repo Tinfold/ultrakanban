@@ -11,6 +11,8 @@
 - **Pull request workflow**: agents submit tickets for review with their GitHub pull request; tickets only enter
   Done once the pull request is merged and move there automatically when it is. Questions (tickets tagged
   `question`) are answered in a comment instead, and you close them yourself by moving them to Done
+- **Checks**: a pull request's card shows whether its checks pass, from GitHub Actions or other CI; hover the icon to
+  see which fail, and the ticket lists the failing checks with links and an excerpt of why they failed
 - **Sub-tickets**: agents split a big ticket into sub-tickets that link back to it; its card shows how many are done,
   and the agent comes back to it only once they all are
 - **Epics**: group the tickets of a larger feature, sub-tickets included, in a bar above the columns with each epic's
@@ -19,6 +21,9 @@
 - **Plans and approval**: agents post a short plan with a size estimate (S, M or L) when they start a ticket;
   optionally, per board, tickets estimated at a given size or larger wait for you to approve the plan on the ticket
   before the agent spends more tokens on them
+- **Run records**: every agent run leaves a record in its ticket's activity: how long it took, its turns and cost, and
+  how it ended (finished, failed, timed out, killed, stopped, out of Claude usage), opening to its final message and
+  the tool calls it made, so you can see what an agent did and why it's stuck; failed runs stand out
 - **Merge all**: merge every pull request in review with one click, one at a time and in an order that avoids
   conflicts (stacked pull requests after the ones they build on); any that conflict after earlier merges are skipped
   for their agent to resolve
@@ -26,7 +31,9 @@
   conflict button on the review column); it comments on each of those tickets and wakes the agent loops up
 - **Quick merge**: merge a single ticket's pull request from its card in the review column
 - **Auto-merge**: optionally, per board, merge pull requests in review by themselves once they have no conflicts,
-  every check has passed and every checklist item of their ticket is checked
+  every check has passed and every checklist item of their ticket is checked. Cards in review say what each one is
+  waiting for ("Waiting for checks", "2 checklist items unchecked", "Waits for #41 to merge first"), and a merge that
+  fails shows in red rather than only in the server's log
 - **Delete branches after merge**: optionally, per board, delete a pull request's branch on GitHub once it is merged,
   moving the pull requests stacked on it to its base first
 - **Notifications**: optionally, per board, send an ntfy, Discord or webhook message when a ticket needs you: an agent

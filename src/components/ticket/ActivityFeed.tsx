@@ -1,13 +1,22 @@
-import { SendHorizontalIcon } from 'lucide-react'
+import { ChevronRightIcon, SendHorizontalIcon, XIcon } from 'lucide-react'
 import { type FormEvent, type ReactNode, useMemo, useState } from 'react'
-import { type Activity, type Attachment, parsePullRequestUrl, type PullRequest } from '@shared/domain'
+import {
+  type Activity,
+  type Attachment,
+  parsePullRequestUrl,
+  type PullRequest,
+  type RunOutcome,
+  type RunRecord,
+  type RunStep,
+} from '@shared/domain'
 import { Markdown } from '@/components/common/Markdown'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { Textarea } from '@/components/ui/textarea'
-import { useTicketActivity, useTicketAttachments } from '@/hooks/queries'
-import { formatDateTime, formatRelative } from '@/lib/format'
+import { useTicketActivity, useTicketAttachments, useTicketRuns } from '@/hooks/queries'
+import { formatDateTime, formatRelative, formatRunOutcome, formatRunTotals } from '@/lib/format'
+import { cn } from '@/lib/utils'
 import { useBoardContext } from '../board/board-context'
 import { AttachmentThumbnail, AttachmentViewer } from './attachments'
 
@@ -171,6 +180,102 @@ function ActivityItem({ entry, attachmentsById, onViewAttachment }: ActivityItem
   )
 }
 
+/** How each outcome of a run looks: runs that failed stand out, finished ones don't need to. */
+const OUTCOME_STYLES: Record<RunOutcome, { item: string; label: string }> = {
+  finished: { item: '', label: 'text-emerald-600 dark:text-emerald-400' },
+  failed: { item: 'border-red-500/40 bg-red-500/5', label: 'text-red-600 dark:text-red-400' },
+  timed_out: { item: 'border-red-500/40 bg-red-500/5', label: 'text-red-600 dark:text-red-400' },
+  killed: { item: 'border-red-500/40 bg-red-500/5', label: 'text-red-600 dark:text-red-400' },
+  stopped: { item: '', label: 'text-muted-foreground' },
+  usage_limit: { item: 'border-amber-500/40 bg-amber-500/5', label: 'text-amber-600 dark:text-amber-400' },
+}
+
+function RunStepLine({ step }: { step: RunStep }) {
+  return (
+    <li className={cn('flex min-w-0 gap-2', step.error && 'text-red-600 dark:text-red-400')}>
+      <span className="w-20 shrink-0 truncate font-medium" title={step.tool}>
+        {step.tool}
+      </span>
+      <span className="min-w-0 truncate font-mono text-[11px]" title={step.summary}>
+        {step.summary}
+      </span>
+      {step.error && <XIcon aria-label="Reported an error" className="size-3.5 shrink-0" />}
+    </li>
+  )
+}
+
+/**
+ * An agent run on the ticket (see `RunRecord`), collapsed to one line saying how long it took and how it ended; open, it
+ * shows the run's final message and the tool calls it made.
+ */
+function RunItem({ run }: { run: RunRecord }) {
+  const [open, setOpen] = useState(false)
+  const styles = OUTCOME_STYLES[run.outcome]
+  const totals = formatRunTotals(run)
+  const steps = run.steps.map((step, index) => <RunStepLine key={index} step={step} />)
+  if (run.omittedSteps) {
+    steps.splice(
+      run.omittedSteps.after,
+      0,
+      <li key="omitted" className="text-muted-foreground italic">
+        … {run.omittedSteps.count} more {run.omittedSteps.count === 1 ? 'step' : 'steps'} …
+      </li>,
+    )
+  }
+
+  return (
+    <li className={cn('rounded-lg border bg-card text-xs', styles.item)}>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className="flex w-full min-w-0 items-center gap-2 rounded-lg px-3 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <ChevronRightIcon className={cn('size-3.5 shrink-0 text-muted-foreground', open && 'rotate-90')} />
+        <UserAvatar name={run.agent} size="xs" />
+        <p className="min-w-0 text-muted-foreground">
+          <span className="font-medium text-foreground">{run.agent}</span> Run
+          {totals && <> · {totals}</>}
+          <span aria-hidden> · </span>
+          <span className={cn('font-medium', styles.label)}>{formatRunOutcome(run)}</span>
+          <span aria-hidden> · </span>
+          <Timestamp iso={run.createdAt} />
+        </p>
+      </button>
+      {open && (
+        <div className="grid gap-2 border-t px-3 py-2.5">
+          {run.message ? (
+            <Markdown>{run.message}</Markdown>
+          ) : (
+            <p className="text-muted-foreground">The run left no final message.</p>
+          )}
+          {steps.length > 0 && (
+            <>
+              <p className="font-medium text-muted-foreground">
+                {run.steps.length + (run.omittedSteps?.count ?? 0)}{' '}
+                {run.steps.length + (run.omittedSteps?.count ?? 0) === 1 ? 'tool call' : 'tool calls'}
+              </p>
+              <ol className="grid max-h-80 gap-0.5 overflow-y-auto">{steps}</ol>
+            </>
+          )}
+        </div>
+      )}
+    </li>
+  )
+}
+
+/** The ticket's activity and its agent runs, oldest first: a run shows when it ended, among what happened meanwhile. */
+type FeedEntry = { kind: 'activity'; entry: Activity } | { kind: 'run'; run: RunRecord }
+
+function feedEntries(activity: Activity[], runs: RunRecord[]): FeedEntry[] {
+  const entries: FeedEntry[] = activity.map((entry) => ({ kind: 'activity', entry }))
+  for (const run of [...runs].reverse()) {
+    const at = entries.findIndex((item) => item.kind === 'activity' && item.entry.createdAt > run.createdAt)
+    entries.splice(at === -1 ? entries.length : at, 0, { kind: 'run', run })
+  }
+  return entries
+}
+
 function CommentComposer({ ticketId, pullRequest }: { ticketId: string; pullRequest: PullRequest | null }) {
   const { actions } = useBoardContext()
   const [body, setBody] = useState('')
@@ -225,8 +330,10 @@ function CommentComposer({ ticketId, pullRequest }: { ticketId: string; pullRequ
 
 export function ActivityFeed({ ticketId, pullRequest }: { ticketId: string; pullRequest: PullRequest | null }) {
   const { data: activity = [] } = useTicketActivity(ticketId)
+  const { data: runs = [] } = useTicketRuns(ticketId)
   const { data: attachments = [] } = useTicketAttachments(ticketId)
   const attachmentsById = useMemo(() => new Map(attachments.map((item) => [item.id, item])), [attachments])
+  const entries = useMemo(() => feedEntries(activity, runs), [activity, runs])
   const [viewing, setViewing] = useState<Attachment | null>(null)
 
   return (
@@ -235,9 +342,18 @@ export function ActivityFeed({ ticketId, pullRequest }: { ticketId: string; pull
         Activity
       </h3>
       <ol className="grid gap-3">
-        {activity.map((entry) => (
-          <ActivityItem key={entry.id} entry={entry} attachmentsById={attachmentsById} onViewAttachment={setViewing} />
-        ))}
+        {entries.map((item) =>
+          item.kind === 'run' ? (
+            <RunItem key={`run-${item.run.id}`} run={item.run} />
+          ) : (
+            <ActivityItem
+              key={item.entry.id}
+              entry={item.entry}
+              attachmentsById={attachmentsById}
+              onViewAttachment={setViewing}
+            />
+          ),
+        )}
       </ol>
       <CommentComposer ticketId={ticketId} pullRequest={pullRequest} />
       <AttachmentViewer ticketId={ticketId} attachment={viewing} onClose={() => setViewing(null)} />

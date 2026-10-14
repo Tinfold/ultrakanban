@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { openBlockers } from '@shared/blockers'
 import type { Ticket } from '@shared/domain'
+import { AutoMergeHint } from '@/components/common/AutoMergeHint'
 import { CheckStatusIcon } from '@/components/common/CheckStatusIcon'
 import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { PullRequestIcon } from '@/components/common/PullRequestIcon'
@@ -167,7 +168,9 @@ export function TicketCard({ ticket, overlay, selecting, selected }: TicketCardP
           {ticket.pullRequest && (
             <span className="flex items-center gap-1 tabular-nums" title={ticket.pullRequest.title ?? undefined}>
               <PullRequestIcon state={ticket.pullRequest.state} />#{ticket.pullRequest.number}
-              {ticket.pullRequest.checks && <CheckStatusIcon status={ticket.pullRequest.checks} />}
+              {ticket.pullRequest.checks && (
+                <CheckStatusIcon status={ticket.pullRequest.checks} failingChecks={ticket.pullRequest.failingChecks} />
+              )}
             </span>
           )}
           {ticket.pullRequest?.conflicts && (
@@ -196,6 +199,9 @@ export function TicketCard({ ticket, overlay, selecting, selected }: TicketCardP
           )}
           {canMerge && <QuickMergeButton ticket={ticket} />}
         </div>
+      )}
+      {ticket.autoMergeWait && (
+        <AutoMergeHint wait={ticket.autoMergeWait} className="mt-2 text-[11px] [&_svg]:size-3" />
       )}
       {ticket.run && <RunStatus run={ticket.run} />}
     </div>

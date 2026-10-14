@@ -11,7 +11,17 @@ import {
 } from '../shared/domain.ts'
 import { subscribeWake } from './events.ts'
 import { FIX_CONFLICTS_COMMENT } from './store/tickets.ts'
-import { addTicket, boardId, call, github, prComments, pullRequestStatuses, ticketsIn, useBoard } from './test-app.ts'
+import {
+  addTicket,
+  boardId,
+  call,
+  checkRuns,
+  github,
+  prComments,
+  pullRequestStatuses,
+  ticketsIn,
+  useBoard,
+} from './test-app.ts'
 
 describe('pull request workflow', () => {
   const PR = 'https://github.com/acme/app/pull/42'
@@ -150,19 +160,29 @@ describe('pull request workflow', () => {
     const sync = async () =>
       (await call<Ticket>('POST', `/tickets/${ticket.id}/pull-request/sync`)).body.pullRequest?.checks
 
+    const run = (conclusion: string | null) => ({
+      id: 1,
+      name: 'test',
+      status: conclusion ? 'completed' : 'in_progress',
+      conclusion,
+      detailsUrl: null,
+      output: { title: null, summary: null, annotationsCount: 0 },
+    })
+
     assert.equal(ticket.pullRequest?.checks, null)
-    pullRequestStatuses.set(url, { state: 'open', title: 'Some PR', checks: 'pending' })
+    checkRuns.set('acme/app@head', [run(null)])
     assert.equal(await sync(), 'pending')
-    pullRequestStatuses.set(url, { state: 'open', title: 'Some PR', checks: 'failing' })
+    checkRuns.set('acme/app@head', [run('failure')])
     assert.equal(await sync(), 'failing')
-    // GitHub hasn't worked it out yet: the last answer stands.
-    pullRequestStatuses.set(url, { state: 'open', title: 'Some PR', checks: null })
+    // GitHub lists no checks for the commit yet: the last answer stands.
+    checkRuns.delete('acme/app@head')
     assert.equal(await sync(), 'failing')
-    pullRequestStatuses.set(url, { state: 'open', title: 'Some PR', checks: 'passing' })
+    checkRuns.set('acme/app@head', [run('success')])
     assert.equal(await sync(), 'passing')
-    pullRequestStatuses.set(url, { state: 'closed', title: 'Some PR', checks: 'passing' })
+    pullRequestStatuses.set(url, { state: 'closed', title: 'Some PR' })
     assert.equal(await sync(), null)
     pullRequestStatuses.clear()
+    checkRuns.clear()
   })
 
   test('asks for the merge conflicts in the review column to be fixed', async () => {

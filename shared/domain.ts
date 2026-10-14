@@ -154,8 +154,39 @@ export const PULL_REQUEST_STATES = ['unknown', 'open', 'draft', 'merged', 'close
 export type PullRequestState = (typeof PULL_REQUEST_STATES)[number]
 
 export const CHECK_STATUSES = ['pending', 'passing', 'failing'] as const
-/** GitHub's combined status for the pull request's head commit. */
+/**
+ * The combined status of the checks on the pull request's head commit: its check runs (GitHub Actions and other GitHub
+ * apps) and its commit statuses (older CI integrations) together. `failing` once any of them didn't pass, otherwise
+ * `pending` while any is still running, otherwise `passing`.
+ */
 export type CheckStatus = (typeof CHECK_STATUSES)[number]
+
+/** Most failing checks a pull request keeps (see `PullRequest.failingChecks`). */
+export const MAX_FAILING_CHECKS = 20
+/** Failing check runs whose details (annotations or output) are fetched for an excerpt, the first ones by name. */
+export const FAILING_CHECK_EXCERPTS = 3
+/** Longest excerpt kept of why a check failed. */
+export const FAILING_CHECK_EXCERPT_MAX = 600
+
+/**
+ * A check on the pull request's head commit that didn't pass, counted the way the agent loop counts them
+ * (scripts/agent-loop/ci.sh): a check run that completed as `failure`, `timed_out`, `startup_failure` or
+ * `action_required`, or a commit status in `failure` or `error`. Cancelled, skipped, neutral and stale ones aren't.
+ */
+export interface FailingCheck {
+  /** The check run's name (e.g. a GitHub Actions job's) or the commit status's context. */
+  name: string
+  /** How it ended: the check run's conclusion, or the commit status's state. */
+  conclusion: string
+  /** Where to see it: the check run's or commit status's details page; null when it has none. */
+  url: string | null
+  /**
+   * A short excerpt of why it failed, from the check run's failure annotations or its output's title and summary, at
+   * most `FAILING_CHECK_EXCERPT_MAX` characters. Only the first `FAILING_CHECK_EXCERPTS` failing check runs have one
+   * (to spare GitHub's rate limit), and commit statuses give their description. Null when there is none.
+   */
+  excerpt: string | null
+}
 
 export interface PullRequest {
   url: string
@@ -166,8 +197,13 @@ export interface PullRequest {
   title: string | null
   /** Whether GitHub last found that it can't merge cleanly into its base branch (only open and draft ones). */
   conflicts: boolean
-  /** Combined status of its checks; `null` when it has none, or isn't open or draft. */
+  /** Combined status of its checks (see `CheckStatus`); `null` when it has none, or isn't open or draft. */
   checks: CheckStatus | null
+  /**
+   * The checks of its head commit that didn't pass, by name, at most `MAX_FAILING_CHECKS`; empty unless `checks` is
+   * `failing`.
+   */
+  failingChecks: FailingCheck[]
   checkedAt: string | null
 }
 
@@ -419,6 +455,12 @@ export interface Ticket {
   movedAt: string
   /** Whether it has been in the board's done column for longer than the board's `archiveDoneDays`. */
   archived: boolean
+  /**
+   * Why the board's auto-merge hasn't merged its pull request yet (see `AutoMergeWait`): only while the board has
+   * auto-merge on, the ticket is in the review column and its pull request is open. Null when it is ready, and merges
+   * at auto-merge's next round.
+   */
+  autoMergeWait: AutoMergeWait | null
   /** The ticket this one is a sub-ticket of; null when it isn't one. */
   parentId: string | null
   /**
@@ -430,6 +472,26 @@ export interface Ticket {
   epicId: string | null
   createdAt: string
   updatedAt: string
+}
+
+/**
+ * Why the board's auto-merge (`BoardSummary.autoMerge`) isn't merging a ticket's pull request yet, as its latest round
+ * found: what keeps it from being ready, or that merging it failed. Auto-merge looks again every minute.
+ */
+export interface AutoMergeWait {
+  /**
+   * For people, e.g. "Waiting for checks", "2 checklist items unchecked", "Waits for #41 to merge first", "Branch
+   * protection needs an approving review", "Merge conflicts", or "Merging failed: …" with GitHub's answer.
+   */
+  reason: string
+  /**
+   * Whether auto-merge tried to merge it and failed (GitHub turned the merge down, or auto-merge itself couldn't run),
+   * rather than it not being ready. It is tried again each round, and stays failed until it merges or something else
+   * keeps it waiting, so a merge that keeps failing shows.
+   */
+  failed: boolean
+  /** Since when this has been the reason. */
+  since: string
 }
 
 /** A ticket's token usage added up over all the agent runs on it. */
@@ -556,6 +618,67 @@ export interface TokenUsage extends TokenCounts {
   durationMs: number | null
   /** The run's tokens split by the models that used them, most first; empty when the agent didn't report that. */
   models: ModelUsage[]
+  createdAt: string
+}
+
+export const RUN_OUTCOMES = ['finished', 'failed', 'timed_out', 'killed', 'stopped', 'usage_limit'] as const
+/**
+ * How an agent run ended: `finished` (the agent exited successfully), `failed` (it exited with an error), `timed_out`
+ * (it ran longer than the agent loop's TICKET_TIMEOUT), `killed` (by a signal, most likely the kernel's for running out
+ * of memory), `stopped` (the loop stopped it because someone took the ticket away from the agent) or `usage_limit` (the
+ * account ran out of Claude usage, so the loop waits for it to reset and then resumes the run).
+ */
+export type RunOutcome = (typeof RUN_OUTCOMES)[number]
+
+/** Longest final message a run record keeps (see `RunRecord`); longer ones are clipped. */
+export const RUN_MESSAGE_MAX = 4000
+/** Most steps a run record holds (see `RunRecord`): a long run keeps its first and last ones. */
+export const RUN_MAX_STEPS = 150
+/** Run records kept per ticket: older ones are deleted as new ones arrive. */
+export const RUN_RECORDS_KEPT = 50
+
+/** One tool call of an agent run, condensed for people to skim (see `RunRecord`). */
+export interface RunStep {
+  /** The tool's name, e.g. `Bash`, `Edit` or `mcp__github__create_pull_request`. */
+  tool: string
+  /** What it was called on: a command's first line, a file's path, a search pattern. Empty when nothing fits. */
+  summary: string
+  /** Whether the tool reported an error, e.g. a command that failed or an edit that didn't apply. */
+  error: boolean
+}
+
+/**
+ * What one agent run on a ticket did and how it ended (`POST /tickets/:id/runs`), so people can see what an agent did
+ * and why it is stuck without reading the agent loop's logs. The loop reports every run it starts, finished or not,
+ * even when the run printed no result (it timed out or was killed).
+ */
+export interface RunRecord {
+  id: number
+  ticketId: string
+  /** Who ran, e.g. `claude/opus/high`. */
+  agent: string
+  outcome: RunOutcome
+  /** The agent process's exit status; null when the agent doesn't say. */
+  exitCode: number | null
+  /** How long the run took, start to end. */
+  durationMs: number | null
+  /** How many turns (responses of the model) the run took. */
+  turns: number | null
+  /** Estimated cost in US dollars, when the agent reports one. */
+  costUsd: number | null
+  /**
+   * The run's final message (Markdown), or what it last said or printed when it ended without one; at most
+   * `RUN_MESSAGE_MAX` characters. Empty when there was nothing.
+   */
+  message: string
+  /** Its tool calls in order (not its subagents'), at most `RUN_MAX_STEPS`. */
+  steps: RunStep[]
+  /**
+   * Tool calls left out of a long run to keep the record small: `count` of them, which came between `steps[after - 1]`
+   * and `steps[after]`. Null when none were.
+   */
+  omittedSteps: { after: number; count: number } | null
+  /** When the run was reported, as it ended. */
   createdAt: string
 }
 

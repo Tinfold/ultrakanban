@@ -347,6 +347,40 @@ const MIGRATIONS = [
   -- Whether the last switch on (agents_changed_at) asked for the running loops to be restarted too.
   ALTER TABLE setup ADD COLUMN agents_restart INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  -- What each agent run on a ticket did and how it ended (POST /tickets/:id/runs, see RunRecord), the newest
+  -- RUN_RECORDS_KEPT per ticket. steps is a JSON array of { tool, summary, error }; omitted_after and omitted_count
+  -- say how many steps of a long run were left out, and where.
+  CREATE TABLE run_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    agent TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    exit_code INTEGER,
+    duration_ms INTEGER,
+    turns INTEGER,
+    cost_usd REAL,
+    message TEXT NOT NULL DEFAULT '',
+    steps TEXT NOT NULL DEFAULT '[]',
+    omitted_after INTEGER,
+    omitted_count INTEGER,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX run_records_ticket ON run_records(ticket_id, id);
+  `,
+  `
+  -- The head commit of the ticket's pull request that pr_checks is about, and its checks that didn't pass (a JSON array
+  -- of FailingCheck), as GitHub last reported. Their details are only read again when either changes.
+  ALTER TABLE tickets ADD COLUMN pr_head_sha TEXT;
+  ALTER TABLE tickets ADD COLUMN pr_failing_checks TEXT NOT NULL DEFAULT '[]';
+  `,
+  `
+  -- Why the board's auto-merge isn't merging the ticket's pull request, as its latest round found (see AutoMergeWait):
+  -- the reason for people, whether a merge attempt failed, and since when. NULL when it's ready or auto-merge is off.
+  ALTER TABLE tickets ADD COLUMN auto_merge_wait TEXT;
+  ALTER TABLE tickets ADD COLUMN auto_merge_failed INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE tickets ADD COLUMN auto_merge_since TEXT;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

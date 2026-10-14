@@ -1,9 +1,80 @@
-# Running claude on a ticket: token usage, the usage limit, watching the ticket, and the prompt.
+# Running claude on a ticket: what the run did, token usage, the usage limit, watching the ticket, and the prompt.
 # Part of agent-loop.sh, which sources it; the settings it uses are described there.
 
-# The tokens a run used, from claude's JSON output (every model it called, subagents included), in all and per model,
-# as the body of POST /tickets/:id/usage. Claude prices models it doesn't know (another provider's, or a local one,
-# through ANTHROPIC_BASE_URL) as if they were Opus and says so with costBasis "unknown": those costs are left out.
+# What the loop needs from a run's output, read in one pass. Claude writes stream-json: one JSON object per line as
+# the run goes (its init, each message of the model and each tool result, then a final `"type": "result"` object with
+# the final message, turns, cost and usage). The output can be many megabytes, as tool results are in it, so this
+# keeps only what is needed, small enough to handle as a whole:
+#   result  the final result object, or null when the run ended without one (it timed out or was killed)
+#   text    the run's last text message, for a run without a result
+#   output  what claude printed that isn't JSON, such as an error before the run started (at most 50 lines)
+#   turns   how many responses the model gave, for a run without a result (parallel tool calls share one)
+#   steps   the run's tool calls in order as {tool, summary, error}, for its record: not its subagents' (the Agent
+#           call that started one is a step), the summary a short target for people (a command's first line, a
+#           file's path relative to the checkout $cwd, a search pattern), error whether the tool reported one
+# Lines that don't parse are skipped, such as the last one when claude was killed while writing it, and every field is
+# optional, so an older or newer claude still gives what it can.
+read -r -d '' RUN_SUMMARY <<'JQ'
+def clip($n): if length > $n then .[:($n - 1)] + "…" else . end;
+def path: ltrimstr($cwd + "/") | if length > 120 then "…" + .[(length - 119):] else . end;
+def summary:
+  ((.input | objects) // {}) as $in
+  | if .name == "Bash" then $in.command // "" | split("\n") | .[0] // ""
+    elif .name | IN("Read", "Edit", "MultiEdit", "Write") then $in.file_path // "" | path
+    elif .name == "NotebookEdit" then $in.notebook_path // "" | path
+    elif .name | IN("Grep", "Glob") then
+      ($in.pattern // "") + (if $in.path then " in \($in.path | tostring | path)" else "" end)
+    elif .name == "WebFetch" then $in.url // ""
+    elif .name == "WebSearch" then $in.query // ""
+    elif .name | IN("Task", "Agent") then $in.description // ""
+    elif .name == "Skill" then $in.skill // $in.command // ""
+    elif .name == "TodoWrite" then [$in.todos[]? | objects | select(.status == "in_progress") | .content][0] // ""
+    else [$in[] | strings][0] // "" end
+  | tostring | gsub("\\s+"; " ") | clip(120);
+reduce (inputs | . as $line | try fromjson catch $line) as $event (
+  {result: null, text: null, output: [], turns: 0, message: null, steps: [], failed: {}};
+  if ($event | type) == "string" then
+    if ($event | test("^\\s*[{\\[]|^\\s*$") | not) and (.output | length) < 50 then .output += [$event] else . end
+  elif ($event | type) != "object" then .
+  elif $event.type == "result" then .result = $event
+  elif $event.type == "assistant" and $event.parent_tool_use_id == null then
+    (if $event.message.id != .message then .turns += 1 | .message = $event.message.id else . end)
+    | reduce ($event.message.content // [] | .[] | objects) as $block (.;
+        if $block.type == "tool_use" then
+          .steps += [{id: $block.id, tool: ($block.name // "unknown"), summary: ($block | summary)}]
+        elif $block.type == "text" and ($block.text // "" | test("\\S")) then .text = $block.text
+        else . end)
+  elif $event.type == "user" then
+    .failed += ([$event.message.content[]? | objects | select(.type == "tool_result" and .is_error == true)
+      | {key: .tool_use_id, value: true}] | from_entries)
+  else . end)
+| .failed as $failed
+| .steps |= map({tool, summary, error: ($failed[.id] // false)})
+| del(.failed, .message)
+JQ
+
+# A run's record, the body of POST /tickets/:id/runs (see RunRecord in shared/domain.ts), from RUN_SUMMARY's output
+# and what the loop knows: $outcome, the exit $code, the $duration in ms, the run's $usage (USAGE's output, or null)
+# for its cost, and the end of what claude printed to stderr ($errors), the message of a run that left no other.
+# The message is clipped to 4000 characters (RUN_MESSAGE_MAX), and a run of more than 150 tool calls (RUN_MAX_STEPS)
+# keeps its first and last 75, saying how many were left out between them.
+read -r -d '' RUN_RECORD <<'JQ'
+def clip($n): if length > $n then .[:($n - 1)] + "…" else . end;
+75 as $half
+| (.steps // []) as $steps
+| ($steps | length) as $count
+| {agent: $agent, outcome: $outcome, exitCode: $code, durationMs: $duration,
+   turns: (.result.num_turns // .turns // null), costUsd: (($usage | objects | .costUsd) // null),
+   message: (((.result.result // .text // (.output // [] | join("\n"))) | strings | select(test("\\S"))) // $errors
+     | clip(4000)),
+   steps: (if $count > 2 * $half then $steps[:$half] + $steps[($count - $half):] else $steps end),
+   omittedSteps: (if $count > 2 * $half then {after: $half, count: ($count - 2 * $half)} else null end)}
+JQ
+
+# The tokens a run used, from the result object of claude's output (every model it called, subagents included), in all
+# and per model, as the body of POST /tickets/:id/usage. Claude prices models it doesn't know (another provider's, or
+# a local one, through ANTHROPIC_BASE_URL) as if they were Opus and says so with costBasis "unknown": those costs are
+# left out.
 read -r -d '' USAGE <<'JQ'
 def total($field): [.[] | .[$field] // 0] | add // 0;
 def cost: if .costBasis == "unknown" then null else .costUSD end;
@@ -219,13 +290,43 @@ use_docker() {
 # The name of the container a run on the given ticket goes in.
 container() { printf 'ultrakanban-%s-%s-%s' "$BOARD" "$1" "$$"; }
 
+# How a run that exited with the given status ended, for its record (see RunOutcome in shared/domain.ts), from
+# claude_stopped and claude_result: in the order run_on_ticket looks at them, so the record says what the loop did.
+run_outcome() {
+  if (($1 == 0)); then
+    echo finished
+  elif [[ -n $claude_stopped ]]; then
+    echo stopped
+  elif (($1 == 124)); then
+    echo timed_out
+  elif (($1 > 128)); then
+    echo killed
+  elif grep -qiE "$USAGE_LIMIT_PATTERN" <<<"$claude_result"; then
+    echo usage_limit
+  else
+    echo failed
+  fi
+}
+
+# Records a run on the ticket, given its exit status, RUN_SUMMARY's output, its usage (or null) and how long it took in
+# ms, with POST /tickets/:id/runs, so the ticket's activity shows what the run did and how it ended. Every run is
+# recorded, whether or not it left a result or its usage could be reported.
+record_run() {
+  local id=$1 code=$2 summary=$3 usage=$4 duration=$5 record response
+  record=$(jq -c --arg agent "$worker" --arg outcome "$(run_outcome "$code")" --argjson code "$code" \
+    --argjson duration "$duration" --argjson usage "$usage" --arg errors "$(tail -n 20 <<<"$claude_errors")" \
+    "$RUN_RECORD" <<<"$summary") || { log "can't make the record of the run on $id"; return 1; }
+  response=$(post "/tickets/$id/runs" "$record")
+  [[ ${response##*$'\n'} == 201 ]] || log "can't record the run on $id: ${response%$'\n'*}"
+}
+
 # Runs claude on a ticket with the given prompt and further arguments (the session to start or resume), telling the
 # board it is going on and what it does (run_step, see heartbeat) until it ends. Prints its
-# final message (and keeps it in claude_result, and what it printed to stderr in claude_errors) and reports the tokens
-# it used. Returns claude's exit status. If someone takes the ticket away from the agent meanwhile, the run is stopped
-# and claude_stopped says why (it is empty otherwise).
+# final message (and keeps it in claude_result, and what it printed to stderr in claude_errors), reports the tokens
+# it used and records what it did on the ticket (record_run). Returns claude's exit status. If someone takes the ticket
+# away from the agent meanwhile, the run is stopped and claude_stopped says why (it is empty otherwise).
 run_claude() {
-  local id=$1 prompt=$2 output errors stopped code usage response scratch= run
+  local id=$1 prompt=$2 output errors stopped code usage=null response scratch= run started summary
   shift 2
   output=$(mktemp) && errors=$(mktemp) && stopped=$(mktemp) || return 1
   use_skills
@@ -242,6 +343,7 @@ Put scratch files (clones, builds, test output, screenshots) in \$TMPDIR ($scrat
 in memory and is never cleaned up. \$TMPDIR is on disk, and the loop empties it once the ticket's run finishes."
   fi
   run=$(new_session_id)
+  started=$(date +%s%3N)
   (
     # Without the ticket lock's descriptor: anything claude leaves running mustn't keep the ticket locked.
     if [[ -n $lock_fd ]]; then exec {lock_fd}>&-; fi
@@ -249,7 +351,7 @@ in memory and is never cleaned up. \$TMPDIR is on disk, and the loop empties it 
     export ULTRAKANBAN_RUN=$run
     if [[ -n $scratch ]]; then export TMPDIR=$scratch; fi
     exec timeout --foreground "$TICKET_TIMEOUT" ${docker_args[@]+"${docker_args[@]}"} claude -p ${claude_args[@]+"${claude_args[@]}"} \
-      ${skill_args[@]+"${skill_args[@]}"} --model "$model" --effort "$effort" --output-format json "$@"
+      ${skill_args[@]+"${skill_args[@]}"} --model "$model" --effort "$effort" --output-format stream-json --verbose "$@"
   ) <<<"$prompt" >"$output" 2>"$errors" &
   running=$!
   inhibit_sleep "$id" "$running"
@@ -267,12 +369,17 @@ in memory and is never cleaned up. \$TMPDIR is on disk, and the loop empties it 
   claude_stopped=$(<"$stopped")
   claude_errors=$(<"$errors")
   [[ -n $claude_errors ]] && printf '%s\n' "$claude_errors" >&2
-  claude_result=$(jq -r '.result // empty' "$output" 2>/dev/null || cat "$output")
+  summary=$(jq -cnR --arg cwd "$PWD" "$RUN_SUMMARY" "$output" 2>/dev/null) || summary='{}'
+  # The final message, or what claude printed instead of JSON when it couldn't run (e.g. an error about its options).
+  claude_result=$(jq -r 'if .result then .result.result // empty else .output // [] | join("\n") end' <<<"$summary")
   printf '%s\n' "$claude_result"
-  if usage=$(jq -ce --arg agent "$worker" "$USAGE" "$output" 2>/dev/null); then
+  if usage=$(jq -c '.result // empty' <<<"$summary" | jq -ce --arg agent "$worker" "$USAGE" 2>/dev/null); then
     response=$(post "/tickets/$id/usage" "$usage")
     [[ ${response##*$'\n'} == 201 ]] || log "can't record the token usage of the run on $id: ${response%$'\n'*}"
+  else
+    usage=null
   fi
+  record_run "$id" "$code" "$summary" "$usage" "$(($(date +%s%3N) - started))"
   rm -f "$output" "$errors" "$stopped"
   return "$code"
 }

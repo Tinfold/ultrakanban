@@ -1,6 +1,6 @@
 import { CircleCheckIcon, CircleDashedIcon, CircleXIcon, type LucideIcon } from 'lucide-react'
-import type { CheckStatus } from '@shared/domain'
-import { CHECKS_HINTS } from '@/lib/pull-request'
+import type { CheckStatus, FailingCheck } from '@shared/domain'
+import { checksHint } from '@/lib/pull-request'
 import { cn } from '@/lib/utils'
 
 const ICONS: Record<CheckStatus, { icon: LucideIcon; className: string }> = {
@@ -9,7 +9,21 @@ const ICONS: Record<CheckStatus, { icon: LucideIcon; className: string }> = {
   failing: { icon: CircleXIcon, className: 'text-red-600 dark:text-red-400' },
 }
 
-export function CheckStatusIcon({ status, className }: { status: CheckStatus; className?: string }) {
+/** The combined status of a pull request's checks; hovering it names the failing ones. */
+export function CheckStatusIcon({
+  status,
+  failingChecks,
+  className,
+}: {
+  status: CheckStatus
+  failingChecks?: FailingCheck[]
+  className?: string
+}) {
   const { icon: Icon, className: statusClass } = ICONS[status]
-  return <Icon aria-label={CHECKS_HINTS[status]} className={cn('size-4 shrink-0', statusClass, className)} />
+  const hint = checksHint(status, failingChecks)
+  return (
+    <span title={hint} className="inline-flex shrink-0">
+      <Icon role="img" aria-label={hint} className={cn('size-4 shrink-0', statusClass, className)} />
+    </span>
+  )
 }

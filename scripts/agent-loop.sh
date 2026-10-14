@@ -62,8 +62,11 @@
 # directory of its ticket's on disk (STATE_DIR/tmp/<ticket>), removed once a run on the ticket finishes, and when a run
 # ends the loop stops whatever it left running (see stop_leftovers in agent-loop/run.sh).
 #
-# Each run's token usage (from claude's JSON output) is reported to the board with POST /tickets/:id/usage, so the
-# overview can show how many tokens each agent uses. A run stopped by the timeout reports nothing.
+# Each run's token usage (from the result at the end of claude's stream-json output) is reported to the board with
+# POST /tickets/:id/usage, so the overview can show how many tokens each agent uses; a run that ended without a result
+# (stopped by the timeout, or killed) has no usage to report. Every run, finished or not, is also recorded on its ticket
+# with POST /tickets/:id/runs: how it ended, how long it took, its turns and cost, its final message and the tool calls
+# it made (see record_run in agent-loop/run.sh), so the ticket shows what the agent did and why it is stuck.
 #
 # CI can fail for reasons that aren't the code, and a fix can fail again. So a failing check counts once per commit
 # and check name (re-running CI on the same commit doesn't start a run), checks that never ran or failed for billing,

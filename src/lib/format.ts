@@ -1,5 +1,5 @@
 import { differenceInCalendarDays, format, formatDistanceStrict, isThisYear, parseISO } from 'date-fns'
-import type { TicketUsage } from '@shared/domain'
+import type { RunRecord, TicketUsage } from '@shared/domain'
 
 export const toISODate = (date: Date) => format(date, 'yyyy-MM-dd')
 
@@ -73,6 +73,35 @@ export function formatUsage(usage: TicketUsage) {
   const runs = `${usage.runs} ${usage.runs === 1 ? 'run' : 'runs'}`
   const cost = usage.costUsd !== null ? `, ${formatCost(usage.costUsd)}` : ''
   return `${formatTokens(usage.tokens)} tokens over ${runs}${cost}`
+}
+
+/** How a run ended, for people: `finished`, or what stopped it, e.g. `failed: timed out`. */
+export function formatRunOutcome(run: Pick<RunRecord, 'outcome' | 'exitCode'>) {
+  switch (run.outcome) {
+    case 'finished':
+      return 'finished'
+    case 'failed':
+      return run.exitCode === null ? 'failed' : `failed: exit status ${run.exitCode}`
+    case 'timed_out':
+      return 'failed: timed out'
+    case 'killed':
+      return run.exitCode === 137 ? 'failed: killed (out of memory?)' : 'failed: killed'
+    case 'stopped':
+      return 'stopped: the ticket was taken away'
+    case 'usage_limit':
+      return 'stopped: out of Claude usage'
+  }
+}
+
+/** What a run took, e.g. `23m · 41 turns · $1.20`, leaving out what it didn't report. */
+export function formatRunTotals(run: Pick<RunRecord, 'durationMs' | 'turns' | 'costUsd'>) {
+  return [
+    run.durationMs !== null && formatDuration(run.durationMs),
+    run.turns !== null && `${run.turns} ${run.turns === 1 ? 'turn' : 'turns'}`,
+    run.costUsd !== null && formatCost(run.costUsd),
+  ]
+    .filter(Boolean)
+    .join(' · ')
 }
 
 /**

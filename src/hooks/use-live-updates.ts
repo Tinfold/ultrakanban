@@ -14,6 +14,7 @@ export function useLiveUpdates() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.boards })
       void queryClient.invalidateQueries({ queryKey: queryKeys.board(boardId) })
       void queryClient.invalidateQueries({ queryKey: queryKeys.allActivity })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.allRuns })
       void queryClient.invalidateQueries({ queryKey: queryKeys.allAttachments })
       void queryClient.invalidateQueries({ queryKey: queryKeys.allOverviews })
     })

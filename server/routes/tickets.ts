@@ -9,9 +9,11 @@ import {
   commentSchema,
   createSubticketSchema,
   heartbeatSchema,
+  listRunsQuerySchema,
   mergeTicketSchema,
   moveTicketSchema,
   postPlanSchema,
+  recordRunSchema,
   recordUsageSchema,
   releaseTicketSchema,
   submitForReviewSchema,
@@ -42,6 +44,7 @@ import {
   submitForReview,
   updateTicket,
 } from '../store/tickets.ts'
+import { listRuns, recordRun } from '../store/runs.ts'
 import { listUsage, recordUsage } from '../store/usage.ts'
 
 /** Posts the comment on the ticket's pull request; returns its URL. */
@@ -196,6 +199,17 @@ export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles, notifi
       const input = await readJson(c, recordUsageSchema)
       return c.json(
         transaction(() => recordUsage(c.req.param('ticketId'), input)),
+        201,
+      )
+    })
+    .get('/:ticketId/runs', (c) => {
+      const { limit } = listRunsQuerySchema.parse({ limit: c.req.query('limit') })
+      return c.json(listRuns(c.req.param('ticketId'), limit))
+    })
+    .post('/:ticketId/runs', async (c) => {
+      const input = await readJson(c, recordRunSchema)
+      return c.json(
+        transaction(() => recordRun(c.req.param('ticketId'), input)),
         201,
       )
     })
