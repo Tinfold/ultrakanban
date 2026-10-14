@@ -56,11 +56,17 @@ export function UpdateMenu() {
   const now = useNow()
   const [confirming, setConfirming] = useState(false)
   const [sending, setSending] = useState(false)
+  // Merging is needed when the checkout has commits of its own; the box starts ticked then.
+  const [merge, setMerge] = useState<boolean | null>(null)
   if (!update?.updaterSeenAt) return null
 
   const busy = update.state === 'requested' || update.state === 'running'
   const offline = now - Date.parse(update.updaterSeenAt) > UPDATER_OFFLINE_MS
   const behind = update.behind ?? 0
+  const ahead = update.ahead ?? 0
+  const merging = merge ?? ahead > 0
+  // The board runs an older build than the checkout, e.g. its container wasn't recreated after a rebuild.
+  const stale = !!update.runningCommit && !!update.commit && update.runningCommit !== update.commit
   // Finished since this page loaded, so it runs the old build until reloaded.
   const reload = update.state === 'done' && !!update.finishedAt && update.finishedAt > loadedAt
 
@@ -80,7 +86,7 @@ export function UpdateMenu() {
       <PopoverTrigger asChild>
         <Button variant="ghost" size="icon-sm" className="relative" aria-label="Update ultrakanban">
           {busy ? <Loader2Icon className="animate-spin" /> : <CircleArrowUpIcon />}
-          {!busy && (behind > 0 || reload || update.state === 'failed') && (
+          {!busy && (behind > 0 || reload || stale || update.state === 'failed') && (
             <span
               className={cn(
                 'absolute top-1 right-1 size-2 rounded-full',
@@ -97,6 +103,13 @@ export function UpdateMenu() {
           {update.behind !== null && (
             <p className="text-xs text-muted-foreground">
               {behind > 0 ? `${behind} new commit${behind === 1 ? '' : 's'} to update to.` : 'Up to date.'}
+              {ahead > 0 && ` The checkout has ${ahead} commit${ahead === 1 ? '' : 's'} of its own.`}
+            </p>
+          )}
+          {stale && !reload && (
+            <p className="text-xs text-muted-foreground">
+              The board runs an older build ({update.runningCommit!.slice(0, 7)}) than the checkout. Update & restart
+              rebuilds it.
             </p>
           )}
         </div>
@@ -106,6 +119,19 @@ export function UpdateMenu() {
             The updater last checked in {formatRelative(update.updaterSeenAt)}; an update starts once it is back.
           </p>
         )}
+        <label className="flex items-start gap-2 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={merging}
+            disabled={busy}
+            onChange={(event) => setMerge(event.target.checked)}
+            className="mt-0.5 size-3.5 accent-primary"
+          />
+          <span>
+            Merge with <code>git pull --no-ff</code>, keeping the checkout&apos;s own commits, instead of only
+            fast-forwarding
+          </span>
+        </label>
         <div className="flex justify-end gap-2">
           {reload && (
             <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
@@ -127,9 +153,9 @@ export function UpdateMenu() {
         open={confirming}
         onOpenChange={setConfirming}
         title="Update and restart ultrakanban?"
-        description="This pulls the latest version, rebuilds the board and restarts it. The board is unreachable for a minute or so meanwhile. Agent runs carry on; agents in a container restart and pick up their runs again."
+        description={`This ${merging ? 'merges in' : 'pulls'} the latest version, rebuilds the board and restarts it. The board is unreachable for a minute or so meanwhile. Agent runs carry on; agents in a container restart and pick up their runs again.`}
         confirmLabel="Update & restart"
-        onConfirm={() => send(api.requestAppUpdate)}
+        onConfirm={() => send(() => api.requestAppUpdate({ merge: merging }))}
       />
     </Popover>
   )

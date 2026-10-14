@@ -7,12 +7,13 @@ import {
   reportAppUpdateSchema,
   reportClaudeUsageSchema,
   reportDiskUsageSchema,
+  requestAppUpdateSchema,
   requestAgentLoginSchema,
   setGitHubTokenSchema,
 } from '../../shared/schemas.ts'
 import type { AppServices } from '../app.ts'
 import { now, transaction } from '../db.ts'
-import { gitHubFailure } from '../errors.ts'
+import { badRequest, gitHubFailure } from '../errors.ts'
 import { actorOf, readJson } from '../http.ts'
 import { cancelAppUpdate, getAppUpdate, reportAppUpdate, requestAppUpdate } from '../store/app-update.ts'
 import { getClaudeUsage, reportClaudeUsage } from '../store/claude-usage.ts'
@@ -43,12 +44,21 @@ export const systemRoutes = ({ pullRequests: { github } }: AppServices) => {
   return (
     new Hono()
       .get('/update', (c) => c.json(getAppUpdate()))
-      .post('/update', (c) =>
-        c.json(
-          transaction(() => requestAppUpdate(actorOf(c))),
+      .post('/update', async (c) => {
+        // The body is optional: no body asks for a plain fast-forward update.
+        const text = await c.req.text()
+        let body: unknown = {}
+        try {
+          if (text.trim()) body = JSON.parse(text)
+        } catch {
+          throw badRequest('Request body must be valid JSON')
+        }
+        const input = requestAppUpdateSchema.parse(body)
+        return c.json(
+          transaction(() => requestAppUpdate(actorOf(c), input)),
           202,
-        ),
-      )
+        )
+      })
       .delete('/update', (c) => c.json(transaction(() => cancelAppUpdate())))
       .post('/update/status', async (c) => {
         const input = await readJson(c, reportAppUpdateSchema)

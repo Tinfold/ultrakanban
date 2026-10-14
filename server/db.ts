@@ -318,6 +318,13 @@ const MIGRATIONS = [
     measured_at TEXT NOT NULL
   );
   `,
+  `
+  -- The update: whether it merges origin (git pull --no-ff) instead of fast-forwarding, and the checkout's commit and
+  -- local commits not on origin, as the supervisor reports them.
+  ALTER TABLE app_update ADD COLUMN merge INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE app_update ADD COLUMN commit_sha TEXT;
+  ALTER TABLE app_update ADD COLUMN ahead INTEGER;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'
