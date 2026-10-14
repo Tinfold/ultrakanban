@@ -1,6 +1,11 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      args:
+        # The commit it is built from, which the update button compares with the checkout's. The updater sets it; by
+        # hand: ULTRAKANBAN_COMMIT=$(git rev-parse HEAD) docker compose up -d --build
+        ULTRAKANBAN_COMMIT: ${ULTRAKANBAN_COMMIT:-}
     restart: always
     environment:
       # Checks pull requests on GitHub. Optional: the Setup page (/setup) takes a token too. Get one with: gh auth token

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { beforeEach, describe, test } from 'node:test'
 import { type Overview, type Ticket, type TokenUsage } from '../shared/domain.ts'
 import { getOverview } from './store/overview.ts'
-import { addTicket, boardId, call, pullRequestStatuses, useBoard } from './test-app.ts'
+import { addTicket, app, boardId, call, pullRequestStatuses, useBoard } from './test-app.ts'
 
 describe('overview', () => {
   const PR = 'https://github.com/acme/app/pull/42'
@@ -422,5 +422,46 @@ describe('overview', () => {
     await call('POST', '/overview/hidden-agents', { names: [agent] })
     assert.equal((await call('DELETE', '/overview/hidden-agents')).status, 204)
     assert.deepEqual(await listed(), [true, false])
+  })
+
+  test('overview shows the disk space boards take: their attachments, and their agent folders as last measured', async () => {
+    const boardOf = (overview: Overview, id = boardId) => overview.boards.find((entry) => entry.id === id)!
+    const { body: before } = await call<Overview>('GET', '/overview')
+    assert.deepEqual(boardOf(before).disk, { attachments: 0, agent: null })
+
+    const ticket = await addTicket({ title: 'A' })
+    const form = new FormData()
+    form.append(
+      'file',
+      new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2])], 'a.png', {
+        type: 'image/png',
+      }),
+    )
+    await app.request(`/api/tickets/${ticket.id}/attachments`, { method: 'POST', body: form })
+    const { body: other } = await call<{ id: string }>('POST', '/boards', { name: 'Other' })
+
+    const report = (boards: unknown[]) => call('POST', '/system/disk-usage', { boards }, 'agent-supervisor')
+    assert.equal((await report([{ boardId, repo: -1, worktrees: 0, state: 0 }])).status, 400)
+    const measured = await report([
+      { boardId, repo: 3000, worktrees: 2000, state: 100 },
+      { boardId: other.id, repo: 40, worktrees: 0, state: 2 },
+      { boardId: 'deleted-board', repo: 500, worktrees: 0, state: 0 },
+    ])
+    assert.equal(measured.status, 204)
+
+    const { body: after } = await call<Overview>('GET', '/overview')
+    const { agent, attachments } = boardOf(after).disk
+    assert.equal(attachments, 10)
+    assert.deepEqual([agent?.repo, agent?.worktrees, agent?.state], [3000, 2000, 100])
+    assert.ok(after.disk.measuredAt && agent?.measuredAt === after.disk.measuredAt)
+    assert.equal(after.disk.deletedBoards, 500)
+
+    // A deleted board's folder counts as one of a deleted board until it is gone too.
+    await call('DELETE', `/boards/${other.id}`)
+    assert.equal((await call<Overview>('GET', '/overview')).body.disk.deletedBoards, 542)
+    await report([{ boardId, repo: 3000, worktrees: 0, state: 100 }])
+    const { body: latest } = await call<Overview>('GET', '/overview')
+    assert.equal(latest.disk.deletedBoards, 0)
+    assert.equal(boardOf(latest).disk.agent?.worktrees, 0)
   })
 })

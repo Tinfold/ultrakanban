@@ -2,9 +2,10 @@
 # Installs and enables the systemd user services, so the board and its agents start by themselves at login:
 #   ultrakanban.service         the board (podman-compose or docker compose on this checkout's docker-compose.yml)
 #   ultrakanban-agent.service   the agent supervisor, which runs ultrakanban-agent@<board> for boards with the agent on
+#   app-ultrakanban.slice       the memory, swap and CPU those agents may use together
 # The agent scripts and the skill are copied to ~/.local/share/ultrakanban-agent, so the services don't depend on
-# which branch this checkout is on. The supervisor updates those copies itself when this checkout's default branch
-# moves (when you pull); run this again only after the systemd units in deploy/ change.
+# which branch this checkout is on. The supervisor updates those copies, and the agents' units, itself when this
+# checkout's default branch moves (when you pull); run this again only after deploy/ultrakanban.service changes.
 #
 # To keep them running while you are logged out: loginctl enable-linger
 
@@ -32,7 +33,8 @@ branch=$(git -C "$repo" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>
 commit=$(git -C "$repo" rev-parse --verify --quiet "${branch#origin/}^{commit}" 2>/dev/null) || commit=
 printf '%s\n%s\n' "$repo" "$commit" >"$home/installed-from"
 sed -e "s|@REPO@|$repo|g" -e "s|@COMPOSE@|$compose|g" "$repo/deploy/ultrakanban.service" >"$units/ultrakanban.service"
-install -m 644 "$repo/deploy/ultrakanban-agent.service" "$repo/deploy/ultrakanban-agent@.service" "$units/"
+install -m 644 "$repo/deploy/ultrakanban-agent.service" "$repo/deploy/ultrakanban-agent@.service" \
+  "$repo/deploy/app-ultrakanban.slice" "$units/"
 
 systemctl --user daemon-reload
 systemctl --user enable ultrakanban.service ultrakanban-agent.service

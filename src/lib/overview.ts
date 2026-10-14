@@ -1,6 +1,7 @@
 import { addDays, differenceInCalendarDays, startOfDay } from 'date-fns'
 import {
   addUsage,
+  type BoardDiskUsage,
   noUsage,
   type Overview,
   type OverviewAgent,
@@ -11,6 +12,10 @@ import {
   type UsageTotals,
   type WorkSession,
 } from '@shared/domain'
+
+/** All of a board's disk space, in bytes. */
+export const diskBytes = ({ attachments, agent }: BoardDiskUsage) =>
+  attachments + (agent ? agent.repo + agent.worktrees + agent.state : 0)
 
 export interface Day {
   start: Date

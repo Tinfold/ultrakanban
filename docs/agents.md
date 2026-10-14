@@ -73,9 +73,10 @@ scripts/install-services.sh
 
 It installs and enables two systemd user services that start at login: `ultrakanban` (the board, as in
 [Running with Docker](running.md#running-with-docker)) and `ultrakanban-agent`, the agent supervisor. It copies the agent
-scripts and the skill to `~/.local/share/ultrakanban-agent`, and the supervisor keeps those copies up to date: when
-you pull this checkout's default branch, it installs the new versions, and each agent loop switches to them before its
-next run. Run the script again only when the systemd units in `deploy/` change.
+scripts and the skill to `~/.local/share/ultrakanban-agent`, and the supervisor keeps those copies, and the agents'
+systemd units, up to date: when you pull this checkout's default branch, it installs the new versions, and each agent
+loop switches to them before its next run (restarting its unit once its runs are over, when the unit changed). Run the
+script again only when `deploy/ultrakanban.service` changes.
 
 The services run the tools installed on the machine, so install them first: Claude Code (the `claude` command,
 `npm install -g @anthropic-ai/claude-code`), the GitHub CLI (`gh`, which they push, open pull requests and read reviews
@@ -148,15 +149,24 @@ sends it back.
 
 **Updating from the app.** Once the supervisor runs, the header shows an update button, with the version the board runs
 and how many commits it is behind origin (fetched every 15 minutes). **Update & restart** asks the supervisor to
-`git pull --ff-only` the checkout's default branch, rebuild and restart the board (`compose up -d --build`, as
+`git pull --ff-only` the checkout's default branch (or, with **Merge with `git pull --no-ff`** ticked, merge origin
+into it, keeping commits of its own; it starts ticked when the checkout has some), rebuild and restart the board (`compose up -d --build --force-recreate`, as
 `ultrakanban.service` runs it) and install the new agent scripts. It refuses, and says why, when the checkout has
-another branch checked out or local changes. To keep everything running while you
+another branch checked out or local changes. The board is built with the checkout's commit (`ULTRAKANBAN_COMMIT`), so
+the button also says when the board runs an older build than the checkout, and the update fails if the restarted board
+doesn't run the commit it built. To keep everything running while you
 are logged out, also run `loginctl enable-linger`.
 
 **Claude usage.** The supervisor also reads how much of your Claude plan's usage limits is used (the current session,
 the week, and any per-model weekly limit, as `/usage` in claude shows them) every 5 minutes (`CLAUDE_USAGE_SECONDS`),
 with the claude login in `~/.claude/.credentials.json` (or `$CLAUDE_CONFIG_DIR`), and the overview shows it as bars of
 the usage left and when each resets. The board itself can't read it: it runs in a container, without your login.
+
+**Disk usage.** Every 30 minutes (`DISK_USAGE_SECONDS`) the supervisor also measures, at low priority and in the
+background, how much disk space each board's agent folder (`~/.local/share/ultrakanban-agent/boards/<board>`) takes:
+its clone, the worktrees of its parallel runs, and the rest (loop state and the runs' scratch files). The overview's
+Boards table shows it per board with the board's attachments (the breakdown is in the cell's tooltip), and the total
+above it, with the space folders of deleted boards still take.
 
 Then, per board, open **Board menu → Board settings**, set the **GitHub repository** (`owner/name`, or **New** to
 create one on GitHub with the server's login and link it) and switch on
@@ -173,8 +183,26 @@ Nothing should pause or slow the agents down halfway through a run. While a run 
 systemd-logind inhibitor lock, so the machine doesn't suspend or go idle (`INHIBIT_SLEEP=0` turns this off; see
 `systemd-inhibit --list`). The agent units keep normal CPU and IO priority (`Nice=0`, `CPUWeight=100`,
 `IOWeight=100`), and when the kernel kills a run for lack of memory, the loop carries on and retries it
-(`OOMPolicy=continue`) instead of systemd stopping the whole loop. The units change only when you run
-`scripts/install-services.sh` again.
+(`OOMPolicy=continue`) instead of systemd stopping the whole loop.
+
+**Memory, swap and CPU.** The agents mustn't starve the rest of the machine either. Every board's loop, and every run
+and build it starts, goes in one systemd slice, [`app-ultrakanban.slice`](../deploy/app-ultrakanban.slice). Over 60% of
+the machine's memory (`MemoryHigh`), the kernel takes memory back from the agents and slows them down, instead of
+pushing your other programs out to swap. At 75% (`MemoryMax`) it kills one of their processes, never one outside. A run
+killed this way fails, says so on its ticket, and is retried like any failed run. Together the agents fill at most 2 GB
+of swap (`MemorySwapMax`) and run at most 8192 processes (`TasksMax`). They also share one CPU share, as much as any
+other app, however many boards and parallel runs there are. To change the limits, run
+`systemctl --user edit app-ultrakanban.slice`, e.g. `MemoryMax=50%`. The change takes effect at once and is kept when
+you install again. `systemctl --user status app-ultrakanban.slice` shows what the agents use now. Runs in Docker (see
+below) are outside the slice: limit them with `DOCKER_ARGS`.
+
+Runs also clean up after themselves. Agents like to put clones, builds and test output in `/tmp`, which is often held
+in memory (tmpfs) and never emptied, so it ends up in swap for good. Each run gets a scratch directory on disk instead,
+as `TMPDIR`, under the loop's state directory (`boards/<board>/state/tmp/<ticket>`), and its prompt asks it to use that
+directory. The directory is removed when the ticket's run finishes, and kept when the run stops partway and will be
+resumed. Directories no run has used for 3 days are removed too. Every run's processes carry an `ULTRAKANBAN_RUN`
+marker in their environment. When the run ends, the loop stops whatever still has the marker, such as a dev server
+started in the background, so nothing it started keeps holding memory.
 
 **Parallel runs.** By default a board's agent runs one `claude -p` at a time. The board's **Parallel runs** setting
 (`agentConcurrency`, up to 8) lets it work that many tickets at once: the unit then runs that many loops, the first in
@@ -184,7 +212,11 @@ work it, so two runs never work the same ticket, and when one runs out of Claude
 that many new tickets at a time, too: a claimed ticket whose run fails stays in progress to be retried, and until its
 run succeeds (or someone moves it back to Todo) it takes up one of the slots, so runs that keep failing don't drag the
 whole Todo or Backlog column into progress. Changing the
-setting restarts the board's loops, which stops runs in progress (they are resumed, see below). The boards themselves
+setting restarts the board's loops, which stops runs in progress (they are resumed, see below). The button left of the
+update button in the header switches every board's agents off and on at once: it is green while each board whose
+agent is on has its loop running, and a warning sign when one doesn't (or they are switched off). Switched off, the
+supervisor stops all the loops and the containers their runs use, until they are switched on again; clicking the
+warning sign while they are on starts the loops that stopped now, rather than after the supervisor's wait. The boards themselves
 also run side by side, with no limit across boards: three enabled boards with two parallel runs each can mean six
 agents working at once, all on your `claude` login and its usage limits.
 
@@ -222,7 +254,8 @@ Running the services on the host, not in the containers, is deliberate: the agen
 **What the loop does.** Each round, it first checks the tickets the agent holds and starts a run for one with new
 feedback: a ticket comment, a pull request comment, review or inline review comment, a check on the latest commit
 that ran and failed, merge conflicts, or someone moving the ticket back into In progress (e.g. from Review, to
-ask for more work). The prompt lists exactly what is new. Bots and the agent's own replies
+ask for more work). The prompt lists exactly what is new, and every prompt includes the board's description (Board
+settings), so put conventions for all of the board's tickets there. Bots and the agent's own replies
 don't count: the agent posts from the same GitHub account as you, so the skill makes it end every pull request
 comment with `<!-- ultrakanban:<agent> -->`, which the loop ignores. A pull request closed without merging moves
 its ticket to the `Cancelled` column (`CANCELLED_COLUMN`; add it to the board, the loop won't fall back to Todo)
@@ -314,7 +347,8 @@ the same `BOARD`, agent settings and `STATE_DIR`.
 A reset keeps build output (ignored files such as `target/` or `node_modules/`) so builds stay incremental, until a
 checkout's ignored files pass `MAX_BUILD_GB` (default 20): then the loop removes them all before the next run. Each
 board's clone and worktree has its own, so a Rust board with several parallel runs could otherwise fill the disk.
-`MAX_BUILD_GB=0` keeps them.
+`MAX_BUILD_GB=0` keeps them. To clear them sooner, use **Clear build output** in the board's Disk usage dialog (its
+menu): each of the board's loops then removes its checkout's ignored files between runs, at once when idle.
 
 ### Other models
 

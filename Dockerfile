@@ -17,6 +17,9 @@ COPY shared ./shared
 COPY docs ./docs
 COPY --from=build /app/dist ./dist
 RUN mkdir -p data && chown -R node:node /app
+# The commit it is built from (the updater passes it), so the app can tell when it runs an older build than the checkout
+ARG ULTRAKANBAN_COMMIT=
+ENV ULTRAKANBAN_COMMIT=$ULTRAKANBAN_COMMIT
 USER node
 EXPOSE 4317
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \

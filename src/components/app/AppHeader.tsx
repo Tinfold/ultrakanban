@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useSetup } from '@/hooks/queries'
 import { cn } from '@/lib/utils'
 import { ActorMenu } from './ActorMenu'
+import { AgentsSwitch } from './AgentsSwitch'
 import { ThemeToggle } from './ThemeToggle'
 import { UpdateMenu } from './UpdateMenu'
 

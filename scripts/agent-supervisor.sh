@@ -11,21 +11,29 @@
 # as its child processes instead: it restarts one that dies (waiting 30 s, doubling up to 15 min) and stops them all
 # when it stops. Their logs go to its own output, each line marked with the board.
 #
-# It also keeps the installed scripts and skill up to date. install-services.sh notes the checkout it installed them
-# from and that checkout's default branch commit, in AGENT_HOME/installed-from. When that branch moves (you pull),
-# this script copies the branch's versions over the installed ones: each agent loop starts again with them before its
-# next run (see agent-board.sh), and this script restarts itself. Other branches checked out there change nothing.
+# It also keeps the installed scripts, skill and systemd units up to date. install-services.sh notes the checkout it
+# installed them from and that checkout's default branch commit, in AGENT_HOME/installed-from. When that branch moves
+# (you pull), this script copies the branch's versions over the installed ones: each agent loop starts again with them
+# before its next run (see agent-board.sh), and this script restarts itself. Other branches checked out there change
+# nothing.
 #
 # And it updates ultrakanban itself when someone asks for it in the app (the update button in the header): it pulls
-# that checkout's default branch, rebuilds and restarts the board (ultrakanban.service's compose project), and reports
+# that checkout's default branch (fast-forward only, or merging origin with --no-ff when asked to), rebuilds and restarts the board (ultrakanban.service's compose project), and reports
 # how it went. Every poll it checks in with the checkout's version and how many commits it is behind origin (fetched
 # every UPDATE_FETCH_SECONDS), which the app shows next to the button.
 #
 # And every CLAUDE_USAGE_SECONDS it reads how much of the Claude plan's usage limits is used, with your claude login (as
 # /usage in claude does), and reports it to the board for the overview. The board can't: it runs in a container.
 #
+# And it switches every board's agents off and on again from the header: switched off, it stops all the loops (and the
+# containers their runs used) and starts none, until they are switched on again. It checks for that every few seconds,
+# and reports which loops run after each poll, which the header shows.
+#
+# And every DISK_USAGE_SECONDS it measures the disk space each board's agent folder takes (its clone, worktrees and loop
+# state, in AGENT_HOME/boards/<board>), and reports it to the board for the overview.
+#
 # Settings: KANBAN (default http://localhost:4317), POLL_SECONDS (default 30), UPDATE_FETCH_SECONDS (default 900),
-# CLAUDE_USAGE_SECONDS (default 300), NO_SYSTEMD and ULTRAKANBAN_AGENT_HOME.
+# CLAUDE_USAGE_SECONDS (default 300), DISK_USAGE_SECONDS (default 1800), NO_SYSTEMD and ULTRAKANBAN_AGENT_HOME.
 
 set -uo pipefail
 
@@ -33,8 +41,15 @@ KANBAN=${KANBAN:-http://localhost:4317}
 POLL_SECONDS=${POLL_SECONDS:-30}
 UPDATE_FETCH_SECONDS=${UPDATE_FETCH_SECONDS:-900}
 CLAUDE_USAGE_SECONDS=${CLAUDE_USAGE_SECONDS:-300}
+DISK_USAGE_SECONDS=${DISK_USAGE_SECONDS:-1800}
 AGENT_HOME=${ULTRAKANBAN_AGENT_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/ultrakanban-agent}
 self=$(readlink -f "$0")
+# What agent runs start their containers with, as in agent-loop.sh; empty when there is neither.
+if [[ -z ${DOCKER:-} ]]; then
+  DOCKER=docker
+  command -v docker >/dev/null || ! command -v podman >/dev/null || DOCKER=podman
+fi
+command -v "$DOCKER" >/dev/null || DOCKER=
 systemd=1
 [[ -z ${NO_SYSTEMD:-} ]] && systemctl --user show-environment >/dev/null 2>&1 || systemd=
 # The installed files and where they come from in the checkout.
@@ -43,10 +58,18 @@ INSTALLED=(bin/agent-loop.sh:scripts/agent-loop.sh bin/agent-board.sh:scripts/ag
 for part in triage board ci checkout run tickets; do
   INSTALLED+=("bin/agent-loop/$part.sh:scripts/agent-loop/$part.sh")
 done
+# The systemd units install-services.sh installed from deploy/, kept up to date the same way. Not ultrakanban.service,
+# which it fills in for this machine.
+UNIT_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
+UNITS=(ultrakanban-agent.service ultrakanban-agent@.service app-ultrakanban.slice)
 
-# Copies the installed files from the checkout's default branch when it has moved since they were installed.
+# Copies the installed files, and the systemd units when they are installed, from the checkout's default branch when it
+# has moved since they were installed. A changed slice takes effect at once. Each agent loop's unit restarts itself with
+# a changed ultrakanban-agent@.service between runs (see agent-board.sh); a changed ultrakanban-agent.service takes
+# effect the next time it starts, as restarting it would stop every run.
 update_scripts() {
-  local checkout installed branch commit entry target tmp updated= missing=
+  local checkout installed branch commit entry target tmp unit updated= units= missing= unit_dir=
+  [[ -n $systemd && -f $UNIT_DIR/ultrakanban-agent.service ]] && unit_dir=$UNIT_DIR
   { read -r checkout && read -r installed; } 2>/dev/null <"$AGENT_HOME/installed-from" || return 0
   branch=$(git -C "$checkout" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null) || branch=origin/main
   branch=${branch#origin/}
@@ -56,6 +79,9 @@ update_scripts() {
   if [[ $commit == "$installed" ]]; then
     for entry in "${INSTALLED[@]}"; do
       [[ -f $AGENT_HOME/${entry%%:*} ]] || missing=1
+    done
+    for unit in ${unit_dir:+"${UNITS[@]}"}; do
+      [[ -f $unit_dir/$unit ]] || missing=1
     done
     [[ -n $missing ]] || return 0
   fi
@@ -71,6 +97,20 @@ update_scripts() {
       rm -f "$tmp"
     fi
   done
+  for unit in ${unit_dir:+"${UNITS[@]}"}; do
+    target=$unit_dir/$unit
+    tmp=$(mktemp "$target.XXXXXX") || continue
+    if git -C "$checkout" show "$commit:deploy/$unit" >"$tmp" 2>/dev/null && ! cmp -s "$tmp" "$target" &&
+      chmod 644 "$tmp" && mv -f "$tmp" "$target"; then
+      units+=" $unit"
+    else
+      rm -f "$tmp"
+    fi
+  done
+  if [[ -n $units ]]; then
+    systemctl --user daemon-reload
+    updated+=$units
+  fi
   printf '%s\n%s\n' "$checkout" "$commit" >"$AGENT_HOME/installed-from"
   [[ -n $updated ]] || return 0
   echo "updated$updated to $branch at ${commit:0:7} in $checkout"
@@ -87,12 +127,15 @@ report() {
     -H 'X-Actor: agent-supervisor' -d "$1"
 }
 
-# The checkout's version and how far its default branch is behind origin, as report fields.
+# The checkout's version and commit, and how far its default branch is behind and ahead of origin, as report fields.
 checkout_state() {
-  local checkout=$1 branch=$2 behind
+  local checkout=$1 branch=$2 behind ahead
   behind=$(git -C "$checkout" rev-list --count "$branch..origin/$branch" 2>/dev/null) || behind=null
+  ahead=$(git -C "$checkout" rev-list --count "origin/$branch..$branch" 2>/dev/null) || ahead=null
   jq -nc --arg version "$(git -C "$checkout" log -1 --format='%h %s' 2>/dev/null)" --argjson behind "$behind" \
-    '{version: (if $version == "" then null else $version end), behind: $behind}'
+    --argjson ahead "$ahead" --arg commit "$(git -C "$checkout" rev-parse HEAD 2>/dev/null)" \
+    '{version: (if $version == "" then null else $version end), behind: $behind, ahead: $ahead,
+      commit: (if $commit == "" then null else $commit end)}'
 }
 
 last_fetch=
@@ -114,12 +157,13 @@ check_in() {
     report '{"state":"failed","message":"The agent supervisor stopped during the update. Ask for it again."}' >/dev/null
   fi
   interrupted=
-  [[ $(jq -r .state <<<"$status") == requested ]] && update_board "$checkout" "$branch"
+  [[ $(jq -r .state <<<"$status") == requested ]] && update_board "$checkout" "$branch" "$(jq -r .merge <<<"$status")"
 }
 
-# Pulls the checkout's default branch, then rebuilds and restarts the board on it.
+# Pulls the checkout's default branch (merging origin into it with --no-ff when merge is true), then rebuilds and
+# restarts the board on it: `update_board <checkout> <branch> <merge>`.
 update_board() {
-  local checkout=$1 branch=$2 current output compose waited=0
+  local checkout=$1 branch=$2 merge=$3 current output compose running commit waited=0 pull=(--ff-only)
   update_failed() {
     echo "update failed: $1"
     report "$(jq -nc --arg message "$1" --argjson fields "$(checkout_state "$checkout" "$branch")" \
@@ -139,8 +183,11 @@ update_board() {
     update_failed "$checkout has local changes. Commit or stash them to update."
     return
   fi
-  if ! output=$(GIT_TERMINAL_PROMPT=0 timeout 300 git -C "$checkout" pull --ff-only --quiet origin "$branch" 2>&1); then
-    update_failed "git pull failed: $(tail -c 1500 <<<"$output")"
+  [[ $merge == true ]] && pull=(--no-ff --no-edit)
+  if ! output=$(GIT_TERMINAL_PROMPT=0 timeout 300 git -C "$checkout" pull "${pull[@]}" --quiet origin "$branch" 2>&1); then
+    [[ $merge == true ]] && git -C "$checkout" merge --abort 2>/dev/null
+    update_failed "git pull ${pull[*]} failed: $(tail -c 1500 <<<"$output")$([[ $merge == true ]] ||
+      echo " If $branch has commits of its own, update with a merge instead.")"
     return
   fi
   last_fetch=$SECONDS
@@ -159,15 +206,25 @@ update_board() {
     return
   fi
   echo "rebuilding and restarting the board"
-  if ! output=$("${compose[@]}" -f "$checkout/docker-compose.yml" up -d --build 2>&1); then
+  # --force-recreate: podman-compose builds the new image with a plain --build but keeps the old container running.
+  # ULTRAKANBAN_COMMIT: the commit the app is built from, so the app and this script can tell it runs this one.
+  commit=$(git -C "$checkout" rev-parse HEAD)
+  if ! output=$(ULTRAKANBAN_COMMIT=$commit "${compose[@]}" -f "$checkout/docker-compose.yml" up -d --build \
+    --force-recreate 2>&1); then
     update_failed "Rebuilding the board failed: $(tail -c 1500 <<<"$output")"
     return
   fi
   # The app restarts with the new build; wait for it to answer again, so the report gets through.
-  until curl -sf "$KANBAN/api/system/update" >/dev/null || ((waited >= 300)); do
+  until running=$(curl -sf "$KANBAN/api/system/update") || ((waited >= 300)); do
     sleep 5
     ((waited += 5))
   done
+  running=$(jq -r '.runningCommit // empty' <<<"$running" 2>/dev/null)
+  if [[ -n $running && $running != "$commit" ]]; then
+    update_failed "Rebuilt the board on ${commit:0:7}, but it still runs ${running:0:7}. Restart it yourself: \
+${compose[*]} -f $checkout/docker-compose.yml up -d --force-recreate"
+    return
+  fi
   echo "updated ultrakanban to $(git -C "$checkout" log -1 --format='%h %s')"
   report "$(jq -nc --arg message "Updated to $(git -C "$checkout" log -1 --format='%h %s')" \
     --argjson fields "$(checkout_state "$checkout" "$branch")" '$fields + {state: "done", message: $message}')" \
@@ -200,6 +257,34 @@ report_claude_usage() {
   fi
   curl -sf -X POST "$KANBAN/api/system/claude-usage" -H 'Content-Type: application/json' \
     -H 'X-Actor: agent-supervisor' -d "$body" >/dev/null || echo "couldn't report Claude usage to $KANBAN"
+}
+
+last_disk=
+disk_pid=
+# Reports the disk space of each board's agent folder to the board (see reportDiskUsageSchema), every
+# DISK_USAGE_SECONDS: its clone, its worktrees for parallel runs, and the rest (the loop's state and the runs' scratch
+# files). It measures in the background, at low priority, as a few hundred GB of checkouts take a while to go through.
+report_disk_usage() {
+  [[ -z $last_disk ]] || ((SECONDS - last_disk >= DISK_USAGE_SECONDS)) || return 0
+  [[ -n $disk_pid ]] && kill -0 "$disk_pid" 2>/dev/null && return 0
+  last_disk=$SECONDS
+  (
+    low=(nice -n 19)
+    # Idle I/O priority where there is one and it is allowed.
+    ionice -c 3 true 2>/dev/null && low+=(ionice -c 3)
+    for dir in "$AGENT_HOME"/boards/*/; do
+      dir=${dir%/}
+      [[ -d $dir ]] || continue
+      # One pass: the folder's top-level entries and the folder itself, in KiB.
+      "${low[@]}" du -k -d 1 "$dir" 2>/dev/null | awk -F '\t' -v dir="$dir" -v board="${dir##*/}" '
+        $2 == dir "/repo" { repo = $1 } $2 == dir "/worktrees" { worktrees = $1 } $2 == dir { total = $1 }
+        END { if (total != "") printf "%s\t%.0f\t%.0f\t%.0f\n", board, repo * 1024, worktrees * 1024, (total - repo - worktrees) * 1024 }'
+    done | jq -Rnc '{boards: [inputs | split("\t") | {boardId: .[0], repo: (.[1] | tonumber),
+      worktrees: (.[2] | tonumber), state: (.[3] | tonumber)}]}' |
+      curl -sf -X POST "$KANBAN/api/system/disk-usage" -H 'Content-Type: application/json' \
+        -H 'X-Actor: agent-supervisor' -d @- >/dev/null || echo "couldn't report the agents' disk usage to $KANBAN"
+  ) &
+  disk_pid=$!
 }
 
 runs_in=machine
@@ -381,7 +466,7 @@ after_github_login() {
 # Waits POLL_SECONDS, but starts a login asked for on the Setup page within a few seconds, and checks in again as soon
 # as one finishes.
 wait_poll() {
-  local waited=0
+  local waited=0 switched
   while ((waited < POLL_SECONDS)); do
     sleep 3 &
     wait $!
@@ -395,13 +480,35 @@ wait_poll() {
     elif [[ $(curl -sf "$KANBAN/api/system/agents/login" | jq -r '.state // empty' 2>/dev/null) == requested ]]; then
       start_login
     fi
+    # Switched off or on in the header meanwhile: see to it now rather than at the next poll.
+    switched=$(curl -sf "$KANBAN/api/system/agents/services") || continue
+    [[ $(jq -r '.changedAt // ""' <<<"$switched" 2>/dev/null) == "$changed_at" ]] || return 0
   done
 }
 
+# Whether every board's agents are switched off in the header, and when it was last switched there, as reconcile last
+# found. Switching them on while they are on starts the loops that aren't running now, rather than after their wait.
+paused= changed_at= seen_switch=
 reconcile() {
-  local boards wanted id repo agent model effort concurrency settings unit state units
+  local boards response services wanted= id repo agent model effort concurrency settings unit state units now=
   boards=$(curl -sf "$KANBAN/api/boards") || { echo "can't reach $KANBAN; leaving the loops as they are"; return; }
-  wanted=$(jq -r '.[] | select(.agentEnabled and .githubRepo != null)
+  response=$(curl -s -w '\n%{http_code}' "$KANBAN/api/system/agents/services")
+  case ${response##*$'\n'} in
+    200)
+      services=${response%$'\n'*}
+      paused=$(jq -r '.paused // false' <<<"$services")
+      [[ -n $seen_switch && $(jq -r '.changedAt // ""' <<<"$services") != "$changed_at" ]] && now=1
+      changed_at=$(jq -r '.changedAt // ""' <<<"$services") seen_switch=1
+      ;;
+    # A board older than the switch: its agents are on.
+    404) paused=false ;;
+    # Anything else (a timeout, an error) keeps the last answer, so the loops don't start while switched off.
+    *)
+      [[ -n $paused ]] || { echo "can't read the agents switch from $KANBAN; leaving the loops as they are"; return; }
+      echo "can't read the agents switch from $KANBAN; going by its last answer (paused: $paused)"
+      ;;
+  esac
+  [[ $paused == true ]] || wanted=$(jq -r '.[] | select(.agentEnabled and .githubRepo != null)
     | [.id, .githubRepo, .agentName // "claude", .agentModel // "opus", .agentEffort // "medium", .agentConcurrency // 1]
     | @tsv' <<<"$boards")
 
@@ -417,8 +524,17 @@ reconcile() {
     fi
     loop_state "$id"
     case $state in
-      active | activating | reloading | deactivating) ;;
+      active | reloading | deactivating) ;;
+      activating)
+        # Waiting to be started again after it stopped; started now when asked to in the header.
+        if [[ -n $now ]]; then
+          echo "board $id: agent loop waiting to start again; starting it now, as asked"
+          unset 'not_before[$id]'
+          loop_restart "$id"
+        fi
+        ;;
       *)
+        [[ -n $now ]] && unset 'not_before[$id]'
         if ((SECONDS < ${not_before[$id]:-0})); then
           echo "board $id: agent loop stopped; starting it again in $((not_before[$id] - SECONDS)) s"
         else
@@ -433,10 +549,41 @@ reconcile() {
     [[ $'\n'$wanted == *$'\n'"$id"$'\t'* ]] && continue
     loop_state "$id"
     [[ $state == inactive ]] && continue
-    echo "board $id: agent switched off or board deleted; stopping its loop"
+    if [[ $paused == true ]]; then
+      echo "board $id: every board's agents are switched off; stopping its loop"
+    else
+      echo "board $id: agent switched off or board deleted; stopping its loop"
+    fi
     loop_stop "$id"
     rm -f "$AGENT_HOME/boards/$id/settings"
   done
+}
+
+# Tells the board which boards' loops run, and the switch reconcile saw to, for the header.
+report_services() {
+  local id state running=()
+  for id in $(loop_list); do
+    loop_state "$id"
+    [[ $state == @(active|reloading) ]] && running+=("$id")
+  done
+  # The ids go in as lines, not arguments: one starting with "-" (board ids can) would be taken for an option.
+  printf '%s\n' ${running[@]+"${running[@]}"} | jq -Rnc --arg handledAt "$changed_at" \
+    '{running: [inputs | select(. != "")], handledAt: (if $handledAt == "" then null else $handledAt end)}' |
+    curl -sf -X POST "$KANBAN/api/system/agents/services/status" -H 'Content-Type: application/json' \
+      -H 'X-Actor: agent-supervisor' -d @- >/dev/null || echo "couldn't report the running loops to $KANBAN"
+}
+
+# The containers the board's runs used (see use_docker in agent-loop/run.sh): a run stopped along with its loop leaves
+# its container running.
+stop_containers() {
+  local name
+  [[ -n $DOCKER ]] || return 0
+  while read -r name; do
+    if [[ $name == "ultrakanban-$1-"* ]]; then
+      echo "board $1: removing its run's container $name"
+      "$DOCKER" rm --force "$name" >/dev/null 2>&1
+    fi
+  done < <("$DOCKER" ps --all --format '{{.Names}}' 2>/dev/null)
 }
 
 # The loops: systemd units, or this script's child processes without systemd (see the top).
@@ -486,6 +633,7 @@ loop_stop() {
   if [[ -n $systemd ]]; then
     systemctl --user stop "ultrakanban-agent@$1.service"
     systemctl --user reset-failed "ultrakanban-agent@$1.service" 2>/dev/null
+    stop_containers "$1"
     return
   fi
   if [[ -n ${pids[$1]:-} ]]; then
@@ -494,14 +642,12 @@ loop_stop() {
     kill -KILL "${pids[$1]}" 2>/dev/null
   fi
   unset 'pids[$1]' 'failures[$1]' 'not_before[$1]'
+  stop_containers "$1"
 }
+# Stopped and started rather than restarted, so the stopped runs' containers are removed in between.
 loop_restart() {
-  if [[ -n $systemd ]]; then
-    systemctl --user restart "ultrakanban-agent@$1.service"
-  else
-    loop_stop "$1"
-    loop_start "$1"
-  fi
+  loop_stop "$1"
+  loop_start "$1"
 }
 stop_all() {
   local id
@@ -509,14 +655,16 @@ stop_all() {
   for id in "${!pids[@]}"; do loop_stop "$id"; done
 }
 
-trap 'kill $! ${login_pid:-} 2>/dev/null; stop_all; exit 0' INT TERM
+trap 'kill $! ${login_pid:-} ${disk_pid:-} 2>/dev/null; stop_all; exit 0' INT TERM
 
 echo "watching $KANBAN for boards with the agent switched on${systemd:+ (loops run as systemd user units)}"
 while true; do
   check_in
   report_claude_usage
+  report_disk_usage
   report_agents
   update_scripts
   reconcile
+  report_services
   wait_poll
 done

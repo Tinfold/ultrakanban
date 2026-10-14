@@ -55,8 +55,28 @@ describe('updating ultrakanban', () => {
     assert.equal((await call<AppUpdate>('POST', '/system/update')).body.message, null)
   })
 
+  test("can ask for a merge, and reports the checkout's commit and its own commits", async () => {
+    await call('DELETE', '/system/update')
+    const commit = 'a'.repeat(40)
+    const checkIn = await report({ ahead: 2, commit })
+    assert.deepEqual({ ahead: checkIn.body.ahead, commit: checkIn.body.commit }, { ahead: 2, commit })
+    assert.equal(checkIn.body.runningCommit, null)
+
+    const requested = await call<AppUpdate>('POST', '/system/update', { merge: true })
+    assert.equal(requested.status, 202)
+    assert.equal(requested.body.merge, true)
+    assert.equal((await report({ state: 'running' })).body.merge, true)
+    await report({ state: 'done', ahead: 3 })
+
+    // Without a body it fast-forwards again.
+    assert.equal((await call<AppUpdate>('POST', '/system/update')).body.merge, false)
+    await call('DELETE', '/system/update')
+    assert.equal((await call('POST', '/system/update', { merge: 'yes' })).status, 400)
+  })
+
   test('validates reports', async () => {
     assert.equal((await report({ state: 'requested' })).status, 400)
     assert.equal((await report({ behind: -1 })).status, 400)
+    assert.equal((await report({ commit: 'not a sha' })).status, 400)
   })
 })

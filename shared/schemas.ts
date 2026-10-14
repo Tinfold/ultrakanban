@@ -303,13 +303,37 @@ export const reportClaudeUsageSchema = z.object({
   error: z.string().trim().max(4000).nullable().optional(),
 })
 
+const bytes = z.number().int().nonnegative()
+
+/** The agent supervisor reporting the disk space of each board's agent folder, in bytes (see `AgentDiskUsage`). */
+export const reportDiskUsageSchema = z.object({
+  boards: z
+    .array(z.object({ boardId: z.string().trim().min(1).max(100), repo: bytes, worktrees: bytes, state: bytes }))
+    .max(10_000),
+})
+
+/** Deleting the attachments of a board's finished tickets, optionally only those uploaded more than `olderThanDays` ago. */
+export const attachmentCleanupSchema = z.object({
+  olderThanDays: z.int().min(1).max(3650).nullable().optional(),
+})
+
 /** The agent supervisor checking in, and reporting on an update it is doing. */
 export const reportAppUpdateSchema = z.object({
   state: z.enum(['running', 'done', 'failed']).optional(),
   message: z.string().trim().max(4000).nullable().optional(),
   version: z.string().trim().max(300).nullable().optional(),
   behind: z.int().min(0).nullable().optional(),
+  ahead: z.int().min(0).nullable().optional(),
+  commit: z
+    .string()
+    .trim()
+    .regex(/^[0-9a-f]{7,64}$/)
+    .nullable()
+    .optional(),
 })
+
+/** Asking for an update; `merge` merges origin with `git pull --no-ff` instead of only fast-forwarding. */
+export const requestAppUpdateSchema = z.object({ merge: z.boolean().optional() })
 
 /** A GitHub token for the board, set on the Setup page. */
 export const setGitHubTokenSchema = z.object({ token: z.string().trim().min(1).max(500) })
@@ -320,6 +344,16 @@ export const reportAgentHostSchema = z.object({
   githubLogin: z.string().trim().max(100).nullable().optional(),
   claudeAccount: z.string().trim().max(300).nullable().optional(),
   gitIdentity: z.string().trim().max(300).nullable().optional(),
+})
+
+/** Switching every board's agents off or on again (see `AgentServices`). */
+export const setAgentServicesSchema = z.object({ paused: z.boolean() })
+
+/** The agent supervisor reporting the boards whose loop runs. */
+export const reportAgentServicesSchema = z.object({
+  running: z.array(z.string().trim().min(1).max(100)).max(10_000),
+  /** The switch's `changedAt` it saw to. */
+  handledAt: z.string().max(100).nullable().optional(),
 })
 
 /** Asking the agent supervisor to run a login. */
@@ -466,9 +500,13 @@ export type HeartbeatInput = z.input<typeof heartbeatSchema>
 export type ReleaseIdleInput = z.input<typeof releaseIdleSchema>
 export type SubmitForReviewInput = z.input<typeof submitForReviewSchema>
 export type ReportAppUpdateInput = z.input<typeof reportAppUpdateSchema>
+export type RequestAppUpdateInput = z.input<typeof requestAppUpdateSchema>
 export type ReportClaudeUsageInput = z.input<typeof reportClaudeUsageSchema>
+export type ReportDiskUsageInput = z.input<typeof reportDiskUsageSchema>
+export type AttachmentCleanupInput = z.input<typeof attachmentCleanupSchema>
 export type ReportAgentHostInput = z.input<typeof reportAgentHostSchema>
 export type ReportAgentLoginInput = z.input<typeof reportAgentLoginSchema>
+export type ReportAgentServicesInput = z.input<typeof reportAgentServicesSchema>
 export type PostPlanInput = z.input<typeof postPlanSchema>
 export type ApprovePlanInput = z.input<typeof approvePlanSchema>
 export type ClaimNextInput = z.input<typeof claimNextSchema>

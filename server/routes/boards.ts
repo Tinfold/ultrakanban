@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import {
   agentSuggestionQuerySchema,
+  attachmentCleanupSchema,
   boardDetailQuerySchema,
   boardExportSchema,
   bulkTicketsSchema,
@@ -23,6 +24,8 @@ import { actorOf, readJson } from '../http.ts'
 import type { AppServices } from '../app.ts'
 import { createBoard, deleteBoard, getBoard, getBoardDetail, listBoards, updateBoard } from '../store/boards.ts'
 import { createColumn } from '../store/columns.ts'
+import { listAttachmentIds } from '../store/attachments.ts'
+import { boardDiskBreakdown, cleanUpAttachments, requestAgentCleanup } from '../store/disk-usage.ts'
 import { createEpic, listEpics } from '../store/epics.ts'
 import { createTag } from '../store/tags.ts'
 import {
@@ -37,7 +40,7 @@ import { suggestAgent } from '../store/suggestions.ts'
 import { exportBoard, importBoard } from '../store/transfer.ts'
 import { listBoardUsage, recordBoardUsage } from '../store/usage.ts'
 
-export const boardRoutes = ({ pullRequests, mergeQueue }: AppServices) =>
+export const boardRoutes = ({ pullRequests, mergeQueue, attachmentFiles }: AppServices) =>
   new Hono()
     .get('/', (c) => c.json(listBoards()))
     .post('/', async (c) => {
@@ -144,6 +147,18 @@ export const boardRoutes = ({ pullRequests, mergeQueue }: AppServices) =>
       const tickets = transaction(() => requestConflictFixes(boardId, actorOf(c)))
       wake({ boardId })
       return c.json({ tickets })
+    })
+    .get('/:boardId/disk-usage', (c) => c.json(boardDiskBreakdown(c.req.param('boardId'))))
+    .post('/:boardId/attachments/cleanup', async (c) => {
+      const input = await readJson(c, attachmentCleanupSchema)
+      const deleted = transaction(() => cleanUpAttachments(c.req.param('boardId'), input))
+      if (deleted.count) await attachmentFiles.sweep(listAttachmentIds())
+      return c.json(deleted)
+    })
+    .post('/:boardId/agent-cleanup', (c) => {
+      const board = transaction(() => requestAgentCleanup(c.req.param('boardId')))
+      wake({ boardId: board.id })
+      return c.json(board)
     })
     .get('/:boardId/agent-suggestion', (c) => {
       const query = agentSuggestionQuerySchema.parse({
