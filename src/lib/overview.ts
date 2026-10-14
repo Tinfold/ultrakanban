@@ -5,6 +5,7 @@ import {
   noUsage,
   type Overview,
   type OverviewAgent,
+  type OverviewCompletion,
   type OverviewEventKind,
   type OverviewTicketUsage,
   type Tag,
@@ -75,6 +76,20 @@ export const ticketHref = (ticket: { id: string; boardId: string }) => `/b/${tic
 export function median(values: number[]) {
   if (!values.length) return null
   return values.toSorted((a, b) => a - b)[Math.floor((values.length - 1) / 2)]
+}
+
+/**
+ * What a completed ticket cost, on average over all its agent runs: the mean of the completions whose runs reported a
+ * cost, a ticket completed more than once counting once. Null when none did, e.g. agents on a local model.
+ */
+export function costPerCompletedTicket(completions: OverviewCompletion[]) {
+  const costs = new Map<string, number>()
+  for (const completion of completions) {
+    if (completion.costUsd !== null) costs.set(completion.ticketId, completion.costUsd)
+  }
+  if (!costs.size) return null
+  const total = [...costs.values()].reduce((sum, cost) => sum + cost, 0)
+  return { costUsd: total / costs.size, tickets: costs.size }
 }
 
 /** How long a ticket can be worked without moving before it's worth a look. */

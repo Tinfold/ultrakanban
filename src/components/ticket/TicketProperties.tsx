@@ -6,7 +6,15 @@ import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { ColorDot, TagChip } from '@/components/common/TagChip'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
-import { boardDockerLabel, dockerLabel, dueState, formatCost, formatDueDate, formatTokens } from '@/lib/format'
+import {
+  boardDockerLabel,
+  COST_NOTE,
+  dockerLabel,
+  dueState,
+  formatCost,
+  formatDueDate,
+  formatTokens,
+} from '@/lib/format'
 import { PRIORITY_LABELS } from '@/lib/priority'
 import { cn } from '@/lib/utils'
 import { useBoardContext } from '../board/board-context'
@@ -159,7 +167,12 @@ export function TicketProperties({ ticket }: { ticket: Ticket }) {
         <Property label="Usage">
           <p className="px-2 py-1.5 text-sm tabular-nums">
             {formatTokens(ticket.usage.tokens)} tokens
-            {ticket.usage.costUsd !== null && <> · {formatCost(ticket.usage.costUsd)}</>}
+            {ticket.usage.costUsd !== null && (
+              <span title={COST_NOTE}>
+                {' '}
+                · {formatCost(ticket.usage.costUsd)} <span className="text-muted-foreground">est.</span>
+              </span>
+            )}
             <span className="text-muted-foreground">
               {' '}
               over {ticket.usage.runs} {ticket.usage.runs === 1 ? 'run' : 'runs'}

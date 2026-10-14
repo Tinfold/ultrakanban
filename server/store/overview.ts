@@ -113,6 +113,14 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
      FROM tickets t`,
   )
   const ticketsById = new Map(tickets.map((ticket) => [ticket.id, ticket]))
+  // What all the runs on each ticket cost, whenever they ran: what a ticket completed within the range cost.
+  const ticketCosts = new Map(
+    sql
+      .all<{ ticket_id: string; cost: number | null }>(
+        'SELECT ticket_id, sum(cost_usd) AS cost FROM token_usage WHERE ticket_id IS NOT NULL GROUP BY ticket_id',
+      )
+      .map((row) => [row.ticket_id, row.cost]),
+  )
 
   // Replay the history of every ticket that changed within the range or is assigned now.
   const history = sql.all<ActivityRow>(
@@ -161,6 +169,7 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
             at: entry.createdAt,
             cycleMs: startedAt ? at - Date.parse(startedAt) : null,
             reviewMs: reviewSince ? at - Date.parse(reviewSince) : null,
+            costUsd: ticketCosts.get(ticket.id) ?? null,
           })
         }
         // Reopened tickets start over.
@@ -219,9 +228,11 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
   })
   const usageBy = new Map<string, UsageTotals>()
   const tokensOn = new Map<string, number>()
+  const costOn = new Map<string, number>()
   for (const run of usage) {
     usageBy.set(run.agent, addUsage(usageBy.get(run.agent) ?? noUsage(), run))
     tokensOn.set(run.boardId, (tokensOn.get(run.boardId) ?? 0) + totalTokens(run))
+    if (run.costUsd !== null) costOn.set(run.boardId, (costOn.get(run.boardId) ?? 0) + run.costUsd)
   }
 
   // Tickets worked within the range, with everything their runs used.
@@ -401,6 +412,7 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
       completed: completedOn.get(board.id) ?? 0,
       events: eventsOn.get(board.id) ?? 0,
       tokens: tokensOn.get(board.id) ?? 0,
+      costUsd: costOn.get(board.id) ?? null,
       lastActivityAt: boardLastActivity.get(board.id) ?? null,
       disk: { attachments: attachmentsOn.get(board.id) ?? 0, agent: agentDisk.get(board.id) ?? null },
     }

@@ -34,6 +34,7 @@ import type {
   CreateTagInput,
   CreateTicketInput,
   MoveTicketInput,
+  SetUsageReserveInput,
   UpdateBoardInput,
   UpdateColumnInput,
   UpdateEpicInput,
@@ -153,6 +154,9 @@ export const api = {
   showHiddenAgents: () => request<void>('DELETE', '/overview/hidden-agents'),
   appUpdate: () => request<AppUpdate>('GET', '/system/update'),
   claudeUsage: () => request<ClaudeUsage>('GET', '/system/claude-usage'),
+  /** Sets how far agents may use the week, the current session or both before they claim no new tickets. */
+  setUsageReserve: (reserve: SetUsageReserveInput) =>
+    request<ClaudeUsage>('PUT', '/system/claude-usage/reserve', reserve),
   requestAppUpdate: () => request<AppUpdate>('POST', '/system/update'),
   cancelAppUpdate: () => request<AppUpdate>('DELETE', '/system/update'),
   setup: () => request<SetupStatus>('GET', '/system/setup'),

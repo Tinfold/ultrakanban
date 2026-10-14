@@ -307,6 +307,18 @@ export const reportClaudeUsageSchema = z.object({
   error: z.string().trim().max(4000).nullable().optional(),
 })
 
+const reservePercent = z.int().min(1).max(100).nullable()
+
+/**
+ * Setting the usage reserve (see `ClaudeUsageReserve`): a whole percent of the week or of the current session, or `null`
+ * for off. One left out stays as it is.
+ */
+export const setUsageReserveSchema = z
+  .object({ week: reservePercent.optional(), session: reservePercent.optional() })
+  .refine((input) => input.week !== undefined || input.session !== undefined, {
+    message: 'Say which reserve to set: week, session or both',
+  })
+
 const bytes = z.number().int().nonnegative()
 
 /** The agent supervisor reporting the disk space of each board's agent folder, in bytes (see `AgentDiskUsage`). */
@@ -547,6 +559,7 @@ export type ReleaseIdleInput = z.input<typeof releaseIdleSchema>
 export type SubmitForReviewInput = z.input<typeof submitForReviewSchema>
 export type ReportAppUpdateInput = z.input<typeof reportAppUpdateSchema>
 export type ReportClaudeUsageInput = z.input<typeof reportClaudeUsageSchema>
+export type SetUsageReserveInput = z.input<typeof setUsageReserveSchema>
 export type ReportDiskUsageInput = z.input<typeof reportDiskUsageSchema>
 export type AttachmentCleanupInput = z.input<typeof attachmentCleanupSchema>
 export type ReportAgentHostInput = z.input<typeof reportAgentHostSchema>

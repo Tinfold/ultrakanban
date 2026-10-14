@@ -241,6 +241,19 @@ their first run yet (CLAIM_LIMIT $CLAIM_LIMIT)"
     status=${response##*$'\n'}
     ticket=${response%$'\n'*}
   fi
+  if [[ $status == 404 && $ticket == *usage_reserve_reached* ]]; then
+    # Agents leave the rest of the week's or the current session's Claude usage to people (the usage reserve, set on
+    # the overview next to the Claude usage). Tickets the agent holds still get runs; only claiming waits, and the
+    # board says why.
+    claim_unlock
+    [[ -n $reserve_held ]] || log "not claiming new tickets: $(jq -r '.error.message // empty' <<<"$ticket")"
+    reserve_held=1
+    return 1
+  fi
+  if [[ -n $reserve_held && ($status == 200 || $ticket == *no_ticket_available*) ]]; then
+    log "Claude usage is below the usage reserve again: claiming new tickets"
+    reserve_held=
+  fi
   if [[ $status != 200 ]]; then
     claim_unlock
     [[ $status == 404 && $ticket == *no_ticket_available* ]] || log "claim failed (HTTP ${status:-none}): $ticket"

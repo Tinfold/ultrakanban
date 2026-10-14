@@ -9,6 +9,9 @@ JSON over HTTP. Base URL: `http://127.0.0.1:4317/api` (in development the Vite d
   - `400 validation_error` / `bad_request` - fix the request.
   - `404 not_found` - unknown board/column/tag/ticket or route.
   - `404 no_ticket_available` - `claim-next` found nothing to claim.
+  - `404 usage_reserve_reached` - `claim-next` hands out no new tickets while the week's or the current session's
+    Claude usage is at its usage reserve (see [Claude usage](#claude-usage)); `details` has the `limit` and its
+    `reservePercent`. Try again later.
   - `409 already_claimed` / `claimed_by_other` - someone else holds the ticket (`details.ticket` has its current state).
   - `409 version_conflict` - `ifVersion` did not match (`details.ticket` has its current state).
   - `409 tag_exists` - tag names are unique per board (case-insensitive).
@@ -43,7 +46,9 @@ for a model that has none (`gemini/gemini-2.5-pro/default`). The model is everyt
    `claim-next` skips blocked tickets: those tagged `blocked`, and those whose description says they wait for another
    ticket of the board (`blocked by #12`, `blocked on #12`, `depends on #3 and #4`, `waiting on #7`) until that ticket is in the
    done column (the board's last column if it has none) or its pull request is merged. It also skips tickets whose
-   sub-tickets aren't all finished (see [Sub-tickets](#sub-tickets)).
+   sub-tickets aren't all finished (see [Sub-tickets](#sub-tickets)). While the week's or the current session's Claude
+   usage is at its usage reserve, it claims nothing and answers `404 usage_reserve_reached` (see
+   [Claude usage](#claude-usage)).
    Or claim a specific ticket: `POST /api/tickets/:ticketId/claim`.
 3. Read the ticket's comments (`GET /api/tickets/:ticketId/activity`) before starting: they may be newer than
    the description. Report progress and decisions with `POST /api/tickets/:ticketId/comments`.
@@ -661,6 +666,7 @@ interface Overview {
     completed
     events
     tokens
+    costUsd: number | null // estimated cost of the runs on it within the range; null when none reported one
     lastActivityAt
     // Bytes of its attachments, and of its agent's folder as the agent supervisor last measured it (null if it hasn't):
     // the clone, the worktrees of parallel runs, and the rest (loop state, runs' scratch files)
@@ -670,7 +676,15 @@ interface Overview {
   disk: { measuredAt: string | null; deletedBoards: number }
   events: { at: string; kind: 'created' | 'completed' | 'comment' | 'update'; actor: string; boardId: string }[]
   sessions: { agent; ticketId; boardId; start: string; end: string | null }[] // clipped to the range
-  completions: { ticketId; boardId; at: string; cycleMs: number | null; reviewMs: number | null }[] // oldest first
+  // Oldest first; costUsd is what all the ticket's runs cost, whenever they ran (null when none reported a cost)
+  completions: {
+    ticketId
+    boardId
+    at: string
+    cycleMs: number | null
+    reviewMs: number | null
+    costUsd: number | null
+  }[]
   // Token usage reported within the range, oldest first
   // (ticketId is null for runs reported to a board rather than a ticket)
   // (models as in TokenUsage; a run that didn't report them has one entry for the model in its agent's name, or unknown)
@@ -758,11 +772,26 @@ login (from Claude's usage endpoint, what `/usage` in claude shows). `GET /syste
   plan: string | null // the subscription, e.g. "pro" or "max"
   limits: Array<{ label: string; percent: number; resetsAt: string | null }> // e.g. "Current session", "Week, all models"
   error: string | null // why there are no limits, e.g. no claude login on the host
+  reserve: { week: number | null; session: number | null } // the usage reserve, 1-100 each (see below); null when off
+  reserveReached: { label: string; percent: number; resetsAt: string | null } | null // the limit holding agents back now
 }
 ```
 
 The supervisor reports with `POST /system/claude-usage` and `{ plan?, usage?, error? }`: `usage` is the usage
 endpoint's answer as it is (the board picks the limits out of it), `error` says why it couldn't get one.
+
+**The usage reserve** keeps some of the week, of the current session or both for people's own Claude sessions. It is
+one setting for the whole Claude account, not per board: `PUT /system/claude-usage/reserve` with
+`{ "week": 80, "session": 90 }` (each a whole percent, 1-100, or `null` for off; one left out stays as it is) answers
+with the usage above. Once a weekly limit (`Week, all models` or a per-model one such as `Week, Opus`) is at or over
+`week`, or the current session at or over `session`, `claim-next` hands out no new tickets and answers
+`404 usage_reserve_reached`, with the limit and its reserve in `details`; `reserveReached` says which limit it is (of
+several, the one that resets last, as claiming starts again only once all of them have). It only goes by a fresh
+report, from the last 30 minutes (the supervisor reports every 5), and a limit counts as reset once its `resetsAt` has
+passed: a stale or missing report never holds agents back, so agents don't stop because the supervisor did. Only
+claiming new tickets stops. Tickets agents already hold still get runs for their feedback, and claiming a given ticket
+(`POST /tickets/:ticketId/claim`) still works, so work under way and pull requests in review aren't left halfway;
+Claude's own limits stop those runs when the session or the week runs out.
 
 ## Disk usage
 
@@ -860,7 +889,8 @@ starts the loop of every board whose agent is on, as before. The boards' own age
   wanted: string[] // the boards whose agent is on (with a repository): each should have a loop running unless paused
   running: string[] // the boards whose loop the supervisor last found running
   // boards where claim-next last failed (e.g. its moveTo column is gone), why, and since when; each stays until a
-  // claim there goes through or finds nothing to do, or the supervisor reports its loop stopped
+  // claim there goes through or finds nothing to do, or the supervisor reports its loop stopped; the usage reserve
+  // holding agents back (usage_reserve_reached, see Claude usage) doesn't count as failing
   claimErrors: { boardId: string, message: string, since: string }[]
   reportedAt: string | null // when the supervisor last reported them; null if it never has
   handledAt: string | null // the changedAt it had seen to then: until it equals changedAt, the switch is on its way
