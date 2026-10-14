@@ -33,6 +33,8 @@ function verb(entry: OverviewActivity) {
       return entry.data.held ? 'posted a plan, waiting for approval, for' : 'posted a plan for'
     case 'approved':
       return 'approved the plan of'
+    case 'stopped':
+      return "stopped the agent's run on"
     case 'attachment':
       return 'attached a file to'
     case 'pull_request':

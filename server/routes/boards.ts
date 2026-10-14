@@ -158,7 +158,6 @@ export const boardRoutes = ({ pullRequests, mergeQueue, attachmentFiles }: AppSe
     .post('/:boardId/fix-conflicts', (c) => {
       const boardId = getBoard(c.req.param('boardId')).id
       const tickets = transaction(() => requestConflictFixes(boardId, actorOf(c)))
-      wake({ boardId })
       return c.json({ tickets })
     })
     .get('/:boardId/disk-usage', (c) => c.json(boardDiskBreakdown(c.req.param('boardId'))))

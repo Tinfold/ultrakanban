@@ -3,6 +3,7 @@ import { useMemo } from 'react'
 import { toast } from 'sonner'
 import type { BoardDetail, MergeMethod } from '@shared/domain'
 import type { CreateColumnInput, CreateEpicInput, CreateTagInput, CreateTicketInput } from '@shared/schemas'
+import { readActor } from '@/lib/actor'
 import { api, errorMessage } from '@/lib/api'
 import * as updates from '@/lib/board-updates'
 import { ticketRef } from '@/lib/format'
@@ -61,6 +62,24 @@ export function useBoardActions(boardId: string) {
         void queryClient.invalidateQueries({ queryKey: boardKey })
         void queryClient.invalidateQueries({ queryKey: queryKeys.boards })
       }
+    }
+
+    /** With `pullRequest`, the comment is posted on the ticket's pull request too. */
+    const addComment = async (ticketId: string, body: string, pullRequest = false) => {
+      const comment = await run(() => api.addComment(ticketId, body, pullRequest))
+      await queryClient.invalidateQueries({ queryKey: queryKeys.activity(ticketId) })
+      return comment
+    }
+
+    /** Asks the agent run working the ticket to stop, showing it as stopping right away. */
+    const requestStop = async (ticketId: string) => {
+      const ticket = await run(
+        () => api.stopRun(ticketId),
+        (d) => updates.requestStop(d, ticketId, readActor()),
+        updates.addTicket,
+      )
+      await queryClient.invalidateQueries({ queryKey: queryKeys.activity(ticketId) })
+      return ticket
     }
 
     return {
@@ -174,6 +193,25 @@ export function useBoardActions(boardId: string) {
         if (ticket) toast.success('Plan approved; the agent will carry on')
         return ticket
       },
+      /**
+       * Asks the agent run working the ticket to stop. Its loop stops it at its next check of the ticket (within half a
+       * minute), keeping what it has done, and resumes it where it left off once there is new feedback, such as a
+       * comment telling it what to do instead.
+       */
+      stopRun: async (ticketId: string) => {
+        const ticket = await requestStop(ticketId)
+        if (ticket)
+          toast.success(`Stopping the run on ${ticketRef(ticket.number)}; comment to tell the agent what to do`)
+        return ticket
+      },
+      /** Posts the comment, then stops the agent's run, so it carries on with the comment as its new instructions. */
+      commentAndStopRun: async (ticketId: string, body: string, pullRequest = false) => {
+        const comment = await addComment(ticketId, body, pullRequest)
+        const ticket = comment && (await requestStop(ticketId))
+        if (ticket)
+          toast.success(`Stopping the run on ${ticketRef(ticket.number)}; the agent carries on with your comment`)
+        return comment
+      },
       syncPullRequest: (ticketId: string) => run(() => api.syncPullRequest(ticketId), undefined, updates.addTicket),
       /** Merges the ticket's pull request, which moves the ticket to the done column. */
       mergeTicket: async (ticketId: string, method: MergeMethod) => {
@@ -247,12 +285,7 @@ export function useBoardActions(boardId: string) {
           onAutoClose: commit,
         })
       },
-      /** With `pullRequest`, the comment is posted on the ticket's pull request too. */
-      addComment: async (ticketId: string, body: string, pullRequest = false) => {
-        const comment = await run(() => api.addComment(ticketId, body, pullRequest))
-        await queryClient.invalidateQueries({ queryKey: queryKeys.activity(ticketId) })
-        return comment
-      },
+      addComment,
       /** Uploads files one by one; failures are reported per file without stopping the rest. */
       uploadAttachments: async (ticketId: string, files: File[]) => {
         for (const file of files) await run(() => api.uploadAttachment(ticketId, file))

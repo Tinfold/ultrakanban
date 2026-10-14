@@ -8,6 +8,7 @@ import {
   type CheckStatus,
   type Column,
   type FailingCheck,
+  IN_PROGRESS_COLUMN,
   parsePullRequestUrl,
   PRIORITIES,
   type Priority,
@@ -36,7 +37,7 @@ import type {
   SubmitForReviewInput,
   UpdateTicketInput,
 } from '../../shared/schemas.ts'
-import { newId, now, reorder, sql, touchBoard, updateRow } from '../db.ts'
+import { newId, now, reorder, sql, touchBoard, updateRow, wakeAgent } from '../db.ts'
 import { badRequest, conflict, HttpError, notFound } from '../errors.ts'
 import { publish } from '../events.ts'
 import { logActivity } from './activity.ts'
@@ -73,6 +74,8 @@ interface TicketRow {
   agent_seen_at: string | null
   run_started_at: string | null
   run_step: string | null
+  stop_requested_at: string | null
+  stop_requested_by: string | null
   estimate: TicketSize | null
   approval: Approval | null
   position: number
@@ -151,13 +154,17 @@ function toPullRequest(url: string, row: TicketRow): PullRequest {
   }
 }
 
-type RunRow = Pick<TicketRow, 'agent_seen_at' | 'run_started_at' | 'run_step'>
+type RunRow = Pick<
+  TicketRow,
+  'agent_seen_at' | 'run_started_at' | 'run_step' | 'stop_requested_at' | 'stop_requested_by'
+>
 
 /** The run working a ticket: one has started, hasn't ended, and sent a heartbeat within `AGENT_IDLE_MINUTES`. */
 function runOf(row: RunRow): AgentRun | null {
   const { agent_seen_at: seenAt, run_started_at: startedAt, run_step: step } = row
   if (!startedAt || !seenAt || Date.parse(seenAt) < Date.now() - AGENT_IDLE_MINUTES * 60_000) return null
-  return { startedAt, seenAt, step }
+  const { stop_requested_at: at, stop_requested_by: by } = row
+  return { startedAt, seenAt, step, stopRequested: at && by ? { at, by } : null }
 }
 
 /**
@@ -345,6 +352,26 @@ function place(ticket: Ticket, columnId: string, position?: number) {
   reorder('tickets', ids)
 }
 
+/**
+ * Whether `actor` is the agent holding a ticket under the name `assignee`, or another name of the same agent, by the
+ * rule the agent loop tells its own names by (`ours` in scripts/agent-loop/board.sh): the agent's own name (the
+ * assignee's up to its first "/"), its loop's (`<agent>-loop`) or one of its workers' (`<agent>/<model>/<effort>`).
+ */
+function isAgentOf(assignee: string, actor: string) {
+  const agent = assignee.split('/')[0]
+  return actor === assignee || actor === agent || actor === `${agent}-loop` || actor.startsWith(`${agent}/`)
+}
+
+/**
+ * Wakes the board's agent up (see `wakeAgent`) when `actor` gives feedback on a ticket the agent holds, so its loop
+ * starts a run for it now rather than after its idle wait (up to minutes). Called for exactly what the loop counts as
+ * feedback in a ticket's activity (`TRIAGE` in scripts/agent-loop/triage.sh): a comment, an approved plan, and a move
+ * into the in-progress column, by anyone but the agent itself.
+ */
+function wakeForFeedback(ticket: Pick<Ticket, 'boardId' | 'assignee'>, actor: string) {
+  if (ticket.assignee && !isAgentOf(ticket.assignee, actor)) wakeAgent(ticket.boardId)
+}
+
 /** Whether a ticket is tagged as a question (`QUESTION_TAG`), answered in a comment rather than a pull request. */
 function isQuestion(ticketId: string) {
   return Boolean(
@@ -383,6 +410,7 @@ function relocate(ticket: Ticket, columnRef: string, position: number | undefine
   place(ticket, target.id, position)
   if (target.id !== ticket.columnId) {
     logActivity(ticket.id, actor, 'moved', { from: getColumn(ticket.columnId).name, to: target.name })
+    if (target.name.toLowerCase() === IN_PROGRESS_COLUMN) wakeForFeedback(ticket, actor)
   }
 }
 
@@ -602,7 +630,8 @@ export function releaseTicket(id: string, input: ReleaseTicketInput): Ticket {
 
 const getRunRow = (id: string) => {
   const row = sql.get<RunRow & { board_id: string }>(
-    'SELECT board_id, agent_seen_at, run_started_at, run_step FROM tickets WHERE id = ?',
+    `SELECT board_id, agent_seen_at, run_started_at, run_step, stop_requested_at, stop_requested_by
+     FROM tickets WHERE id = ?`,
     id,
   )
   if (!row) throw notFound('Ticket', id)
@@ -612,7 +641,8 @@ const getRunRow = (id: string) => {
 /**
  * Notes that an agent is working on the ticket right now, starting a run unless one is going on (see `AgentRun`), and
  * what the run is doing if the agent says (it keeps its step otherwise). Not a change to the ticket: nothing is logged
- * or bumped, but boards are told when a run starts or its step changes, so they show it.
+ * or bumped, but boards are told when a run starts or its step changes, so they show it. A new run starts without a
+ * stop request, even if the run before it went quiet with one.
  */
 export function recordHeartbeat(id: string, input: HeartbeatInput) {
   const row = getRunRow(id)
@@ -620,21 +650,47 @@ export function recordHeartbeat(id: string, input: HeartbeatInput) {
   const at = now()
   const step = input.step === undefined ? (run?.step ?? null) : input.step || null
   sql.run(
-    'UPDATE tickets SET agent_seen_at = ?, run_started_at = ?, run_step = ? WHERE id = ?',
+    `UPDATE tickets SET agent_seen_at = ?, run_started_at = ?, run_step = ?, stop_requested_at = ?,
+       stop_requested_by = ?
+     WHERE id = ?`,
     at,
     run?.startedAt ?? at,
     step,
+    run?.stopRequested?.at ?? null,
+    run?.stopRequested?.by ?? null,
     id,
   )
   if (!run || step !== run.step) publish({ boardId: row.board_id })
 }
 
-/** Ends the run working the ticket, if any: the agent says it has stopped. */
+/** Ends the run working the ticket, if any: the agent says it has stopped. Its stop request, if any, goes with it. */
 export function endRun(id: string) {
   const row = getRunRow(id)
   if (!row.run_started_at) return
-  sql.run('UPDATE tickets SET run_started_at = NULL, run_step = NULL WHERE id = ?', id)
+  sql.run(
+    `UPDATE tickets SET run_started_at = NULL, run_step = NULL, stop_requested_at = NULL, stop_requested_by = NULL
+     WHERE id = ?`,
+    id,
+  )
   publish({ boardId: row.board_id })
+}
+
+/**
+ * Asks the agent run working the ticket to stop (see `AgentRun.stopRequested`), logged as `stopped`, and wakes the
+ * board's agent. Its loop sees the request at its next check of the ticket, stops the run without losing its session
+ * or work, and resumes it once someone gives new feedback, e.g. new instructions in a comment. Asking again before the
+ * run has stopped changes nothing. Throws 409 `no_run` when no run is going.
+ */
+export function requestStop(id: string, actor: string): Ticket {
+  const row = getRunRow(id)
+  const run = runOf(row)
+  if (!run) throw conflict('no_run', 'No agent run is working the ticket, so there is nothing to stop')
+  if (run.stopRequested) return getTicket(id)
+  touchBoard(row.board_id)
+  sql.run('UPDATE tickets SET stop_requested_at = ?, stop_requested_by = ? WHERE id = ?', now(), actor, id)
+  logActivity(id, actor, 'stopped', { step: run.step })
+  wakeAgent(row.board_id)
+  return getTicket(id)
 }
 
 /**
@@ -796,6 +852,7 @@ export function approvePlan(id: string, input: ApprovePlanInput, actor: string):
   touchBoard(ticket.boardId)
   updateRow('tickets', id, { approval: 'approved' })
   logActivity(id, actor, 'approved', { estimate: ticket.estimate })
+  wakeForFeedback(ticket, actor)
   bumpVersion(id)
   return getTicket(id)
 }
@@ -918,9 +975,11 @@ export function deleteTicket(id: string) {
   sql.run('DELETE FROM tickets WHERE id = ?', id)
 }
 
+/** Comments on the ticket. A comment from anyone but the agent holding it wakes the agent up (see `wakeForFeedback`). */
 export function addComment(id: string, body: string, actor: string, pullRequestComment?: string) {
   const ticket = getTicket(id)
   touchBoard(ticket.boardId)
+  wakeForFeedback(ticket, actor)
   return logActivity(id, actor, 'comment', pullRequestComment ? { body, pullRequestComment } : { body })
 }
 
@@ -930,11 +989,12 @@ export const FIX_CONFLICTS_COMMENT =
 
 /**
  * Asks for the merge conflicts of the review column's open pull requests to be fixed, with a comment on each of their
- * tickets: new feedback for the agent that holds it. Returns the tickets commented on.
+ * tickets: new feedback for the agent that holds it. Wakes the board's agent up. Returns the tickets commented on.
  */
 export function requestConflictFixes(boardId: string, actor: string): Ticket[] {
   const review = workflowColumns(boardId).review
   if (!review) throw badRequest('The board has no review column')
+  wakeAgent(boardId)
   const tickets = sql
     .all<TicketRow>(
       `${SELECT_TICKETS} WHERE t.column_id = ? AND t.pr_state = 'open' AND t.pr_conflicts = 1 ORDER BY t.position`,

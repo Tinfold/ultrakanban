@@ -29,6 +29,11 @@
   for their agent to resolve
 - **Fix conflicts**: ask the agents to fix the merge conflicts of the pull requests in review with one click (the
   conflict button on the review column); it comments on each of those tickets and wakes the agent loops up
+- **Feedback reaches the agent right away**: a comment, an approved plan or a move back into In progress wakes the
+  board's agent up, so it answers within seconds instead of after its idle wait
+- **Stop and redirect a run**: stop the agent's run from the running ticket's card or the ticket, or post a comment and
+  stop the run in one go; the agent keeps its work and context, and carries on where it left off with your new
+  instructions
 - **Quick merge**: merge a single ticket's pull request from its card in the review column
 - **Auto-merge**: optionally, per board, merge pull requests in review by themselves once they have no conflicts,
   every check has passed and every checklist item of their ticket is checked. Cards in review say what each one is

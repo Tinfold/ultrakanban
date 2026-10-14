@@ -88,6 +88,8 @@ export function formatRunOutcome(run: Pick<RunRecord, 'outcome' | 'exitCode'>) {
       return run.exitCode === 137 ? 'failed: killed (out of memory?)' : 'failed: killed'
     case 'stopped':
       return 'stopped: the ticket was taken away'
+    case 'stop_requested':
+      return 'stopped: someone asked'
     case 'usage_limit':
       return 'stopped: out of Claude usage'
   }

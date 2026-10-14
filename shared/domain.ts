@@ -46,6 +46,13 @@ export const QUESTION_TAG = 'question'
  */
 export const CANCELLED_COLUMN = 'cancelled'
 
+/**
+ * Name of the column (case-insensitive) the board's agent works its tickets in: the default of the agent loop's
+ * IN_PROGRESS_COLUMN, which scripts/agent-board.sh keeps. Someone other than its agent moving a ticket the agent holds
+ * into it asks for more work on it, so the board wakes the agent up for it, as for a comment.
+ */
+export const IN_PROGRESS_COLUMN = 'in progress'
+
 export interface TicketTemplate {
   id: string
   name: string
@@ -555,6 +562,12 @@ export interface AgentRun {
   seenAt: string
   /** What the run is doing, as its agent last said, e.g. "Answering review feedback". */
   step: string | null
+  /**
+   * When someone asked for the run to stop (`POST /tickets/:id/stop`) and who, until it ends: the agent loop stops it
+   * at its next check of the ticket, keeping its session and work, and resumes it once there is new feedback. Null
+   * while nobody has.
+   */
+  stopRequested: { at: string; by: string } | null
 }
 
 export interface BoardDetail {
@@ -579,6 +592,8 @@ export type Activity =
   | ActivityBase<'comment', { body: string; pullRequestComment?: string }>
   | ActivityBase<'plan', { body: string; estimate: TicketSize; held: boolean }>
   | ActivityBase<'approved', { estimate: TicketSize | null }>
+  /** Someone asked the agent run working the ticket to stop (`POST /tickets/:id/stop`); `step` is what it was doing. */
+  | ActivityBase<'stopped', { step: string | null }>
   | ActivityBase<'attachment', { attachmentId: string; filename: string; contentType: AttachmentType }>
   | ActivityBase<'pull_request', { url: string; event: 'linked' | 'unlinked' | Exclude<PullRequestState, 'unknown'> }>
 
@@ -621,12 +636,21 @@ export interface TokenUsage extends TokenCounts {
   createdAt: string
 }
 
-export const RUN_OUTCOMES = ['finished', 'failed', 'timed_out', 'killed', 'stopped', 'usage_limit'] as const
+export const RUN_OUTCOMES = [
+  'finished',
+  'failed',
+  'timed_out',
+  'killed',
+  'stopped',
+  'stop_requested',
+  'usage_limit',
+] as const
 /**
  * How an agent run ended: `finished` (the agent exited successfully), `failed` (it exited with an error), `timed_out`
  * (it ran longer than the agent loop's TICKET_TIMEOUT), `killed` (by a signal, most likely the kernel's for running out
- * of memory), `stopped` (the loop stopped it because someone took the ticket away from the agent) or `usage_limit` (the
- * account ran out of Claude usage, so the loop waits for it to reset and then resumes the run).
+ * of memory), `stopped` (the loop stopped it because someone took the ticket away from the agent), `stop_requested`
+ * (the loop stopped it because someone asked, see `AgentRun.stopRequested`, and resumes it once there is new feedback)
+ * or `usage_limit` (the account ran out of Claude usage, so the loop waits for it to reset and then resumes the run).
  */
 export type RunOutcome = (typeof RUN_OUTCOMES)[number]
 

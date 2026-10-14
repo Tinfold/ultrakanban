@@ -203,7 +203,7 @@ export function TicketCard({ ticket, overlay, selecting, selected }: TicketCardP
       {ticket.autoMergeWait && (
         <AutoMergeHint wait={ticket.autoMergeWait} className="mt-2 text-[11px] [&_svg]:size-3" />
       )}
-      {ticket.run && <RunStatus run={ticket.run} />}
+      {ticket.run && <RunStatus ticket={ticket} />}
     </div>
   )
 }

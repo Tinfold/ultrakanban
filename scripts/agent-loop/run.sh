@@ -118,15 +118,20 @@ limit_reset() {
   printf '%s\n' "$at"
 }
 
-# Prints why the agent no longer has a ticket, given the board's IDLE_COLUMNS: someone else moved it to one of them,
-# unassigned it or gave it to someone else, or deleted it. Fails while the agent still has it, and when the agent
-# moved or released it itself (e.g. to the cancelled column, as the skill says to when its pull request was closed).
-taken_away() {
-  local id=$1 idle=$2 response ticket why actor
+# Prints why the run on a ticket must stop, from one look at the ticket (GET /tickets/:id), given the board's
+# IDLE_COLUMNS. That is a kind and a text, separated by a tab:
+#   taken      why the agent no longer has the ticket: someone else moved it to one of those columns, unassigned it or
+#              gave it to someone else, or deleted it
+#   requested  who asked for the run to stop (POST /tickets/:id/stop, the Stop button), e.g. to give it new
+#              instructions; the ticket is still the agent's
+# Fails while the run may go on, including when the agent moved or released the ticket itself (e.g. to the cancelled
+# column, as the skill says to when its pull request was closed).
+stop_reason() {
+  local id=$1 idle=$2 response ticket why actor by
   response=$(curl -s -w '\n%{http_code}' "$KANBAN/api/tickets/$id")
   case ${response##*$'\n'} in
     404)
-      echo "the ticket was deleted"
+      printf 'taken\t%s\n' "the ticket was deleted"
       return 0
       ;;
     200) ticket=${response%$'\n'*} ;;
@@ -138,27 +143,37 @@ taken_away() {
     elif .assignee == null then "it was unassigned"
     elif .assignee | ours | not then "it was reassigned to \(.assignee)"
     else empty end' <<<"$ticket") || return 1
-  [[ -n $why ]] || return 1
-  actor=$(get "/tickets/$id/activity" |
-    jq -r '[.[] | select(.type | IN("moved", "claimed", "released"))] | last | .actor // ""') || return 1
-  ours "$actor" && return 1
-  printf '%s%s\n' "$why" "${actor:+ (by $actor)}"
+  if [[ -n $why ]]; then
+    actor=$(get "/tickets/$id/activity" |
+      jq -r '[.[] | select(.type | IN("moved", "claimed", "released"))] | last | .actor // ""') || return 1
+    if ! ours "$actor"; then
+      printf 'taken\t%s%s\n' "$why" "${actor:+ (by $actor)}"
+      return 0
+    fi
+  fi
+  by=$(jq -r '.run.stopRequested.by // empty' <<<"$ticket") || return 1
+  [[ -n $by ]] || return 1
+  printf 'requested\t%s\n' "$by"
 }
 
 # Checks a run's ticket every TICKET_CHECK_SECONDS while the run (process pid) goes on, and stops the run if someone
-# takes the ticket away from the agent, writing why to the given file. Each check also tells the board the agent is
-# working on the ticket, so the board doesn't count it as idle.
+# takes the ticket away from the agent or asks for the run to stop, writing why to the given file (see stop_reason).
+# Each check also tells the board the agent is working on the ticket, so the board doesn't count it as idle.
 watch_run() {
-  local id=$1 pid=$2 file=$3 idle= why
+  local id=$1 pid=$2 file=$3 idle= reason
   trap - INT TERM
   if [[ -n $lock_fd ]]; then exec {lock_fd}>&-; fi
   heartbeat "$id"
   while sleep "$TICKET_CHECK_SECONDS" && kill -0 "$pid" 2>/dev/null; do
     heartbeat "$id"
     [[ -n $idle ]] || idle=$(idle_columns) || { idle=; continue; }
-    why=$(taken_away "$id" "$idle") || continue
-    printf '%s\n' "$why" >"$file"
-    log "ticket $id: $why; stopping its run"
+    reason=$(stop_reason "$id" "$idle") || continue
+    printf '%s\n' "$reason" >"$file"
+    if [[ $reason == requested$'\t'* ]]; then
+      log "ticket $id: ${reason#*$'\t'} asked for its run to stop; stopping it"
+    else
+      log "ticket $id: ${reason#*$'\t'}; stopping its run"
+    fi
     kill -TERM "$pid"
     return
   done
@@ -291,10 +306,13 @@ use_docker() {
 container() { printf 'ultrakanban-%s-%s-%s' "$BOARD" "$1" "$$"; }
 
 # How a run that exited with the given status ended, for its record (see RunOutcome in shared/domain.ts), from
-# claude_stopped and claude_result: in the order run_on_ticket looks at them, so the record says what the loop did.
+# claude_stop_requested, claude_stopped and claude_result: in the order run_on_ticket looks at them, so the record says
+# what the loop did.
 run_outcome() {
   if (($1 == 0)); then
     echo finished
+  elif [[ -n $claude_stop_requested ]]; then
+    echo stop_requested
   elif [[ -n $claude_stopped ]]; then
     echo stopped
   elif (($1 == 124)); then
@@ -324,14 +342,16 @@ record_run() {
 # board it is going on and what it does (run_step, see heartbeat) until it ends. Prints its
 # final message (and keeps it in claude_result, and what it printed to stderr in claude_errors), reports the tokens
 # it used and records what it did on the ticket (record_run). Returns claude's exit status. If someone takes the ticket
-# away from the agent meanwhile, the run is stopped and claude_stopped says why (it is empty otherwise).
+# away from the agent meanwhile, the run is stopped and claude_stopped says why; if someone asks for the run to stop, it
+# is stopped and claude_stop_requested says who asked (both are empty otherwise). A run stopped either way returns a
+# failure, whatever claude exited with.
 run_claude() {
-  local id=$1 prompt=$2 output errors stopped code usage=null response scratch= run started summary
+  local id=$1 prompt=$2 output errors stopped code usage=null response scratch= run started summary kind= reason=
   shift 2
   output=$(mktemp) && errors=$(mktemp) && stopped=$(mktemp) || return 1
   use_skills
   if ! use_docker "$id"; then
-    claude_stopped= claude_errors= claude_result="Can't run it in Docker: $docker_error."
+    claude_stopped= claude_stop_requested= claude_errors= claude_result="Can't run it in Docker: $docker_error."
     rm -f "$output" "$errors" "$stopped"
     return 1
   fi
@@ -366,7 +386,14 @@ in memory and is never cleaned up. \$TMPDIR is on disk, and the loop empties it 
   if ((${#docker_args[@]})); then "$DOCKER" rm --force "$(container "$id")" >/dev/null 2>&1; fi
   stop_leftovers "$id" "$run"
   running= watcher=
-  claude_stopped=$(<"$stopped")
+  IFS=$'\t' read -r kind reason <"$stopped"
+  claude_stopped= claude_stop_requested=
+  case $kind in
+    taken) claude_stopped=$reason ;;
+    requested) claude_stop_requested=$reason ;;
+  esac
+  # Even if claude exited cleanly on the TERM, the run didn't finish.
+  if [[ -n $kind && $code == 0 ]]; then code=143; fi
   claude_errors=$(<"$errors")
   [[ -n $claude_errors ]] && printf '%s\n' "$claude_errors" >&2
   summary=$(jq -cnR --arg cwd "$PWD" "$RUN_SUMMARY" "$output" 2>/dev/null) || summary='{}'
@@ -394,6 +421,11 @@ new_session_id() { { uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid; } 
 # session there, so the next run on the ticket resumes it (claude --resume) with everything the run already knew and
 # did. A run that failed or timed out starts a new session instead, as resuming it would likely fail the same way.
 # Either way, the unfinished work in the checkout is put back first (save_work, restore_work).
+#
+# A run a person stopped (POST /tickets/:id/stop) keeps its session too, with why it stopped, and its work. The ticket
+# then waits for feedback that run wasn't handed, such as a comment with new instructions, rather than starting again
+# at once: its state's `stopped` holds the stopped run's snapshot, which TRIAGE compares the feedback with. The next
+# run resumes the session with that feedback, and drops `stopped`.
 run_on_ticket() {
   local id=$1 prompt=$2 snapshot=$3 fingerprint=$4 ci_runs=${5:-0} branch=${6:-} code limit why state session \
     start=--session-id previous work=
@@ -401,7 +433,7 @@ run_on_ticket() {
   paused && return 0
   state=$(read_state "$id")
   session=$(jq -r '.session.id // ""' <<<"$state")
-  claude_stopped=
+  claude_stopped= claude_stop_requested=
   if branch=$(checkout "$branch"); then
     if [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]]; then
       printf '%s %s\n' "$id" "$(git rev-parse HEAD)" >"$(run_file)"
@@ -439,7 +471,7 @@ from origin with no local changes."
 The repository is checked out on $branch, freshly updated from origin$(
         [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]] && printf '%s' " with no local changes")."
     fi
-    update_state "$id" '.session = ($v | fromjson)' \
+    update_state "$id" '.session = ($v | fromjson) | del(.stopped)' \
       "$(jq -nc --arg id "$session" --arg checkout "$PWD" '{id: $id, checkout: $checkout}')"
     run_claude "$id" "$prompt" "$start" "$session"
     code=$?
@@ -452,6 +484,21 @@ The repository is checked out on $branch, freshly updated from origin$(
   if [[ $code == 0 ]]; then
     write_state "$id" "$snapshot"
     remove_scratch "$id"
+    return 0
+  fi
+  if [[ -n $claude_stop_requested ]]; then
+    # A person stopped the run, most likely to give the agent new instructions: not a failure, and nothing of the run
+    # is lost. Its session stays for the next run to resume, with why it stopped; so does its scratch directory, and
+    # with AGENT_LOOP_CLEAN=1 the checkout above kept its work (save_work: the run didn't succeed, so its RUN_FILE is
+    # still there) for the next run to put back. That run waits for feedback this one wasn't handed (see `stopped`
+    # in TRIAGE), so it doesn't simply pick up what it was stopped from.
+    write_state "$id" "$(read_state "$id" | jq -c --argjson snapshot "$snapshot" --arg why "$claude_stop_requested \
+stopped it to give you new instructions: read the newest comments on the ticket (and on its pull request, if it has \
+one) first, and follow them where they differ from what you were doing" '.session.why = $why
+      | .stopped = ($snapshot | {activity, issue, review, inline} | with_entries(select(.value != null)))')"
+    log "ticket $id: its run stopped at $claude_stop_requested's request; resuming it once there is new feedback"
+    note "$id" "Stopped the agent's run at $claude_stop_requested's request. It resumes, where it left off, once \
+there is new feedback, such as a comment."
     return 0
   fi
   if [[ -n $claude_stopped ]]; then

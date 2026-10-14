@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite'
 import { notFound } from './errors.ts'
-import { publish } from './events.ts'
+import { publish, wake } from './events.ts'
 
 const MIGRATIONS = [
   `
@@ -381,6 +381,12 @@ const MIGRATIONS = [
   ALTER TABLE tickets ADD COLUMN auto_merge_failed INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE tickets ADD COLUMN auto_merge_since TEXT;
   `,
+  `
+  -- When someone asked the agent run working the ticket to stop (POST /tickets/:id/stop), and who. Cleared when the run
+  -- ends, and when a new run starts after one that went quiet.
+  ALTER TABLE tickets ADD COLUMN stop_requested_at TEXT;
+  ALTER TABLE tickets ADD COLUMN stop_requested_by TEXT;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'
@@ -418,26 +424,31 @@ export const sql = {
 }
 
 let changedBoards: Set<string> | null = null
+let wokenBoards: Set<string> | null = null
 
 /**
  * Runs `fn` inside an IMMEDIATE transaction (write lock acquired up front), so every
  * read-check-write sequence inside it is atomic. Change events for boards touched via
- * `touchBoard` are published only after a successful commit.
+ * `touchBoard`, and wake events for boards whose agent `wakeAgent` asked for, are published
+ * only after a successful commit.
  */
 export function transaction<T>(fn: () => T): T {
   if (changedBoards) throw new Error('Nested transactions are not supported')
   changedBoards = new Set()
+  wokenBoards = new Set()
   db.exec('BEGIN IMMEDIATE')
   try {
     const result = fn()
     db.exec('COMMIT')
     const changed = changedBoards
-    changedBoards = null
+    const woken = wokenBoards
+    changedBoards = wokenBoards = null
     for (const boardId of changed) publish({ boardId })
+    for (const boardId of woken) wake({ boardId })
     return result
   } catch (error) {
     db.exec('ROLLBACK')
-    changedBoards = null
+    changedBoards = wokenBoards = null
     throw error
   }
 }
@@ -447,6 +458,16 @@ export function touchBoard(boardId: string) {
   const { changes } = sql.run('UPDATE boards SET updated_at = ? WHERE id = ?', now(), boardId)
   if (!changes) throw notFound('Board', boardId)
   changedBoards?.add(boardId)
+}
+
+/**
+ * Wakes the board's idle agent loops up once the transaction commits (see `wake`), so they look at the board now
+ * rather than after their idle wait, e.g. for a person's feedback on a ticket the agent holds. Once per board and
+ * transaction, and not at all if it rolls back.
+ */
+export function wakeAgent(boardId: string) {
+  if (!wokenBoards) throw new Error('wakeAgent needs a transaction')
+  wokenBoards.add(boardId)
 }
 
 type Table = 'boards' | 'columns' | 'tags' | 'epics' | 'tickets'

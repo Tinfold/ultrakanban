@@ -126,6 +126,7 @@ export const api = {
   /** The ticket's latest agent runs, newest first. */
   listRuns: (ticketId: string) => request<RunRecord[]>('GET', `/tickets/${ticketId}/runs`),
   approvePlan: (ticketId: string) => request<Ticket>('POST', `/tickets/${ticketId}/approve`),
+  stopRun: (ticketId: string) => request<Ticket>('POST', `/tickets/${ticketId}/stop`),
   syncPullRequest: (ticketId: string) => request<Ticket>('POST', `/tickets/${ticketId}/pull-request/sync`),
   mergeTicket: (ticketId: string, method: MergeMethod) =>
     request<Ticket>('POST', `/tickets/${ticketId}/merge`, { method }),

@@ -41,6 +41,7 @@ import {
   recordHeartbeat,
   endRun,
   releaseTicket,
+  requestStop,
   submitForReview,
   updateTicket,
 } from '../store/tickets.ts'
@@ -190,6 +191,8 @@ export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles, notifi
       endRun(c.req.param('ticketId'))
       return c.body(null, 204)
     })
+    // Takes no body (any is ignored): the request is recorded with who sent it (X-Actor).
+    .post('/:ticketId/stop', (c) => c.json(transaction(() => requestStop(c.req.param('ticketId'), actorOf(c)))))
     .get('/:ticketId/activity', (c) => {
       const ticket = getTicket(c.req.param('ticketId'))
       return c.json(listActivity(ticket.id))
