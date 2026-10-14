@@ -12,6 +12,7 @@ export const queryKeys = {
   allAttachments: ['attachments'] as const,
   github: ['github'] as const,
   idleTickets: (columnId: string) => ['idle-tickets', columnId] as const,
+  diskUsage: (boardId: string) => ['disk-usage', boardId] as const,
   mergePlan: (boardId: string) => ['merge-plan', boardId] as const,
   mergeRun: (boardId: string) => ['merge-run', boardId] as const,
   overview: (days: OverviewRange) => ['overview', days] as const,
@@ -53,6 +54,10 @@ export const useIdleTickets = (columnId: string, enabled: boolean) =>
     enabled,
     refetchInterval: 60_000,
   })
+
+/** What the board's disk space is made of, for its Disk usage dialog. */
+export const useDiskUsage = (boardId: string) =>
+  useQuery({ queryKey: queryKeys.diskUsage(boardId), queryFn: () => api.diskUsage(boardId) })
 
 /** Asks GitHub about every pull request in review, so it is only loaded while needed. */
 export const useMergePlan = (boardId: string, enabled: boolean) =>

@@ -312,6 +312,11 @@ export const reportDiskUsageSchema = z.object({
     .max(10_000),
 })
 
+/** Deleting the attachments of a board's finished tickets, optionally only those uploaded more than `olderThanDays` ago. */
+export const attachmentCleanupSchema = z.object({
+  olderThanDays: z.int().min(1).max(3650).nullable().optional(),
+})
+
 /** The agent supervisor checking in, and reporting on an update it is doing. */
 export const reportAppUpdateSchema = z.object({
   state: z.enum(['running', 'done', 'failed']).optional(),
@@ -488,6 +493,7 @@ export type ReportAppUpdateInput = z.input<typeof reportAppUpdateSchema>
 export type RequestAppUpdateInput = z.input<typeof requestAppUpdateSchema>
 export type ReportClaudeUsageInput = z.input<typeof reportClaudeUsageSchema>
 export type ReportDiskUsageInput = z.input<typeof reportDiskUsageSchema>
+export type AttachmentCleanupInput = z.input<typeof attachmentCleanupSchema>
 export type ReportAgentHostInput = z.input<typeof reportAgentHostSchema>
 export type ReportAgentLoginInput = z.input<typeof reportAgentLoginSchema>
 export type PostPlanInput = z.input<typeof postPlanSchema>
