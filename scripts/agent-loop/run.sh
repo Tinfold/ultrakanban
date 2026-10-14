@@ -402,4 +402,12 @@ POST $KANBAN/api/tickets/<id>/checklist/<index> (0-based) instead of editing the
 End every pull request comment, review and inline reply you post with this exact line, so the loop doesn't mistake
 your own replies for feedback:
 $MARKER"
+  # The board's description holds conventions for every ticket on it, so each run gets it rather than having to look.
+  local description
+  description=$(get "/boards/$BOARD" | jq -r '.board.description // "" | gsub("^\\s+|\\s+$"; "")') || description=
+  [[ -z $description ]] || printf '%s' "
+
+The board's description (its conventions for every ticket on it; follow them unless the ticket says otherwise):
+
+$description"
 }

@@ -247,7 +247,8 @@ Running the services on the host, not in the containers, is deliberate: the agen
 **What the loop does.** Each round, it first checks the tickets the agent holds and starts a run for one with new
 feedback: a ticket comment, a pull request comment, review or inline review comment, a check on the latest commit
 that ran and failed, merge conflicts, or someone moving the ticket back into In progress (e.g. from Review, to
-ask for more work). The prompt lists exactly what is new. Bots and the agent's own replies
+ask for more work). The prompt lists exactly what is new, and every prompt includes the board's description (Board
+settings), so put conventions for all of the board's tickets there. Bots and the agent's own replies
 don't count: the agent posts from the same GitHub account as you, so the skill makes it end every pull request
 comment with `<!-- ultrakanban:<agent> -->`, which the loop ignores. A pull request closed without merging moves
 its ticket to the `Cancelled` column (`CANCELLED_COLUMN`; add it to the board, the loop won't fall back to Todo)
