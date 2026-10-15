@@ -840,6 +840,8 @@ export interface OverviewBoard {
   events: number
   /** Tokens agents used on its tickets within the range. */
   tokens: number
+  /** Estimated cost in US dollars of those runs, of the ones that reported one; null when none did. */
+  costUsd: number | null
   lastActivityAt: string | null
   disk: BoardDiskUsage
 }
@@ -928,6 +930,8 @@ export interface OverviewCompletion {
   cycleMs: number | null
   /** From when it last entered the review column to done, if it went straight from review to done. */
   reviewMs: number | null
+  /** Estimated cost in US dollars of all the agent runs on the ticket, whenever they ran; null when none reported one. */
+  costUsd: number | null
 }
 
 /** An agent run's token usage within the range. */
@@ -1040,8 +1044,43 @@ export interface ClaudeUsageLimit {
 }
 
 /**
+ * Whether a usage limit counts the week, for all models or for one (as opposed to the current session): the labels
+ * the board gives them start with "Week" ("Week, all models", "Week, Opus"), or with "weekly" for kinds of limit it
+ * doesn't know.
+ */
+export const isWeeklyLimit = (limit: Pick<ClaudeUsageLimit, 'label'>) => /^week/i.test(limit.label)
+
+/** Whether a usage limit counts the current session, Claude's five-hour window ("Current session"). */
+export const isSessionLimit = (limit: Pick<ClaudeUsageLimit, 'label'>) => /session/i.test(limit.label)
+
+/**
+ * The usage reserve, one setting for the whole Claude account rather than per board: how far agents may use the week
+ * and the current session, each in percent (1 to 100) of its limit, null when off. Past either, agents claim no new
+ * tickets (`claim-next`), leaving the rest for the user's own sessions. Tickets agents already hold still get runs for
+ * their feedback.
+ */
+export interface ClaudeUsageReserve {
+  /** For the weekly limits, all models and per-model ones alike. */
+  week: number | null
+  /** For the current session. */
+  session: number | null
+}
+
+/** The reserve that applies to a usage limit: the week's to the weekly ones, the session's to the current session. */
+export function reserveFor(limit: Pick<ClaudeUsageLimit, 'label'>, reserve: ClaudeUsageReserve) {
+  return isWeeklyLimit(limit) ? reserve.week : isSessionLimit(limit) ? reserve.session : null
+}
+
+/**
+ * How old a usage report can be and still hold agents back with the usage reserve (`ClaudeUsage.reserve`). The
+ * supervisor reports every 5 minutes, so an older report means it stopped reporting: agents then claim as usual rather
+ * than wait on a number nobody updates.
+ */
+export const CLAUDE_USAGE_FRESH_MINUTES = 30
+
+/**
  * How much Claude usage is left, as the agent supervisor (`scripts/agent-supervisor.sh`, on the host) last read it from
- * Claude's usage endpoint with the host's claude login.
+ * Claude's usage endpoint with the host's claude login, and how much of it agents leave for the user.
  */
 export interface ClaudeUsage {
   /** When the supervisor last reported; null if it never has. */
@@ -1051,6 +1090,14 @@ export interface ClaudeUsage {
   limits: ClaudeUsageLimit[]
   /** Why the last report has no limits, e.g. no claude login on the host. */
   error: string | null
+  /** How far agents may use the week and the current session (see `ClaudeUsageReserve`). */
+  reserve: ClaudeUsageReserve
+  /**
+   * The limit that holds agents back right now: one at or over its reserve (see `reserveFor`) that hasn't reset since,
+   * when the report is fresh (see `CLAUDE_USAGE_FRESH_MINUTES`). Of several, the one that resets last (the most used of
+   * those that reset together), as agents claim again only once all of them have. Null otherwise.
+   */
+  reserveReached: ClaudeUsageLimit | null
 }
 
 /** Where the board's GitHub token comes from: set on the Setup page, `GITHUB_TOKEN`, or the GitHub CLI's login. */
@@ -1120,7 +1167,8 @@ export interface AgentServices {
   running: string[]
   /**
    * Running loops that can't take any ticket: the boards where claiming one last failed, why (e.g. its in-progress
-   * column is gone) and since when. Each stays until a claim there goes through or finds nothing to do.
+   * column is gone) and since when. Each stays until a claim there goes through or finds nothing to do. The usage
+   * reserve holding agents back (`usage_reserve_reached`) doesn't count as failing.
    */
   claimErrors: AgentClaimError[]
   /** When the supervisor last reported them; null if it never has, so nothing would act on the switch. */

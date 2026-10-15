@@ -148,10 +148,10 @@ export const boardRoutes = ({ pullRequests, mergeQueue, attachmentFiles }: AppSe
         transaction(() => recordClaim(boardId, null))
         return c.json(ticket)
       } catch (error) {
-        const nothingToDo = error instanceof HttpError && error.code === 'no_ticket_available'
-        transaction(() =>
-          recordClaim(boardId, nothingToDo ? null : error instanceof Error ? error.message : String(error)),
-        )
+        // Nothing to do, or the usage reserve holding agents back on purpose (the overview says so), isn't a failure.
+        const waiting =
+          error instanceof HttpError && (error.code === 'no_ticket_available' || error.code === 'usage_reserve_reached')
+        transaction(() => recordClaim(boardId, waiting ? null : error instanceof Error ? error.message : String(error)))
         throw error
       }
     })

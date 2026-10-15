@@ -86,6 +86,12 @@
 # ticket, quoting claude's message, and starts no runs at all until the time the message says the limit resets
 # (RETRY_SECONDS later if it doesn't say), then resumes the run.
 #
+# The usage reserve (on the overview, one setting for the whole Claude account) stops agents before that, keeping the
+# rest of the week, of the current session or both for people: once a weekly limit or the current session reaches its
+# reserve, claim-next hands out no new tickets (404 usage_reserve_reached), and the loop says so in its log once and
+# claims nothing until it lifts. Tickets the agent holds still get runs for their feedback, so work in progress and in
+# review isn't left halfway.
+#
 # Runs that don't finish are resumed, not started over. Each run is a claude session, and a run cut short by the
 # usage limit or by the loop stopping (a restart of the service or the machine, a crash) is continued in that same
 # session (claude --resume), so it keeps everything it already knew and did. With AGENT_LOOP_CLEAN=1, the work such a
@@ -261,6 +267,8 @@ listener=
 paused_until=0
 # The pending claims last reported as holding back claim_next, so the log says it once rather than every round.
 claim_held=
+# Set while the usage reserve holds back claim_next, so the log says it once rather than every round.
+reserve_held=
 # The run in progress and the process watching its ticket (see run_claude), if any.
 running=
 watcher=

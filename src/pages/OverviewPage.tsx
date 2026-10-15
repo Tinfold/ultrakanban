@@ -27,6 +27,7 @@ import { useStoredState } from '@/hooks/use-stored-state'
 import { api, errorMessage } from '@/lib/api'
 import { formatBytes, formatCost, formatDateTime, formatDuration, formatModel, formatTokens } from '@/lib/format'
 import {
+  costPerCompletedTicket,
   dailyActivity,
   diskBytes,
   median,
@@ -265,6 +266,7 @@ export function OverviewPage() {
     const completions = overview.completions.filter(
       (completion) => Date.parse(completion.at) >= daily[0].start.getTime(),
     )
+    const completedCost = costPerCompletedTicket(completions)
     const cycleTimes = completions.flatMap((completion) => completion.cycleMs ?? [])
     const reviewTimes = completions.flatMap((completion) => completion.reviewMs ?? [])
     const columns = daily.map((day) => ({
@@ -306,7 +308,7 @@ export function OverviewPage() {
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-3 *:last:col-span-2 md:grid-cols-3 md:*:last:col-span-1 xl:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
           <Stat
             label="Median cycle time"
             value={formatMedian(cycleTimes)}
@@ -331,6 +333,16 @@ export function OverviewPage() {
               usage.costUsd === null ? runs(usage.runs) : `${formatCost(usage.costUsd)} estimated, ${runs(usage.runs)}`
             }
             target={SECTIONS.tokens}
+          />
+          <Stat
+            label="Cost per completed ticket"
+            value={completedCost ? formatCost(completedCost.costUsd) : '—'}
+            detail={
+              completedCost
+                ? `Estimated, all runs of ${tickets(completedCost.tickets)}`
+                : 'No completed ticket reported a cost'
+            }
+            target={SECTIONS.ticketUsage}
           />
         </div>
 

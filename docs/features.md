@@ -43,6 +43,10 @@
   moving the pull requests stacked on it to its base first
 - **Notifications**: optionally, per board, send an ntfy, Discord or webhook message when a ticket needs you: an agent
   asks a question, CI needs someone, a plan waits for approval, a question is answered or a pull request is ready to merge
+- **Usage reserve**: keeps part of the week's Claude plan, of the current session or both for you: agents stop claiming
+  new tickets once the week or the session is used that far, shown on the overview's usage bars
+- **Costs**: what agent runs cost (estimated) shows on cards, in the ticket, per board and agent on the overview, and
+  per completed ticket
 - **Archiving**: optionally, per board, hide tickets that have been done for a number of days, so the done column and
   the board agents read stay small; search still finds them and the filter menu can show them
 - **Overview**: a dashboard across all boards (`/overview`): which agents are working on what right now, time

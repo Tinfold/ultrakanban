@@ -387,6 +387,12 @@ const MIGRATIONS = [
   ALTER TABLE tickets ADD COLUMN stop_requested_at TEXT;
   ALTER TABLE tickets ADD COLUMN stop_requested_by TEXT;
   `,
+  `
+  -- The usage reserve (see ClaudeUsageReserve): once a weekly limit of the Claude plan, or the current session, is used
+  -- to this percent, agents claim no new tickets, leaving the rest to the user. Off when NULL.
+  ALTER TABLE claude_usage ADD COLUMN week_reserve_percent INTEGER;
+  ALTER TABLE claude_usage ADD COLUMN session_reserve_percent INTEGER;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

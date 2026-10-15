@@ -14,7 +14,7 @@ import {
   SquareCheckIcon,
 } from 'lucide-react'
 import { openBlockers } from '@shared/blockers'
-import type { Ticket } from '@shared/domain'
+import type { Ticket, TicketUsage } from '@shared/domain'
 import { AutoMergeHint } from '@/components/common/AutoMergeHint'
 import { CheckStatusIcon } from '@/components/common/CheckStatusIcon'
 import { PriorityIcon } from '@/components/common/PriorityIcon'
@@ -23,7 +23,7 @@ import { EpicChip } from '@/components/common/EpicChip'
 import { TagChip } from '@/components/common/TagChip'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { WaitingBadge } from '@/components/common/WaitingBadge'
-import { dueState, formatDueDate, formatUsage, formatUsageShort, ticketRef } from '@/lib/format'
+import { COST_NOTE, dueState, formatDueDate, formatUsage, formatUsageShort, ticketRef } from '@/lib/format'
 import { checklistProgress } from '@/lib/markdown'
 import { CONFLICTS_HINT } from '@/lib/pull-request'
 import { cn } from '@/lib/utils'
@@ -37,6 +37,10 @@ const DUE_STYLES = {
   soon: 'text-amber-600 dark:text-amber-400',
   later: '',
 }
+
+/** The tooltip of a ticket's usage: its tokens, runs and cost, with what the cost is. */
+const usageTitle = (usage: TicketUsage) =>
+  usage.costUsd === null ? formatUsage(usage) : `${formatUsage(usage)}\n${COST_NOTE}`
 
 interface TicketCardProps {
   ticket: Ticket
@@ -192,7 +196,7 @@ export function TicketCard({ ticket, overlay, selecting, selected }: TicketCardP
             </span>
           )}
           {ticket.usage.runs > 0 && (
-            <span className="flex items-center gap-1 tabular-nums" title={formatUsage(ticket.usage)}>
+            <span className="flex items-center gap-1 tabular-nums" title={usageTitle(ticket.usage)}>
               <CoinsIcon />
               {formatUsageShort(ticket.usage)}
             </span>

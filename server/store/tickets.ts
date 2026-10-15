@@ -9,6 +9,7 @@ import {
   type Column,
   type FailingCheck,
   IN_PROGRESS_COLUMN,
+  isWeeklyLimit,
   parsePullRequestUrl,
   PRIORITIES,
   type Priority,
@@ -16,6 +17,7 @@ import {
   type PullRequestState,
   needsApproval,
   QUESTION_TAG,
+  reserveFor,
   type Ticket,
   type TicketSize,
 } from '../../shared/domain.ts'
@@ -41,6 +43,7 @@ import { newId, now, reorder, sql, touchBoard, updateRow, wakeAgent } from '../d
 import { badRequest, conflict, HttpError, notFound } from '../errors.ts'
 import { publish } from '../events.ts'
 import { logActivity } from './activity.ts'
+import { getClaudeUsage } from './claude-usage.ts'
 import { getColumn, listColumns, resolveColumn, workflowColumns } from './columns.ts'
 import { resolveEpic } from './epics.ts'
 import { resolveTags } from './tags.ts'
@@ -729,16 +732,38 @@ export function releaseIdleTickets(columnId: string, input: ReleaseIdleInput, ac
 }
 
 /**
+ * Turns down claiming new tickets while the usage reserve holds agents back (see `ClaudeUsage.reserveReached`), so the
+ * rest of the week or of the current session is left for the user. Only new tickets: those agents already hold go on
+ * getting runs.
+ */
+function assertBelowUsageReserve() {
+  const { reserveReached: limit, reserve } = getClaudeUsage()
+  if (!limit) return
+  const reservePercent = reserveFor(limit, reserve)
+  const kept = isWeeklyLimit(limit) ? "the week's Claude usage" : 'the current Claude session'
+  const resets = limit.resetsAt ? ` It resets at ${limit.resetsAt}.` : ''
+  throw new HttpError(
+    404,
+    'usage_reserve_reached',
+    `Agents claim no new tickets while the rest of ${kept} is kept for people's own work: ` +
+      `${limit.label} is at ${Math.round(limit.percent)}%, and its usage reserve starts at ${reservePercent}%. ` +
+      `Tickets agents already hold can still be worked.${resets}`,
+    { limit, reservePercent },
+  )
+}
+
+/**
  * Atomically claims the most important unassigned ticket of a column:
  * highest priority first, then earliest due date, then board order.
  * Blocked tickets are skipped: tagged `blocked`, waiting for an unfinished ticket (`blocked by #12`), or with
- * unfinished sub-tickets.
+ * unfinished sub-tickets. Nothing is claimed while the usage reserve holds agents back.
  */
 export function claimNextTicket(boardId: string, input: ClaimNextInput): Ticket {
   touchBoard(boardId)
   const column = resolveColumn(boardId, input.column)
   // Checked even with nothing to claim, so a missing column shows before there is a ticket that can't be claimed.
   if (input.moveTo) resolveColumn(boardId, input.moveTo)
+  assertBelowUsageReserve()
   const tagIds = resolveTags(boardId, input.tags ?? [], { create: false })
   const tagFilter = tagIds.map(() => 'AND EXISTS (SELECT 1 FROM ticket_tags WHERE ticket_id = t.id AND tag_id = ?)')
   const candidates = sql.all<{ id: string; number: number; description: string }>(

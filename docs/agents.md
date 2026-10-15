@@ -164,6 +164,18 @@ the week, and any per-model weekly limit, as `/usage` in claude shows them) ever
 with the claude login in `~/.claude/.credentials.json` (or `$CLAUDE_CONFIG_DIR`), and the overview shows it as bars of
 the usage left and when each resets. The board itself can't read it: it runs in a container, without your login.
 
+**Usage reserve.** Agents share your Claude plan with you, and left alone they can use up the whole week, or the
+current session just when you want to work. Set the **Usage reserve** under the Claude usage on the overview (one
+setting for the account, not per board), for the **Week**, the **Current session** or both, e.g. from 80% of the week
+and 90% of the session: once a weekly limit (all models, or a per-model one such as Opus) or the current session
+reaches its reserve, `claim-next` hands out no new tickets, so every loop on every board stops claiming without any
+change to it. The loop logs it once (`not claiming new tickets: ...`, and again when it lifts) and idles; the overview
+marks each reserve on its bars and says when agents paused new tickets. A session reserve lifts when the session
+resets, within five hours. Tickets the agents already hold still get runs for their feedback, on purpose: a pull
+request in review whose reviewer asks for a change shouldn't wait a week, and those runs are usually small. When the
+session or the week does run out, Claude's own limit stops them (see below). The reserve only goes by a report from
+the last 30 minutes: when the supervisor stops reporting, agents claim as usual rather than stop with it.
+
 **Disk usage.** Every 30 minutes (`DISK_USAGE_SECONDS`) the supervisor also measures, at low priority and in the
 background, how much disk space each board's agent folder (`~/.local/share/ultrakanban-agent/boards/<board>`) takes:
 its clone, the worktrees of its parallel runs, and the rest (loop state and the runs' scratch files). The overview's

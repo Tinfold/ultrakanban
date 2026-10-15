@@ -61,17 +61,27 @@ export function formatBytes(bytes: number) {
 
 const dollars = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' })
 
-/** US dollars to the cent, e.g. `$12.34`; amounts below a cent read `<$0.01`. */
+/**
+ * US dollars to the cent, e.g. `$12.34`; amounts below a cent read `<$0.01`. Every cost on the board goes through it:
+ * they are estimates (see `COST_NOTE`), so label them as such where they are shown.
+ */
 export const formatCost = (usd: number) => (usd > 0 && usd < 0.01 ? '<$0.01' : dollars.format(usd))
+
+/**
+ * What every cost the board shows is, for its tooltips: claude's `total_cost_usd`, what the runs would cost at API
+ * prices, which on a subscription plan is an equivalent rather than what is billed.
+ */
+export const COST_NOTE =
+  'Estimated: what the agent reports its runs cost at API prices. On a subscription plan this is an equivalent, not what you are billed.'
 
 /** A ticket's usage in a few characters: its cost when its runs reported one, else its tokens. */
 export const formatUsageShort = (usage: TicketUsage) =>
   usage.costUsd !== null ? formatCost(usage.costUsd) : formatTokens(usage.tokens)
 
-/** A ticket's usage in full, e.g. `1.2M tokens over 3 runs, $4.56`. */
+/** A ticket's usage in full, e.g. `1.2M tokens over 3 runs, $4.56 estimated`. */
 export function formatUsage(usage: TicketUsage) {
   const runs = `${usage.runs} ${usage.runs === 1 ? 'run' : 'runs'}`
-  const cost = usage.costUsd !== null ? `, ${formatCost(usage.costUsd)}` : ''
+  const cost = usage.costUsd !== null ? `, ${formatCost(usage.costUsd)} estimated` : ''
   return `${formatTokens(usage.tokens)} tokens over ${runs}${cost}`
 }
 
