@@ -167,4 +167,30 @@ describe('plans and approval', () => {
       mock.timers.reset()
     }
   })
+
+  test('the board counts tickets waiting on a person, in review and in the backlog', async () => {
+    const counts = async () => {
+      const { body } = await call<BoardSummary[]>('GET', '/boards')
+      const board = body.find((b) => b.id === boardId)!
+      return { waiting: board.waitingCount, review: board.reviewCount, backlog: board.backlogCount }
+    }
+    assert.deepEqual(await counts(), { waiting: 0, review: 0, backlog: 0 })
+
+    await addTicket({ title: 'Later', column: 'Backlog' })
+    await addTicket({ title: 'Someday', column: 'Backlog' })
+    const held = await claimed('Held')
+    await plan(held, 'L')
+    const asking = await claimed('Asking')
+    await call('POST', `/tickets/${asking.id}/comments`, { body: 'Which one?' }, AGENT)
+    const done = await claimed('Done')
+    await call('POST', `/tickets/${done.id}/review`, { agent: AGENT, pullRequest: PR }, AGENT)
+    assert.deepEqual(await counts(), { waiting: 2, review: 1, backlog: 2 })
+
+    // Answering stops the wait; a held plan waits until it's approved, even after a person comments.
+    await call('POST', `/tickets/${asking.id}/comments`, { body: 'The first' }, 'person')
+    await call('POST', `/tickets/${held.id}/comments`, { body: 'Looking at it' }, 'person')
+    assert.equal((await counts()).waiting, 1)
+    await approve(held)
+    assert.equal((await counts()).waiting, 0)
+  })
 })
