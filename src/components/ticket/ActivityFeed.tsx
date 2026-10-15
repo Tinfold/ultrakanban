@@ -1,4 +1,4 @@
-import { ChevronRightIcon, SendHorizontalIcon, SquareIcon, XIcon } from 'lucide-react'
+import { ChevronRightIcon, SendHorizontalIcon, SquareIcon } from 'lucide-react'
 import { type FormEvent, type ReactNode, useMemo, useState } from 'react'
 import {
   type Activity,
@@ -8,7 +8,6 @@ import {
   type PullRequest,
   type RunOutcome,
   type RunRecord,
-  type RunStep,
 } from '@shared/domain'
 import { Markdown } from '@/components/common/Markdown'
 import { UserAvatar } from '@/components/common/UserAvatar'
@@ -20,6 +19,7 @@ import { formatDateTime, formatRelative, formatRunOutcome, formatRunTotals } fro
 import { cn } from '@/lib/utils'
 import { useBoardContext } from '../board/board-context'
 import { AttachmentThumbnail, AttachmentViewer } from './attachments'
+import { RunSteps } from './RunSteps'
 
 const FIELD_LABELS: Record<string, string> = {
   title: 'title',
@@ -194,20 +194,6 @@ const OUTCOME_STYLES: Record<RunOutcome, { item: string; label: string }> = {
   usage_limit: { item: 'border-amber-500/40 bg-amber-500/5', label: 'text-amber-600 dark:text-amber-400' },
 }
 
-function RunStepLine({ step }: { step: RunStep }) {
-  return (
-    <li className={cn('flex min-w-0 gap-2', step.error && 'text-red-600 dark:text-red-400')}>
-      <span className="w-20 shrink-0 truncate font-medium" title={step.tool}>
-        {step.tool}
-      </span>
-      <span className="min-w-0 truncate font-mono text-[11px]" title={step.summary}>
-        {step.summary}
-      </span>
-      {step.error && <XIcon aria-label="Reported an error" className="size-3.5 shrink-0" />}
-    </li>
-  )
-}
-
 /**
  * An agent run on the ticket (see `RunRecord`), collapsed to one line saying how long it took and how it ended; open, it
  * shows the run's final message and the tool calls it made.
@@ -216,16 +202,6 @@ function RunItem({ run }: { run: RunRecord }) {
   const [open, setOpen] = useState(false)
   const styles = OUTCOME_STYLES[run.outcome]
   const totals = formatRunTotals(run)
-  const steps = run.steps.map((step, index) => <RunStepLine key={index} step={step} />)
-  if (run.omittedSteps) {
-    steps.splice(
-      run.omittedSteps.after,
-      0,
-      <li key="omitted" className="text-muted-foreground italic">
-        … {run.omittedSteps.count} more {run.omittedSteps.count === 1 ? 'step' : 'steps'} …
-      </li>,
-    )
-  }
 
   return (
     <li className={cn('rounded-lg border bg-card text-xs', styles.item)}>
@@ -253,15 +229,7 @@ function RunItem({ run }: { run: RunRecord }) {
           ) : (
             <p className="text-muted-foreground">The run left no final message.</p>
           )}
-          {steps.length > 0 && (
-            <>
-              <p className="font-medium text-muted-foreground">
-                {run.steps.length + (run.omittedSteps?.count ?? 0)}{' '}
-                {run.steps.length + (run.omittedSteps?.count ?? 0) === 1 ? 'tool call' : 'tool calls'}
-              </p>
-              <ol className="grid max-h-80 gap-0.5 overflow-y-auto">{steps}</ol>
-            </>
-          )}
+          {run.steps.length > 0 && <RunSteps run={run} />}
         </div>
       )}
     </li>

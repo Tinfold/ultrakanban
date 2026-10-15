@@ -308,10 +308,18 @@ loop's logs. The loop runs claude with `--output-format stream-json --verbose`, 
 as the run goes, and once the run ends posts a record of it (`POST /tickets/:id/runs`): how it ended (finished, failed,
 timed out, killed, stopped because the ticket was taken away or because someone asked, or out of Claude usage), its
 exit status, how long it took, its turns and cost, its final message (or what it last said, for a run cut short) and
-each tool call with a short target: a command's first line, a file's path, a search pattern. A run of more than 150
-tool calls keeps its first and last 75. The ticket's activity shows the records among its other events: open one to
-see the steps, with failed ones in red. Runs that time out or are killed are recorded too, though they leave no token
-usage; only a run cut short by the loop itself stopping (a restart) leaves none, and the next run resumes it.
+each tool call with a short target: a command's first line (less a `cd` to the checkout), a file's path, a search
+pattern. A run of more than 150 tool calls keeps its first and last 75. The ticket's activity shows the records among
+its other events: open one to see the steps, numbered, with failed ones in red; narrow them to one tool, to the failed
+ones or to a text, or show them all at once instead of in a list that scrolls. Runs that time out or are killed are
+recorded too, though they leave no token usage; only a run cut short by the loop itself stopping (a restart) leaves
+none, and the next run resumes it. None of this costs tokens: the loop builds it from claude's output, and the model
+is never asked for it.
+
+While a run is going, its card and the ticket show what it does: its latest tool call (`Bash: npm test`, or the
+Agent call that started a subagent while that works), which the loop reads from the same output every
+`RUN_STEP_SECONDS` (10) and sends with the run's heartbeat when it changed. Before its first call, and with
+`RUN_STEP_SECONDS=0`, they show what the run is for: working the ticket, or the feedback it answers.
 
 Nothing is missed, even while a run is going: before each run the loop notes the newest ticket activity id,
 pull request comment, review and inline comment ids, and the head commit's checks and conflict state. It saves

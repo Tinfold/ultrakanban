@@ -10,16 +10,22 @@
 #   output  what claude printed that isn't JSON, such as an error before the run started (at most 50 lines)
 #   turns   how many responses the model gave, for a run without a result (parallel tool calls share one)
 #   steps   the run's tool calls in order as {tool, summary, error}, for its record: not its subagents' (the Agent
-#           call that started one is a step), the summary a short target for people (a command's first line, a
-#           file's path relative to the checkout $cwd, a search pattern), error whether the tool reported one
+#           call that started one is a step), the summary a short target for people (a command's first line, less a
+#           leading cd to the checkout, a file's path relative to the checkout $cwd, a search pattern), error whether
+#           the tool reported one
 # Lines that don't parse are skipped, such as the last one when claude was killed while writing it, and every field is
-# optional, so an older or newer claude still gives what it can.
-read -r -d '' RUN_SUMMARY <<'JQ'
+# optional, so an older or newer claude still gives what it can. STEP_SUMMARY is the short target of a tool call
+# (tool_use block), shared with RUN_STEP.
+read -r -d '' STEP_SUMMARY <<'JQ'
 def clip($n): if length > $n then .[:($n - 1)] + "…" else . end;
 def path: ltrimstr($cwd + "/") | if length > 120 then "…" + .[(length - 119):] else . end;
+# A command without the `cd` to the checkout it starts with, if it does, which agents often put before each command.
+def nocd:
+  first(capture("^\\s*cd +(?<dir>[^;&|]+?) *(;|&&) *(?<rest>.*)$")
+    | select(.dir | IN($cwd, "\"\($cwd)\"", "$PWD", "\"$PWD\"", ".")) | .rest) // .;
 def summary:
   ((.input | objects) // {}) as $in
-  | if .name == "Bash" then $in.command // "" | split("\n") | .[0] // ""
+  | if .name == "Bash" then $in.command // "" | split("\n") | .[0] // "" | nocd
     elif .name | IN("Read", "Edit", "MultiEdit", "Write") then $in.file_path // "" | path
     elif .name == "NotebookEdit" then $in.notebook_path // "" | path
     elif .name | IN("Grep", "Glob") then
@@ -31,6 +37,8 @@ def summary:
     elif .name == "TodoWrite" then [$in.todos[]? | objects | select(.status == "in_progress") | .content][0] // ""
     else [$in[] | strings][0] // "" end
   | tostring | gsub("\\s+"; " ") | clip(120);
+JQ
+read -r -d '' RUN_SUMMARY <<'JQ'
 reduce (inputs | . as $line | try fromjson catch $line) as $event (
   {result: null, text: null, output: [], turns: 0, message: null, steps: [], failed: {}};
   if ($event | type) == "string" then
@@ -52,6 +60,25 @@ reduce (inputs | . as $line | try fromjson catch $line) as $event (
 | .steps |= map({tool, summary, error: ($failed[.id] // false)})
 | del(.failed, .message)
 JQ
+RUN_SUMMARY="$STEP_SUMMARY
+$RUN_SUMMARY"
+
+# What a run that is going on is doing right now, for its heartbeat's step: its latest tool call as "Tool: target"
+# (e.g. "Bash: npm test"), not its subagents' (while one works, the Agent call that started it). Reads claude's output
+# backwards (tac), so it stops at the latest call however long the output is; prints nothing before the first one.
+read -r -d '' RUN_STEP <<'JQ'
+first(inputs | try fromjson catch null | objects | select(.type == "assistant" and .parent_tool_use_id == null)
+  | [.message.content[]? | objects | select(.type == "tool_use")] | last // empty
+  | (.name // "unknown") + (summary | if . == "" then "" else ": " + . end) | clip(200)) // empty
+JQ
+RUN_STEP="$STEP_SUMMARY
+$RUN_STEP"
+
+# Prints the latest tool call of the run whose output (claude's stream-json) is in the given file (see RUN_STEP).
+current_step() {
+  tac "$1" 2>/dev/null | grep -F '"parent_tool_use_id":null' | grep -F '"type":"tool_use"' |
+    jq -nRr --arg cwd "$PWD" "$RUN_STEP" 2>/dev/null
+}
 
 # A run's record, the body of POST /tickets/:id/runs (see RunRecord in shared/domain.ts), from RUN_SUMMARY's output
 # and what the loop knows: $outcome, the exit $code, the $duration in ms, the run's $usage (USAGE's output, or null)
@@ -158,14 +185,27 @@ stop_reason() {
 
 # Checks a run's ticket every TICKET_CHECK_SECONDS while the run (process pid) goes on, and stops the run if someone
 # takes the ticket away from the agent or asks for the run to stop, writing why to the given file (see stop_reason).
-# Each check also tells the board the agent is working on the ticket, so the board doesn't count it as idle.
+# Each check also tells the board the agent is working on the ticket, so the board doesn't count it as idle. Every
+# RUN_STEP_SECONDS it also reads the run's latest tool call from its output file (see current_step), and tells the
+# board when it changed, so the ticket shows what the run does as it goes.
 watch_run() {
-  local id=$1 pid=$2 file=$3 idle= reason
+  local id=$1 pid=$2 file=$3 output=$4 idle= reason step due checked=$SECONDS interval=$TICKET_CHECK_SECONDS
   trap - INT TERM
   if [[ -n $lock_fd ]]; then exec {lock_fd}>&-; fi
+  ((RUN_STEP_SECONDS > 0 && RUN_STEP_SECONDS < interval)) && interval=$RUN_STEP_SECONDS
   heartbeat "$id"
-  while sleep "$TICKET_CHECK_SECONDS" && kill -0 "$pid" 2>/dev/null; do
+  while sleep "$interval" && kill -0 "$pid" 2>/dev/null; do
+    due=$((SECONDS - checked >= TICKET_CHECK_SECONDS))
+    step=
+    ((RUN_STEP_SECONDS > 0)) && step=$(current_step "$output")
+    if [[ -n $step && $step != "$run_step" ]]; then
+      run_step=$step
+    elif ((!due)); then
+      continue
+    fi
     heartbeat "$id"
+    ((due)) || continue
+    checked=$SECONDS
     [[ -n $idle ]] || idle=$(idle_columns) || { idle=; continue; }
     reason=$(stop_reason "$id" "$idle") || continue
     printf '%s\n' "$reason" >"$file"
@@ -375,7 +415,7 @@ in memory and is never cleaned up. \$TMPDIR is on disk, and the loop empties it 
   ) <<<"$prompt" >"$output" 2>"$errors" &
   running=$!
   inhibit_sleep "$id" "$running"
-  watch_run "$id" "$running" "$stopped" &
+  watch_run "$id" "$running" "$stopped" "$output" &
   watcher=$!
   wait "$running"
   code=$?

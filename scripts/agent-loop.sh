@@ -39,8 +39,9 @@
 # ticket into the review column, or tickets the agent doesn't hold, changes nothing for the loop. Each of those checks
 # also sends the board a heartbeat for the ticket (POST /tickets/:id/heartbeat): the board counts tickets without one
 # (and without other activity) for 10 minutes as idle, and offers to move them back to the todo column. The heartbeats
-# say what the run is doing (working the ticket, or the feedback it answers), and the loop tells the board when the run
-# ends, so the ticket's card shows the run while it goes on.
+# say what the run is doing (its latest tool call, read from its output every RUN_STEP_SECONDS, or before its first one
+# what it is for: working the ticket, or the feedback it answers), and the loop tells the board when the run ends, so
+# the ticket's card shows the run while it goes on.
 #
 # People can also stop a run without taking the ticket away, to give the agent new instructions (the Stop button,
 # POST /tickets/:id/stop). The same check of the ticket sees that and stops the run, but keeps its session and its
@@ -125,6 +126,9 @@
 #   TICKET_TIMEOUT      stop a run that takes longer than this, as accepted by timeout(1) (default: 4h)
 #   TICKET_CHECK_SECONDS  how often a run's ticket is checked for having been taken away from the agent or for a
 #                       request to stop the run, and a heartbeat sent for it; keep it well under 10 minutes (default: 30)
+#   RUN_STEP_SECONDS    how often a run's latest tool call is read from its output and, when it changed, sent to the
+#                       board as the run's step, so the ticket shows what the run does as it goes; 0 shows only what the
+#                       run is for (working the ticket, or the feedback it answers) (default: 10)
 #   INHIBIT_SLEEP       1 keeps the machine from suspending or going idle while a run is going (a systemd-logind
 #                       inhibitor lock, where systemd-inhibit is available), 0 doesn't (default: 1)
 #   RETRY_SECONDS       wait before retrying a failed run, doubled after each failure (default: 600)
@@ -189,6 +193,7 @@ CANCELLED_COLUMN=${CANCELLED_COLUMN:-Cancelled}
 IDLE_SECONDS=${IDLE_SECONDS:-300}
 TICKET_TIMEOUT=${TICKET_TIMEOUT:-4h}
 TICKET_CHECK_SECONDS=${TICKET_CHECK_SECONDS:-30}
+RUN_STEP_SECONDS=${RUN_STEP_SECONDS:-10}
 INHIBIT_SLEEP=${INHIBIT_SLEEP:-1}
 RETRY_SECONDS=${RETRY_SECONDS:-600}
 MAX_ATTEMPTS=${MAX_ATTEMPTS:-3}
