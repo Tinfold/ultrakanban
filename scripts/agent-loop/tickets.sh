@@ -57,10 +57,11 @@ adopt() {
   log "ticket #$number ($id): reassigned from $holder to $worker"
 }
 
-# Checks the tickets the agent holds and handles the first one that needs work. Returns 1 if none did.
+# Checks the tickets the agent holds and handles the first one that needs work. Returns 1 if none did. A conflict loop
+# (CONFLICTS_ONLY) only handles tickets in the review column whose pull request has merge conflicts.
 handle_feedback() {
   local board review cancelled idle tickets file id number column holder version ticket_model ticket_effort pr_url repo pr_number \
-    queued approval pr branch ci issue reviews inline activity state triage items ci_note next
+    queued approval conflicts pr branch ci issue reviews inline activity state triage items ci_note next
   claim_lock -s
   board=$(get "/boards/$BOARD") || { claim_unlock; log "can't read board $BOARD"; return 1; }
   review=$(jq -r '.board.reviewColumnId // ""' <<<"$board")
@@ -73,7 +74,8 @@ handle_feedback() {
     | select(.columnId != $done and .columnId != $cancelled)
     | [.id, .number, .columnId, .assignee, .version, .agentModel // "-", .agentEffort // "-", .pullRequest.url // "-",
        .pullRequest.repo // "-", .pullRequest.number // "-",
-       ($idle[.columnId] | if .queued then .name else "-" end), .approval // "-"] | @tsv' \
+       ($idle[.columnId] | if .queued then .name else "-" end), .approval // "-", .pullRequest.conflicts // false]
+    | @tsv' \
     <<<"$board")
   board=
 
@@ -94,8 +96,11 @@ handle_feedback() {
   claim_unlock
 
   while IFS=$'\t' read -r -u 3 id number column holder version ticket_model ticket_effort pr_url repo pr_number queued \
-    approval; do
+    approval conflicts; do
     [[ -n $id ]] || continue
+    # The board's view of the pull request (synced from GitHub every minute) spares a conflict loop reading GitHub for
+    # tickets without conflicts; whether there are any now is checked with GitHub below.
+    [[ $CONFLICTS_ONLY == 1 && ($column != "$review" || $conflicts != true) ]] && continue
     # Another loop is working this one.
     unlock_ticket
     lock_ticket "$id" || continue
@@ -152,6 +157,7 @@ loop stopped starting runs for CI on this ticket. Comment on the ticket to let i
       update_state "$id" '.capNoted = true'
     fi
     [[ $(jq -r .run <<<"$triage") == true ]] || continue
+    [[ $CONFLICTS_ONLY == 1 && $(jq -r .conflicted <<<"$triage") != true ]] && continue
 
     use_worker "${ticket_model#-}" "${ticket_effort#-}"
     adopt "$id" "$number" "$holder" "$version" || continue
@@ -219,8 +225,10 @@ claim_from() {
 # Claims the next ticket from the todo column (then the backlog column, if the board allows it) and works it.
 # Returns 1 if there was nothing to claim, or if CLAIM_LIMIT claimed tickets are still waiting for their first run
 # to finish: those are worked (or retried) first, rather than claiming ticket after ticket while runs keep failing.
+# A conflict loop (CONFLICTS_ONLY) never claims one.
 claim_next() {
   local response status ticket id snapshot pending
+  [[ $CONFLICTS_ONLY == 1 ]] && return 1
   paused && return 0
   use_worker "" ""
   claim_lock -x

@@ -52,6 +52,7 @@ const agentModel = z
   .nullable()
 const agentEffort = z.enum(AGENT_EFFORTS).nullable()
 const agentConcurrency = z.int().min(1).max(AGENT_MAX_CONCURRENCY).nullable()
+const agentConflictConcurrency = z.int().min(0).max(AGENT_MAX_CONCURRENCY).nullable()
 const archiveDoneDays = z.int().min(1).max(3650).nullable()
 const ticketSize = z.enum(TICKET_SIZES)
 const notifyUrl = z
@@ -75,6 +76,7 @@ export const createBoardSchema = z.object({
   agentModel: agentModel.optional(),
   agentEffort: agentEffort.optional(),
   agentConcurrency: agentConcurrency.optional(),
+  agentConflictConcurrency: agentConflictConcurrency.optional(),
   agentBacklog: z.boolean().optional(),
   agentAllSkills: z.boolean().optional(),
   agentDocker: z.boolean().optional(),
@@ -96,6 +98,7 @@ export const updateBoardSchema = z.object({
   agentModel: agentModel.optional(),
   agentEffort: agentEffort.optional(),
   agentConcurrency: agentConcurrency.optional(),
+  agentConflictConcurrency: agentConflictConcurrency.optional(),
   agentBacklog: z.boolean().optional(),
   agentAllSkills: z.boolean().optional(),
   agentDocker: z.boolean().optional(),

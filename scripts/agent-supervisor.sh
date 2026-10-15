@@ -555,13 +555,15 @@ reconcile() {
       ;;
   esac
   [[ $paused == true ]] || wanted=$(jq -r '.[] | select(.agentEnabled and .githubRepo != null)
-    | [.id, .githubRepo, .agentName // "claude", .agentModel // "opus", .agentEffort // "medium", .agentConcurrency // 1]
+    | [.id, .githubRepo, .agentName // "claude", .agentModel // "opus", .agentEffort // "medium", .agentConcurrency // 1,
+       .agentConflictConcurrency // ""]
     | @tsv' <<<"$boards")
 
-  while IFS=$'\t' read -r id repo agent model effort concurrency; do
+  while IFS=$'\t' read -r id repo agent model effort concurrency conflicts; do
     [[ -n $id ]] || continue
     unit="ultrakanban-agent@$id.service"
-    settings="$repo $agent/$model/$effort x$concurrency"
+    # The conflict loops only when set, so that boards which leave them at the default keep the settings they had.
+    settings="$repo $agent/$model/$effort x$concurrency${conflicts:++$conflicts}"
     if [[ $(cat "$AGENT_HOME/boards/$id/settings" 2>/dev/null) != "$settings" ]]; then
       echo "board $id: starting its agent loop ($repo as $agent/$model/$effort, $concurrency at a time)"
       mkdir -p "$AGENT_HOME/boards/$id" && printf '%s\n' "$settings" >"$AGENT_HOME/boards/$id/settings"

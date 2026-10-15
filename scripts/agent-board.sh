@@ -4,7 +4,10 @@
 #
 # The board's agentConcurrency (1 when not set) is how many tickets it works at once: that many loops, the first in the
 # clone and each other one in its own git worktree of it (worktrees/<n>), sharing one state directory. If one loop
-# stops, the others are stopped too and the script exits, so systemd restarts them all. When the installed scripts or
+# stops, the others are stopped too and the script exits, so systemd restarts them all. The board's
+# agentConflictConcurrency (2 when not set) is how many more loops it runs, each in a worktree of its own too, that only
+# fix merge conflicts (CONFLICTS_ONLY, see agent-loop.sh), so the conflicts that merging one pull request causes in the
+# others are fixed side by side even when the board works one ticket at a time. When the installed scripts or
 # skill change, each loop stops before its next run and is started again with the new ones on its own. Only a change
 # to this script or its systemd unit waits for them all to stop, and then starts it (or the unit) again.
 #
@@ -29,6 +32,9 @@ model=$(jq -r '.board.agentModel // "opus"' <<<"$board")
 effort=$(jq -r '.board.agentEffort // "medium"' <<<"$board")
 concurrency=$(jq -r '.board.agentConcurrency // 1' <<<"$board")
 [[ $concurrency =~ ^[1-9][0-9]*$ ]] || concurrency=1
+conflicts=$(jq -r '.board.agentConflictConcurrency // 2' <<<"$board")
+[[ $conflicts =~ ^[0-9]+$ ]] || conflicts=2
+loops=$((concurrency + conflicts))
 if [[ $(jq -r .board.agentEnabled <<<"$board") != true || -z $repo ]]; then
   echo "the agent is off for board $BOARD"
   exit 0
@@ -66,11 +72,11 @@ if [[ $(git -C "$dir/repo" config --get ultrakanban.repo 2>/dev/null) != "$repo"
   git -C "$dir/repo" config ultrakanban.repo "$repo"
 fi
 
-# One checkout per loop: the clone, then worktrees/2 up to worktrees/<concurrency>. Worktrees beyond that go, after
-# keeping the work of a run that was stopped in them, which the ticket's next run gets back.
+# One checkout per loop: the clone, then worktrees/2 up to worktrees/<concurrency>, then one per conflict loop. Worktrees
+# beyond that go, after keeping the work of a run that was stopped in them, which the ticket's next run gets back.
 checkouts=("$dir/repo")
 git -C "$dir/repo" worktree prune
-for ((n = 2; n <= concurrency; n++)); do
+for ((n = 2; n <= loops; n++)); do
   if [[ ! -e $dir/worktrees/$n/.git ]]; then
     rm -rf "$dir/worktrees/$n"
     git -C "$dir/repo" worktree add --quiet --detach "$dir/worktrees/$n" ||
@@ -81,7 +87,7 @@ done
 for worktree in "$dir"/worktrees/*; do
   n=${worktree##*/}
   [[ -e $worktree ]] || continue
-  [[ $n =~ ^[0-9]+$ ]] && ((n >= 2 && n <= concurrency)) && continue
+  [[ $n =~ ^[0-9]+$ ]] && ((n >= 2 && n <= loops)) && continue
   (cd "$worktree" && KANBAN=$KANBAN BOARD=$BOARD STATE_DIR=$dir/state "$here/agent-loop.sh" save-work)
   git -C "$dir/repo" worktree remove --force "$worktree" 2>/dev/null || rm -rf "$worktree"
 done
@@ -100,7 +106,8 @@ if [[ -f $installed_skill ]] && ! git -C "$dir/repo" ls-files --error-unmatch "$
   grep -qxF "/$skill" "$dir/repo/.git/info/exclude" 2>/dev/null || echo "/$skill" >>"$dir/repo/.git/info/exclude"
 fi
 
-echo "working board $BOARD on $repo as $agent/$model/$effort, $concurrency ticket(s) at a time"
+echo "working board $BOARD on $repo as $agent/$model/$effort, $concurrency ticket(s) at a time and $conflicts more \
+fixing merge conflicts"
 # The loops check the board and GitHub every minute when there is nothing to do, rather than agent-loop.sh's 5 minutes,
 # so a ticket added to an idle board is picked up soon.
 export IDLE_SECONDS=${IDLE_SECONDS:-60}
@@ -118,7 +125,11 @@ start_loop() {
   (
     sleep "${2:-0}"
     cd "${checkouts[$1]}" || exit 1
-    if ((concurrency > 1)); then export LOOP_ID=$(($1 + 1)); fi
+    if (($1 >= concurrency)); then
+      export CONFLICTS_ONLY=1 LOOP_ID=conflicts-$(($1 - concurrency + 1))
+    elif ((loops > 1)); then
+      export LOOP_ID=$(($1 + 1))
+    fi
     exec "$here/agent-loop.sh"
   ) &
   pids[$1]=$!

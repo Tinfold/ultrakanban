@@ -225,8 +225,18 @@ files never get in each other's way. The loops share the board's state and lock 
 work it, so two runs never work the same ticket, and when one runs out of Claude usage they all wait. They claim at most
 that many new tickets at a time, too: a claimed ticket whose run fails stays in progress to be retried, and until its
 run succeeds (or someone moves it back to Todo) it takes up one of the slots, so runs that keep failing don't drag the
-whole Todo or Backlog column into progress. Changing the
-setting restarts the board's loops, which stops runs in progress (they are resumed, see below). The button left of the
+whole Todo or Backlog column into progress.
+
+**Parallel conflict fixes.** Merging one pull request often leaves several others in Review with merge conflicts. So
+that they don't wait for each other, or for the ticket a loop is working, the board's agent also runs **Parallel
+conflict fixes** (`agentConflictConcurrency`, 0 to 8, 2 by default) more loops, however many parallel runs it has, each
+in a worktree of its own too (after the parallel runs' ones). These claim no tickets: they only look at the agent's
+tickets in Review whose pull request has conflicts now (the board's view of it spares them reading GitHub for the
+others), and start a run for one with new feedback, such as the conflicts themselves or the "fix conflicts" button's
+comment. As for any run, they hand it everything new on the ticket. The loops that work tickets still fix conflicts too,
+and the ticket locks keep them all apart, so with the button pressed on a board working one ticket at a time, three
+pull requests' conflicts are fixed at once. Set it to None to fix them one after another as before; each loop's
+worktree has its own build output (see `MAX_BUILD_GB` below). Changing either setting restarts the board's loops, which stops runs in progress (they are resumed, see below). The button left of the
 update button in the header switches every board's agents off and on at once: it is green while each board whose
 agent is on has its loop running, and a warning sign when one doesn't (or they are switched off). Switched off, the
 supervisor stops all the loops and the containers their runs use, until they are switched on again; clicking the
@@ -393,7 +403,7 @@ KANBAN=http://localhost:4317 BOARD=$BOARD AGENT_LOOP_CLEAN=1 ~/ultrakanban/scrip
 
 `AGENT_LOOP_CLEAN=1` lets it reset the checkout before each run; leave it out in a working copy of your own. To work
 several tickets at once by hand, start one loop per checkout (the clone plus `git worktree add --detach` ones), with
-the same `BOARD`, agent settings and `STATE_DIR`.
+the same `BOARD`, agent settings and `STATE_DIR`; `CONFLICTS_ONLY=1` makes a loop one that only fixes conflicts.
 
 A reset keeps build output (ignored files such as `target/` or `node_modules/`) so builds stay incremental, until a
 checkout's ignored files pass `MAX_BUILD_GB` (default 20): then the loop removes them all before the next run. Each

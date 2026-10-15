@@ -26,6 +26,7 @@ interface BoardRow {
   agent_model: string | null
   agent_effort: AgentEffort | null
   agent_concurrency: number | null
+  agent_conflict_concurrency: number | null
   agent_backlog: number
   agent_all_skills: number
   agent_docker: number
@@ -70,6 +71,7 @@ const toBoard = (row: BoardRow): BoardSummary => ({
   agentModel: row.agent_model,
   agentEffort: row.agent_effort,
   agentConcurrency: row.agent_concurrency,
+  agentConflictConcurrency: row.agent_conflict_concurrency,
   agentBacklog: row.agent_backlog === 1,
   agentAllSkills: row.agent_all_skills === 1,
   agentDocker: row.agent_docker === 1,
@@ -132,6 +134,7 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     agentModel,
     agentEffort,
     agentConcurrency,
+    agentConflictConcurrency,
     agentBacklog,
     agentAllSkills,
     agentDocker,
@@ -150,6 +153,7 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     agentModel,
     agentEffort,
     agentConcurrency,
+    agentConflictConcurrency,
     agentBacklog,
     agentAllSkills,
     agentDocker,
@@ -175,6 +179,7 @@ export function updateBoard(id: string, input: UpdateBoardInput): BoardSummary {
     agent_model: input.agentModel,
     agent_effort: input.agentEffort,
     agent_concurrency: input.agentConcurrency,
+    agent_conflict_concurrency: input.agentConflictConcurrency,
     agent_backlog: input.agentBacklog === undefined ? undefined : Number(input.agentBacklog),
     agent_all_skills: input.agentAllSkills === undefined ? undefined : Number(input.agentAllSkills),
     agent_docker: input.agentDocker === undefined ? undefined : Number(input.agentDocker),

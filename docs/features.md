@@ -28,7 +28,9 @@
   conflicts (stacked pull requests after the ones they build on); any that conflict after earlier merges are skipped
   for their agent to resolve
 - **Fix conflicts**: ask the agents to fix the merge conflicts of the pull requests in review with one click (the
-  conflict button on the review column); it comments on each of those tickets and wakes the agent loops up
+  conflict button on the review column); it comments on each of those tickets and wakes the agent loops up. Extra
+  loops that only fix conflicts (Parallel conflict fixes, 2 by default) fix them side by side, even on a board whose
+  agent works one ticket at a time
 - **Feedback reaches the agent right away**: a comment, an approved plan or a move back into In progress wakes the
   board's agent up, so it answers within seconds instead of after its idle wait
 - **Stop and redirect a run**: stop the agent's run from the running ticket's card or the ticket, or post a comment and

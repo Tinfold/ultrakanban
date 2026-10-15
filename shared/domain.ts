@@ -24,7 +24,13 @@ export const isClaudeModel = (model: string) =>
   (AGENT_MODELS as readonly string[]).includes(model) || /^claude-/i.test(model)
 
 /** What a board's agent runs as when the board doesn't say (see scripts/agent-board.sh). */
-export const AGENT_DEFAULTS = { name: 'claude', model: 'opus', effort: 'medium', concurrency: 1 } as const
+export const AGENT_DEFAULTS = {
+  name: 'claude',
+  model: 'opus',
+  effort: 'medium',
+  concurrency: 1,
+  conflictConcurrency: 2,
+} as const
 /** Most runs a board's agent can work at once; each one needs its own git worktree and counts against Claude usage. */
 export const AGENT_MAX_CONCURRENCY = 8
 
@@ -336,6 +342,12 @@ export interface BoardSummary {
   agentEffort: AgentEffort | null
   /** How many runs the agent works at once, each on its own ticket in its own git worktree; 1 when not set. */
   agentConcurrency: number | null
+  /**
+   * How many more runs the agent can make at once that only fix merge conflicts (and answer whatever else is new on
+   * those tickets), each in its own git worktree, beside `agentConcurrency`: the conflicts that merging one pull request
+   * causes in the others are fixed side by side. 0 for none; 2 when not set.
+   */
+  agentConflictConcurrency: number | null
   /** Whether the agent also takes tickets from the Backlog column once the Todo column has none left. */
   agentBacklog: boolean
   /**
