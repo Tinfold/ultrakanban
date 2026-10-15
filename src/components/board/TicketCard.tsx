@@ -201,13 +201,14 @@ export function TicketCard({ ticket, overlay, selecting, selected }: TicketCardP
               {formatUsageShort(ticket.usage)}
             </span>
           )}
-          {canMerge && <QuickMergeButton ticket={ticket} />}
+          {/* With a run going it goes next to the run's Stop button instead. */}
+          {canMerge && !ticket.run && <QuickMergeButton ticket={ticket} />}
         </div>
       )}
       {ticket.autoMergeWait && (
         <AutoMergeHint wait={ticket.autoMergeWait} className="mt-2 text-[11px] [&_svg]:size-3" />
       )}
-      {ticket.run && <RunStatus ticket={ticket} />}
+      {ticket.run && <RunStatus ticket={ticket}>{canMerge && <QuickMergeButton ticket={ticket} />}</RunStatus>}
     </div>
   )
 }

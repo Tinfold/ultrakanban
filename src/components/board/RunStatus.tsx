@@ -1,5 +1,5 @@
 import { SquareIcon } from 'lucide-react'
-import { type SyntheticEvent, useState } from 'react'
+import { type ReactNode, type SyntheticEvent, useState } from 'react'
 import { AGENT_IDLE_MINUTES, AGENT_RUN_STALLED_MINUTES, type Ticket } from '@shared/domain'
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { Button } from '@/components/ui/button'
@@ -12,16 +12,26 @@ const stopPropagation = (event: SyntheticEvent) => event.stopPropagation()
 
 /**
  * The agent run working a ticket: how long it has gone on and its step, or that its heartbeats stopped, with a button
- * that stops it; "Stopping…" once someone asked it to stop, until it has. Render it only for a ticket with a run, as it
- * keeps a timer.
+ * that stops it; "Stopping…" once someone asked it to stop, until it has. `children` are more buttons for the ticket,
+ * shown after that one. Render it only for a ticket with a run, as it keeps a timer.
  */
-export function RunStatus({ ticket, className }: { ticket: Ticket; className?: string }) {
+export function RunStatus({
+  ticket,
+  className,
+  children,
+}: {
+  ticket: Ticket
+  className?: string
+  children?: ReactNode
+}) {
   const now = useNow(15_000)
   const { run } = ticket
   if (!run) return null
   const silentMs = now - Date.parse(run.seenAt)
   // The board isn't told when heartbeats stop, so the run ends here by the same rule as on the server.
-  if (silentMs >= AGENT_IDLE_MINUTES * 60_000) return null
+  if (silentMs >= AGENT_IDLE_MINUTES * 60_000) {
+    return children ? <div className={cn('mt-2 flex justify-end', className)}>{children}</div> : null
+  }
   const stalled = silentMs >= AGENT_RUN_STALLED_MINUTES * 60_000
   const stopping = run.stopRequested
   const elapsed = formatDuration(now - Date.parse(run.startedAt))
@@ -49,7 +59,12 @@ export function RunStatus({ ticket, className }: { ticket: Ticket; className?: s
         {stopping ? 'Stopping…' : stalled ? `No heartbeat for ${formatDuration(silentMs)}` : `Running ${elapsed}`}
       </span>
       {!stalled && !stopping && run.step && <span className="truncate text-muted-foreground">· {run.step}</span>}
-      {!stopping && <StopRunButton ticket={ticket} />}
+      {(!stopping || children) && (
+        <div className="-my-1 ml-auto flex shrink-0 items-center gap-1 pl-1">
+          {!stopping && <StopRunButton ticket={ticket} />}
+          {children}
+        </div>
+      )}
     </div>
   )
 }
@@ -62,12 +77,7 @@ function StopRunButton({ ticket }: { ticket: Ticket }) {
   return (
     // The dialog's events bubble through React to the card even though it is portaled: keep them, and the button's,
     // from opening the ticket or starting a drag.
-    <div
-      className="-my-1 ml-auto shrink-0 pl-1"
-      onClick={stopPropagation}
-      onPointerDown={stopPropagation}
-      onKeyDown={stopPropagation}
-    >
+    <div onClick={stopPropagation} onPointerDown={stopPropagation} onKeyDown={stopPropagation}>
       <Button
         size="xs"
         variant="outline"
