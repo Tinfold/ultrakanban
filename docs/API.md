@@ -381,9 +381,10 @@ run is working the ticket; the board offers to move a working column's idle tick
 tickets whose agent stopped or crashed.
 
 Heartbeats also make up the ticket's `run`, which its card shows: a heartbeat starts a run unless one is going on,
-and can say what the run is doing (`step`; a heartbeat without one keeps the run's step). The run ends with
-`DELETE /tickets/:ticketId/heartbeat`, or after 10 minutes without a heartbeat. Cards show a run as stalled after 3
-minutes without one.
+and can say what the run is doing (`step`; a heartbeat without one keeps the run's step). `scripts/agent-loop.sh`
+sends the run's latest tool call as its step (e.g. `Bash: npm test`) when it changes, checked every
+`RUN_STEP_SECONDS`. The run ends with `DELETE /tickets/:ticketId/heartbeat`, or after 10 minutes without a heartbeat.
+Cards show a run as stalled after 3 minutes without one.
 
 ### Stopping a run
 
