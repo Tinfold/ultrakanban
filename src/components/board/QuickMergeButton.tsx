@@ -38,7 +38,7 @@ export function QuickMergeButton({ ticket }: { ticket: Ticket }) {
           <Button
             size="xs"
             variant="outline"
-            className="h-5 px-1.5 text-[11px]"
+            className="h-5 px-1.5 text-[11px] text-foreground"
             aria-label={`Merge pull request ${name}`}
             title={`Merge pull request ${name}`}
           >
