@@ -379,8 +379,11 @@ export interface BoardSummary {
    * /boards/:id/agent-cleanup`); each loop does it before its next run, or at once when idle. Null if never asked.
    */
   agentCleanupRequestedAt: string | null
+  /** Open tickets: all but those in the done column or the cancelled one (see `CANCELLED_COLUMN`). */
   ticketCount: number
-  /** Tickets whose agent waits for a person: for approval of its plan, or for an answer to its latest comment. */
+  /**
+   * Open tickets whose agent waits for a person: for approval of its plan, or for an answer to its latest comment.
+   */
   waitingCount: number
   /** Tickets in the review column. */
   reviewCount: number

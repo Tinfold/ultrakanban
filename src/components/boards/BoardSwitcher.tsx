@@ -73,10 +73,7 @@ function BoardCounts({ board }: { board: BoardSummary }) {
         label={`${plural(board.backlogCount, 'ticket')} in the backlog`}
         className="text-muted-foreground"
       />
-      <span
-        className="text-xs text-muted-foreground tabular-nums"
-        title={`${plural(board.ticketCount, 'ticket')} in all`}
-      >
+      <span className="text-xs text-muted-foreground tabular-nums" title={plural(board.ticketCount, 'open ticket')}>
         {board.ticketCount}
       </span>
     </span>
