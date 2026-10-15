@@ -1,6 +1,5 @@
 import {
   ChartColumnIcon,
-  CheckIcon,
   ChevronsUpDownIcon,
   EyeIcon,
   InboxIcon,
@@ -41,10 +40,17 @@ function Count({
   label: string
   className?: string
 }) {
-  if (!count) return null
+  // An empty slot when there are none, so the counts of every board stay in the same columns.
+  if (!count) return <span aria-hidden />
   return (
-    <span className={cn('flex shrink-0 items-center gap-0.5 text-xs tabular-nums', className)} title={label}>
-      <Icon className="size-3.5!" aria-hidden />
+    <span
+      className={cn(
+        'flex items-center justify-self-end gap-0.5 rounded-full px-1.5 py-px text-xs font-medium tabular-nums',
+        className,
+      )}
+      title={label}
+    >
+      <Icon className="size-3!" aria-hidden />
       {count}
       <span className="sr-only">{label}</span>
     </span>
@@ -54,26 +60,29 @@ function Count({
 /** What on a board needs a person: tickets waiting on them, ready for review, and in the backlog. */
 function BoardCounts({ board }: { board: BoardSummary }) {
   return (
-    <span className="ml-auto flex items-center gap-2">
+    <span className="grid shrink-0 grid-cols-[repeat(3,2.75rem)_2rem] items-center gap-1">
       <Count
         icon={MessageCircleQuestionIcon}
         count={board.waitingCount}
         label={`${plural(board.waitingCount, 'ticket')} waiting on you: an agent asks a question or waits for approval of its plan`}
-        className="font-medium text-sky-600 dark:text-sky-400"
+        className="bg-sky-500/15 text-sky-700 dark:text-sky-300"
       />
       <Count
         icon={EyeIcon}
         count={board.reviewCount}
         label={`${plural(board.reviewCount, 'ticket')} ready for review`}
-        className="text-emerald-600 dark:text-emerald-400"
+        className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
       />
       <Count
         icon={InboxIcon}
         count={board.backlogCount}
         label={`${plural(board.backlogCount, 'ticket')} in the backlog`}
-        className="text-muted-foreground"
+        className="bg-muted text-muted-foreground"
       />
-      <span className="text-xs text-muted-foreground tabular-nums" title={plural(board.ticketCount, 'open ticket')}>
+      <span
+        className="justify-self-end text-xs text-muted-foreground tabular-nums"
+        title={plural(board.ticketCount, 'open ticket')}
+      >
         {board.ticketCount}
       </span>
     </span>
@@ -121,7 +130,7 @@ export function BoardSwitcher({ currentBoardId }: { currentBoardId?: string }) {
             <ChevronsUpDownIcon className="text-muted-foreground" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent align="start" className="w-80 p-0">
+        <PopoverContent align="start" className="w-96 max-w-[calc(100vw-1rem)] p-0">
           <Command>
             <CommandInput placeholder="Find board…" />
             <CommandList>
@@ -131,11 +140,11 @@ export function BoardSwitcher({ currentBoardId }: { currentBoardId?: string }) {
                   <CommandItem
                     key={board.id}
                     value={`${board.name} ${board.id}`}
+                    data-checked={board.id === currentBoardId}
                     onSelect={() => run(() => navigate(`/b/${board.id}`))}
                   >
-                    <span className="truncate">{board.name}</span>
+                    <span className="min-w-0 flex-1 truncate">{board.name}</span>
                     <BoardCounts board={board} />
-                    <CheckIcon className={board.id === currentBoardId ? '' : 'invisible'} />
                   </CommandItem>
                 ))}
               </CommandGroup>
