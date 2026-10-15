@@ -230,7 +230,9 @@ setting restarts the board's loops, which stops runs in progress (they are resum
 update button in the header switches every board's agents off and on at once: it is green while each board whose
 agent is on has its loop running, and a warning sign when one doesn't (or they are switched off). Switched off, the
 supervisor stops all the loops and the containers their runs use, until they are switched on again; clicking the
-warning sign while they are on starts the loops that stopped now, rather than after the supervisor's wait. The boards themselves
+warning sign while they are on starts the loops that stopped now, rather than after the supervisor's wait. On a board whose
+agent is on, clicking it while green offers to stop just that board's agent (switching it off, as Board settings does) or
+all of them. The boards themselves
 also run side by side, with no limit across boards: three enabled boards with two parallel runs each can mean six
 agents working at once, all on your `claude` login and its usage limits.
 

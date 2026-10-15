@@ -31,9 +31,10 @@ const list = (names: string[]) =>
  * warning otherwise. Clicking it stops them all (with the containers their runs use), or starts them again; while they
  * are on, it starts the boards' loops that stopped now, rather than after the supervisor's wait between retries, and
  * while a loop runs but can't claim a ticket, it can also restart them all. The agent supervisor does it on the host, so
- * this shows once it has reported.
+ * this shows once it has reported. On a board whose agent is on, stopping them stops that board's agent by default, as
+ * switching it off in its settings does, and the others' only if asked.
  */
-export function AgentsSwitch() {
+export function AgentsSwitch({ boardId }: { boardId?: string }) {
   const queryClient = useQueryClient()
   const { data: services, dataUpdatedAt } = useAgentServices()
   const { data: boardList } = useBoards()
@@ -46,6 +47,8 @@ export function AgentsSwitch() {
   const serverNow = Math.max(now, dataUpdatedAt) + Date.parse(services.serverTime) - dataUpdatedAt
   const state = agentsSwitchState(services, serverNow, (id) => boardList?.find((board) => board.id === id)?.name)
   const up = state.kind === 'up'
+  // The board on screen, if its agent is on: stopping the agents stops its own by default.
+  const board = boardId && services.wanted.includes(boardId) ? boardList?.find(({ id }) => id === boardId) : undefined
 
   let status: string
   switch (state.kind) {
@@ -67,9 +70,11 @@ export function AgentsSwitch() {
         .join('; ')}. Click to stop or restart them.`
       break
     case 'up':
-      status = state.boards
-        ? `Agents are running on ${boards(state.boards)}. Click to stop them.`
-        : 'Agents are on, but no board has its agent switched on. Click to switch them off.'
+      status = !state.boards
+        ? 'Agents are on, but no board has its agent switched on. Click to switch them off.'
+        : board
+          ? `Agents are running on ${boards(state.boards)}. Click to stop the agent on ${board.name}, or all of them.`
+          : `Agents are running on ${boards(state.boards)}. Click to stop them.`
   }
 
   const send = async (request: () => Promise<AgentServices>) => {
@@ -83,6 +88,14 @@ export function AgentsSwitch() {
     }
   }
   const switchTo = (paused: boolean) => send(() => api.setAgentsPaused(paused))
+  // The supervisor stops the loop of a board whose agent is switched off, as it does every loop when they are paused.
+  const stopBoard = (id: string) =>
+    send(async () => {
+      await api.updateBoard(id, { agentEnabled: false })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.board(id) })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.boards })
+      return api.agentServices()
+    })
 
   return (
     <>
@@ -110,7 +123,30 @@ export function AgentsSwitch() {
         </TooltipTrigger>
         <TooltipContent className="max-w-72">{status}</TooltipContent>
       </Tooltip>
-      {up ? (
+      {up && board ? (
+        <AlertDialog open={confirming} onOpenChange={setConfirming}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Stop the agent on {board.name}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Its agent loop stops, along with the containers its runs use, and its agent is switched off: switch it
+                on again in Board settings. Runs in progress stop too, and carry on where they left off once it is back.
+                The other boards' agents keep running; stopping all of them switches every board's agents off until you
+                start them again here.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction variant="outline" onClick={() => switchTo(true)}>
+                Stop all
+              </AlertDialogAction>
+              <AlertDialogAction variant="destructive" onClick={() => stopBoard(board.id)}>
+                Stop this board
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      ) : up ? (
         <ConfirmDialog
           open={confirming}
           onOpenChange={setConfirming}
