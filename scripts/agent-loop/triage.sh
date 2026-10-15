@@ -4,7 +4,8 @@
 # Finds a ticket's new feedback. Input: its activity, open pull request (gh pr view) or null, the classified checks
 # of its head commit (ci_status) or null, pull request comments, reviews and inline comments (GitHub REST), and its
 # saved state. Prints the snapshot to save after a successful run, the items to hand over, their fingerprint,
-# whether to run now (backoff after failures), and which notes to leave (CI not running, CI run cap reached).
+# whether to run now (backoff after failures), whether the pull request has merge conflicts now, and which notes to
+# leave (CI not running, CI run cap reached).
 #
 # The board wakes the loop up for the same ticket activity this counts as human feedback (comments, moves into the
 # in-progress column and approved plans by anyone but the agent; see wakeForFeedback in server/store/tickets.ts), so
@@ -79,6 +80,7 @@ human($s) as $human
        else empty end)
     ]),
     ci: ($ciUsed != []),
+    conflicted: ($conflict != ""),
     ciRuns: $ciRuns,
     infraNote: (if $infraNote then $ci else null end),
     capNote: $capNote

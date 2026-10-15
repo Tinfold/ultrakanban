@@ -106,6 +106,13 @@
 # AGENT_LOOP_CLEAN=1 the default branch is checked out detached (a branch can only be checked out in one worktree),
 # and fetches are serialized.
 #
+# Conflict loops: a loop with CONFLICTS_ONLY=1 claims no tickets and only looks at the tickets in the review column
+# whose pull request the board shows with merge conflicts. It starts a run for one when its pull request has conflicts
+# now and it has new feedback (the conflicts, or e.g. the "fix conflicts" button's comment), handing over everything
+# new on it as usual. Merging one pull request often leaves several others with conflicts: run a few of these beside
+# the loops that work the tickets (agent-board.sh runs the board's agentConflictConcurrency of them), and they are fixed
+# side by side rather than one after another, while the other loops go on with their tickets.
+#
 # Run it from the repository the tickets are about, with the ultrakanban skill installed and gh authenticated:
 #
 #   KANBAN=http://localhost:4317 BOARD=<board id> scripts/agent-loop.sh
@@ -164,6 +171,7 @@
 #   MAX_BUILD_GB        with AGENT_LOOP_CLEAN=1, the most GB of ignored files (build output such as target/ or
 #                       node_modules/) a checkout keeps between runs; over it, they are all removed before the next
 #                       run, which then builds from scratch. 0 never removes them (default: 20)
+#   CONFLICTS_ONLY      1 makes this a conflict loop (see "Conflict loops" above), 0 doesn't (default: 0)
 #   LOOP_ID             label for this loop's log lines when several loops work the board (agent-board.sh numbers them)
 #   WATCH_FILES         files separated by ":"; when one of them changes, the loop exits with status 75 before its next
 #                       run, so it can be started again with the new version (agent-board.sh sets it to the installed
@@ -200,6 +208,7 @@ MAX_ATTEMPTS=${MAX_ATTEMPTS:-3}
 MAX_CI_RUNS=${MAX_CI_RUNS:-2}
 MAX_BUILD_GB=${MAX_BUILD_GB:-20}
 CLAIM_LIMIT=${CLAIM_LIMIT:-1}
+CONFLICTS_ONLY=${CONFLICTS_ONLY:-0}
 # Check output or annotations that mean CI itself didn't run, not that the code failed.
 INFRA_PATTERN='billing|spending limit|payments have failed|account is locked|account has been locked'
 INFRA_PATTERN+='|was not started|minutes quota|exceeded .*(minutes|quota)'
@@ -296,7 +305,12 @@ watched() {
 }
 watching=$(watched)
 
-log "working board $BOARD as $AGENT, claiming tickets as $WORKER (or with the model and effort a ticket asks for)"
+if [[ $CONFLICTS_ONLY == 1 ]]; then
+  log "fixing the merge conflicts of $AGENT's pull requests on board $BOARD as $WORKER (or with the model and effort a \
+ticket asks for)"
+else
+  log "working board $BOARD as $AGENT, claiming tickets as $WORKER (or with the model and effort a ticket asks for)"
+fi
 # A run stopped along with the loop left its work here; keep it now, so whichever loop resumes the ticket gets it back.
 if [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]]; then save_work; fi
 while true; do

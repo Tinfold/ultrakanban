@@ -231,11 +231,12 @@ describe('pull request workflow', () => {
         initial.agentModel,
         initial.agentEffort,
         initial.agentConcurrency,
+        initial.agentConflictConcurrency,
         initial.agentBacklog,
         initial.agentAllSkills,
         initial.agentDocker,
       ],
-      [null, false, null, null, null, null, false, false, false],
+      [null, false, null, null, null, null, null, false, false, false],
     )
     assert.equal(agentWorkerName(initial), 'claude/opus/medium')
 
@@ -251,6 +252,9 @@ describe('pull request workflow', () => {
     for (const agentConcurrency of [0, 1.5, AGENT_MAX_CONCURRENCY + 1, '2']) {
       assert.equal((await call('PATCH', `/boards/${boardId}`, { agentConcurrency })).status, 400)
     }
+    for (const agentConflictConcurrency of [-1, 1.5, AGENT_MAX_CONCURRENCY + 1, '2']) {
+      assert.equal((await call('PATCH', `/boards/${boardId}`, { agentConflictConcurrency })).status, 400)
+    }
     assert.equal((await call('PATCH', `/boards/${boardId}`, { agentBacklog: 'yes' })).status, 400)
     assert.equal((await call('PATCH', `/boards/${boardId}`, { agentAllSkills: 1 })).status, 400)
     assert.equal((await call('PATCH', `/boards/${boardId}`, { agentDocker: null })).status, 400)
@@ -262,6 +266,7 @@ describe('pull request workflow', () => {
       agentModel: 'claude-sonnet-5',
       agentEffort: 'xhigh',
       agentConcurrency: 3,
+      agentConflictConcurrency: 0,
       agentBacklog: true,
       agentAllSkills: true,
       agentDocker: true,
@@ -272,11 +277,12 @@ describe('pull request workflow', () => {
         on.agentEnabled,
         on.agentName,
         on.agentConcurrency,
+        on.agentConflictConcurrency,
         on.agentBacklog,
         on.agentAllSkills,
         on.agentDocker,
       ],
-      ['acme/app', true, 'claude-2', 3, true, true, true],
+      ['acme/app', true, 'claude-2', 3, 0, true, true, true],
     )
     assert.equal(agentWorkerName(on), 'claude-2/claude-sonnet-5/xhigh')
     const { body: boards } = await call<BoardSummary[]>('GET', '/boards')
@@ -298,6 +304,7 @@ describe('pull request workflow', () => {
       agentModel: null,
       agentEffort: null,
       agentConcurrency: null,
+      agentConflictConcurrency: null,
       agentBacklog: false,
       agentAllSkills: false,
       agentDocker: false,
@@ -310,11 +317,12 @@ describe('pull request workflow', () => {
         cleared.agentModel,
         cleared.agentEffort,
         cleared.agentConcurrency,
+        cleared.agentConflictConcurrency,
         cleared.agentBacklog,
         cleared.agentAllSkills,
         cleared.agentDocker,
       ],
-      [null, false, null, null, null, null, false, false, false],
+      [null, false, null, null, null, null, null, false, false, false],
     )
   })
 

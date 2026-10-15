@@ -107,6 +107,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
     return { agentName, agentModel, agentEffort }
   })
   const [agentConcurrency, setAgentConcurrency] = useState(detail.board.agentConcurrency)
+  const [agentConflictConcurrency, setAgentConflictConcurrency] = useState(detail.board.agentConflictConcurrency)
   const [githubRepo, setGithubRepo] = useState(detail.board.githubRepo ?? '')
   const [creatingRepo, setCreatingRepo] = useState(false)
   const signedIn = !!useGitHubStatus().data?.auth
@@ -134,6 +135,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
       agentModel: text('agentModel'),
       agentEffort: agent.agentEffort,
       agentConcurrency,
+      agentConflictConcurrency,
       agentEnabled: data.get('agentEnabled') === 'on',
       agentBacklog: data.get('agentBacklog') === 'on',
       agentAllSkills: data.get('agentAllSkills') === 'on',
@@ -341,13 +343,36 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
               </SelectContent>
             </Select>
           </div>
+          <div className="grid gap-2">
+            <Label htmlFor="board-settings-agent-conflict-concurrency">Parallel conflict fixes</Label>
+            <Select
+              value={String(agentConflictConcurrency ?? DEFAULT_CONCURRENCY)}
+              onValueChange={(value) =>
+                setAgentConflictConcurrency(value === DEFAULT_CONCURRENCY ? null : Number(value))
+              }
+            >
+              <SelectTrigger id="board-settings-agent-conflict-concurrency" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={DEFAULT_CONCURRENCY}>Default ({AGENT_DEFAULTS.conflictConcurrency})</SelectItem>
+                {Array.from({ length: AGENT_MAX_CONCURRENCY + 1 }, (_, index) => String(index)).map((count) => (
+                  <SelectItem key={count} value={count}>
+                    {count === '0' ? 'None' : count}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
         <p className="text-xs text-muted-foreground">
           It claims tickets as <code>{agentWorkerName(agent)}</code>. A full model name, such as claude-opus-5-5, keeps
           each model version apart on the board. A local model or another provider's, such as qwen3-coder:30b, works
           once Claude Code where the agent runs is pointed at an endpoint that serves it (docs/agents.md). With more
           than one parallel run, it works that many tickets at once, each in its own git worktree, all on the same
-          Claude usage or endpoint.
+          Claude usage or endpoint. Parallel conflict fixes are more runs, each in a worktree of its own too, that only
+          fix the merge conflicts of its pull requests, so the conflicts that merging one causes in the others are fixed
+          side by side while the parallel runs go on with their tickets.
         </p>
         <label className="flex items-center gap-2 text-sm">
           <input

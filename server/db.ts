@@ -393,6 +393,11 @@ const MIGRATIONS = [
   ALTER TABLE claude_usage ADD COLUMN week_reserve_percent INTEGER;
   ALTER TABLE claude_usage ADD COLUMN session_reserve_percent INTEGER;
   `,
+  `
+  -- How many more runs the board's agent can make at once that only fix merge conflicts (see BoardSummary). Its
+  -- default (AGENT_DEFAULTS.conflictConcurrency) when NULL.
+  ALTER TABLE boards ADD COLUMN agent_conflict_concurrency INTEGER;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'
