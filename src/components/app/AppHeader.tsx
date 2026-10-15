@@ -75,7 +75,7 @@ export function AppHeader({ boardId, children }: { boardId?: string; children?: 
       <BoardSwitcher currentBoardId={boardId} />
       {children}
       <div className="ml-auto flex shrink-0 items-center gap-0.5">
-        <AgentsSwitch />
+        <AgentsSwitch boardId={boardId} />
         <UpdateMenu />
         <OverviewLink />
         <SetupLink />
