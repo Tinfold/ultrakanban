@@ -1,6 +1,7 @@
 import {
   type AgentEffort,
   BACKLOG_COLUMN,
+  CANCELLED_COLUMN,
   type BoardDetail,
   type BoardSummary,
   type TicketSize,
@@ -42,9 +43,15 @@ interface BoardRow {
   updated_at: string
 }
 
+/** Whether the ticket `t` of the board `b` is still open: not in the done column or the cancelled one. */
+const OPEN_TICKET = `
+  t.column_id IS NOT b.done_column_id
+  AND t.column_id NOT IN (SELECT id FROM columns WHERE board_id = b.id AND lower(name) = '${CANCELLED_COLUMN}')`
+
 const SELECT_BOARDS = `
-  SELECT b.*, (SELECT count(*) FROM tickets WHERE board_id = b.id) AS ticket_count,
-    (SELECT count(*) FROM tickets t WHERE t.board_id = b.id AND (t.approval = 'pending' OR ${WAITING_SINCE} IS NOT NULL))
+  SELECT b.*, (SELECT count(*) FROM tickets t WHERE t.board_id = b.id AND ${OPEN_TICKET}) AS ticket_count,
+    (SELECT count(*) FROM tickets t
+     WHERE t.board_id = b.id AND ${OPEN_TICKET} AND (t.approval = 'pending' OR ${WAITING_SINCE} IS NOT NULL))
       AS waiting_count,
     (SELECT count(*) FROM tickets WHERE column_id = b.review_column_id) AS review_count,
     (SELECT count(*) FROM tickets WHERE column_id IN

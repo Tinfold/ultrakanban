@@ -298,8 +298,8 @@ interface BoardSummary {
   approvalSize: 'S' | 'M' | 'L' | null // smallest estimate at which the agent waits for approval of its plan (never when null)
   notifyUrl: string | null // where to notify people when a ticket needs them: ntfy, Discord or webhook URL (see Boards)
   agentCleanupRequestedAt: string | null // when someone last asked its agent to clear its build output (see Disk usage)
-  ticketCount: number
-  waitingCount: number // tickets whose agent waits for a person: approval of its plan, or an answer to its comment
+  ticketCount: number // open tickets: all but those in the done column or the one named Cancelled (any case)
+  waitingCount: number // open tickets whose agent waits for a person: approval of its plan, or an answer to its comment
   reviewCount: number // tickets in the review column
   backlogCount: number // tickets in the column named Backlog (any case)
   createdAt: string
