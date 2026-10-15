@@ -1,11 +1,17 @@
-import type { AgentEffort, BoardDetail, BoardSummary, TicketSize } from '../../shared/domain.ts'
+import {
+  type AgentEffort,
+  BACKLOG_COLUMN,
+  type BoardDetail,
+  type BoardSummary,
+  type TicketSize,
+} from '../../shared/domain.ts'
 import type { CreateBoardInput, UpdateBoardInput } from '../../shared/schemas.ts'
 import { newId, now, sql, touchBoard, updateRow } from '../db.ts'
 import { badRequest, notFound } from '../errors.ts'
 import { createColumn, listColumns, resolveColumn } from './columns.ts'
 import { listEpics } from './epics.ts'
 import { listTags } from './tags.ts'
-import { listTickets } from './tickets.ts'
+import { listTickets, WAITING_SINCE } from './tickets.ts'
 
 interface BoardRow {
   id: string
@@ -29,12 +35,20 @@ interface BoardRow {
   notify_url: string | null
   agent_cleanup_requested_at: string | null
   ticket_count: number
+  waiting_count: number
+  review_count: number
+  backlog_count: number
   created_at: string
   updated_at: string
 }
 
 const SELECT_BOARDS = `
-  SELECT b.*, (SELECT count(*) FROM tickets WHERE board_id = b.id) AS ticket_count
+  SELECT b.*, (SELECT count(*) FROM tickets WHERE board_id = b.id) AS ticket_count,
+    (SELECT count(*) FROM tickets t WHERE t.board_id = b.id AND (t.approval = 'pending' OR ${WAITING_SINCE} IS NOT NULL))
+      AS waiting_count,
+    (SELECT count(*) FROM tickets WHERE column_id = b.review_column_id) AS review_count,
+    (SELECT count(*) FROM tickets WHERE column_id IN
+      (SELECT id FROM columns WHERE board_id = b.id AND lower(name) = '${BACKLOG_COLUMN}')) AS backlog_count
   FROM boards b`
 
 const toBoard = (row: BoardRow): BoardSummary => ({
@@ -59,6 +73,9 @@ const toBoard = (row: BoardRow): BoardSummary => ({
   notifyUrl: row.notify_url,
   agentCleanupRequestedAt: row.agent_cleanup_requested_at,
   ticketCount: row.ticket_count,
+  waitingCount: row.waiting_count,
+  reviewCount: row.review_count,
+  backlogCount: row.backlog_count,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 })

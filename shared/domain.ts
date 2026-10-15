@@ -46,6 +46,9 @@ export const QUESTION_TAG = 'question'
  */
 export const CANCELLED_COLUMN = 'cancelled'
 
+/** Name of the column (case-insensitive) for tickets not yet ready to work on, counted on each board's summary. */
+export const BACKLOG_COLUMN = 'backlog'
+
 /**
  * Name of the column (case-insensitive) the board's agent works its tickets in: the default of the agent loop's
  * IN_PROGRESS_COLUMN, which scripts/agent-board.sh keeps. Someone other than its agent moving a ticket the agent holds
@@ -377,6 +380,12 @@ export interface BoardSummary {
    */
   agentCleanupRequestedAt: string | null
   ticketCount: number
+  /** Tickets whose agent waits for a person: for approval of its plan, or for an answer to its latest comment. */
+  waitingCount: number
+  /** Tickets in the review column. */
+  reviewCount: number
+  /** Tickets in the Backlog column (see `BACKLOG_COLUMN`). */
+  backlogCount: number
   createdAt: string
   updatedAt: string
 }
