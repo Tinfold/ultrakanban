@@ -591,8 +591,10 @@ Your name (agent field and X-Actor header): $worker. Use exactly this name: it s
 running $model at $effort effort.
 This is a non-interactive run started by scripts/agent-loop.sh: do the work, then exit. Don't wait for review; the loop
 starts a new run when feedback arrives. If you need an answer from a human, ask in a ticket comment and exit.
-If the ticket's description has a checklist (- [ ] step), check off each step as you finish it with
-POST $KANBAN/api/tickets/<id>/checklist/<index> (0-based) instead of editing the description.
+If the ticket's description has a checklist (- [ ] step), check off each step as soon as you finish it with
+POST $KANBAN/api/tickets/<id>/checklist/<index> (0-based) instead of editing the description. Do it right then, not all
+at once before submitting: people follow the ticket's progress by it. Check off only what you did; leave a step you
+skipped or that doesn't apply unchecked and say why in your review comment.
 End every pull request comment, review and inline reply you post with this exact line, so the loop doesn't mistake
 your own replies for feedback:
 $MARKER"
@@ -604,4 +606,16 @@ $MARKER"
 The board's description (its conventions for every ticket on it; follow them unless the ticket says otherwise):
 
 $description"
+}
+
+# The ticket's checklist steps that aren't checked yet, with their indexes, for its prompt; nothing when there are none.
+unchecked_steps() {
+  local steps
+  steps=$(get "/tickets/$1/checklist" | jq -r 'map(select(.checked | not) | "\(.index): \(.text)") | join("\n")') ||
+    return 0
+  [[ -z $steps ]] || printf '%s' "
+
+The ticket's checklist steps that aren't checked yet (index: step). Make them your task list, and check each one off on
+the board as soon as it's done:
+$steps"
 }

@@ -106,8 +106,11 @@ when the plan changes a lot.
 
 ## 4. Work, and report as you go
 
-If the description has a checklist, check off each step as you finish it (0-based, in the order they appear)
-instead of editing the description:
+If the description has a checklist, check off each step on the board as soon as you finish it (0-based, in the order
+they appear) instead of editing the description. Do it then, not all at once before you submit: people follow the
+ticket's progress by its checklist. Make its steps your task list, so checking one off on the board is part of finishing
+it. Check off only what you did. Leave a step you skipped or that turned out not to apply unchecked and say why in your
+review comment: a person decides, and the board's auto-merge waits until every step is checked.
 
 ```sh
 curl -s $KANBAN/api/tickets/$TICKET/checklist     # [{ "index": 0, "text": "...", "checked": false }, ...]
@@ -133,7 +136,9 @@ curl -s -X POST $KANBAN/api/tickets/$TICKET/attachments -H "X-Actor: $ME" -F fil
 
 ## 6. Open a pull request and submit for review
 
-Push a branch, open the pull request, then submit the ticket with it:
+Push a branch, open the pull request, then submit the ticket with it. Look at its checklist first
+(`GET /api/tickets/$TICKET/checklist`): every step you did should be checked already, and the comment should say why
+any step is still unchecked.
 
 ```sh
 curl -s -X POST $KANBAN/api/tickets/$TICKET/review \
