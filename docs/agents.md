@@ -257,6 +257,11 @@ those whose description says they wait for another ticket (`blocked by #12`, `de
 is done or its pull request is merged, and tickets whose sub-tickets aren't all done yet. An agent that finds a ticket blocked marks it this way before handing it back,
 so the loop doesn't keep claiming it only to find out again that it can't be done yet.
 
+**Checklists.** When a ticket's description has a checklist (`- [ ] step`), each run's prompt lists the steps not
+checked yet, with their indexes, and asks the agent to check each one off on the board as soon as it's done rather than
+all at once before submitting, so the card shows how far it is. A step the agent skipped or found doesn't apply stays
+unchecked, with the reason in its review comment; auto-merge waits until you check it or remove it.
+
 **Approval.** Each run that starts a ticket first posts a short plan with a size estimate (S, M or L), shown in the
 ticket's activity and on its card. Set **Wait for approval of the plan on** (`approvalSize`) to hold large tickets, or
 medium and large ones, or every ticket: the run stops after posting the plan, and the ticket waits in **In progress**

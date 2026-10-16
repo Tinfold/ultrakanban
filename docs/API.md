@@ -52,8 +52,10 @@ for a model that has none (`gemini/gemini-2.5-pro/default`). The model is everyt
    Or claim a specific ticket: `POST /api/tickets/:ticketId/claim`.
 3. Read the ticket's comments (`GET /api/tickets/:ticketId/activity`) before starting: they may be newer than
    the description. Report progress and decisions with `POST /api/tickets/:ticketId/comments`.
-   If the description has a checklist (`- [ ] step`), check off each step as you finish it with
-   `POST /api/tickets/:ticketId/checklist/:index` rather than rewriting the description.
+   If the description has a checklist (`- [ ] step`), check off each step as soon as you finish it with
+   `POST /api/tickets/:ticketId/checklist/:index` rather than rewriting the description, not all at once before
+   submitting: people follow the ticket's progress by it. Check off only what you did; leave a step you skipped or that
+   doesn't apply unchecked and say why when you submit (auto-merge waits until every step is checked).
    Before starting the work, post a short plan with a size estimate: `POST /api/tickets/:ticketId/plan` with
    `{ "agent": "claude/claude-opus-5-5/high", "estimate": "M", "plan": "<markdown>" }`. If the returned ticket's
    `approval` is `"pending"`, stop: the board holds tickets of that size until a person approves the plan (see

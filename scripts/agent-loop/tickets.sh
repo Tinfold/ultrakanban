@@ -187,7 +187,7 @@ $next$(
 Failing CI started this run. First find out from the failing job's log whether the failure comes from the code. If it
 doesn't (billing or spending limits, runners or infrastructure, a flaky test unrelated to the change, missing
 secrets), don't push anything: explain what you found in the ticket comment and exit.")
-Finish with a ticket comment summarising what you did, then exit." \
+Finish with a ticket comment summarising what you did, then exit.$([[ $approval == pending ]] || unchecked_steps "$id")" \
       "$(jq -c .snapshot <<<"$triage")" "$(jq -r .fingerprint <<<"$triage")" "$(jq -r .ciRuns <<<"$triage")" "$branch"
     unlock_ticket
     return 0
@@ -293,7 +293,7 @@ Take it through to review and exit after submitting it. If it is tagged question
 as the comment and no pull request.
 Before you start the work, post your plan with its size estimate (POST $KANBAN/api/tickets/$id/plan, see the skill). If \
 the ticket then waits for approval (its \"approval\" is \"pending\"), stop there and exit: the loop starts a new run once \
-someone approves the plan." "$snapshot" "claim"
+someone approves the plan.$(unchecked_steps "$id")" "$snapshot" "claim"
   unlock_ticket
   return 0
 }
