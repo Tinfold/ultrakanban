@@ -312,6 +312,11 @@ interface BoardSummary {
   approvalSize: 'S' | 'M' | 'L' | null // smallest estimate at which the agent waits for approval of its plan (never when null)
   notifyUrl: string | null // where to notify people when a ticket needs them: ntfy, Discord or webhook URL (see Boards)
   agentCleanupRequestedAt: string | null // when someone last asked its agent to clear its build output (see Disk usage)
+  jevEnabled: boolean // the board routes tickets with Jev (see [Routing](#routing)); only settable with a TypeSafe key
+  jevModels: string[] | null // models Jev may pick from; all when null
+  jevThreshold: number | null // smallest confidence at which Jev's pick is used (0.7 when null)
+  jevOnlyLower: boolean // Jev may only pick a cheaper setting than the board's default
+  jevMode: 'dry-run' | 'on' | null // dry-run records Jev's pick only; set to dry-run when Jev is first switched on
   ticketCount: number // open tickets: all but those in the done column or the one named Cancelled (any case)
   waitingCount: number // open tickets whose agent waits for a person: approval of its plan, or an answer to its comment
   reviewCount: number // tickets in the review column
@@ -1011,6 +1016,11 @@ supervisor runs where the agents run. `GET /system/setup` returns:
 `PUT /system/github-token` with `{ token }` checks the token with GitHub (`400 github_error` when GitHub turns it
 down), keeps it in the database and uses it from then on; the API never sends it back. `DELETE /system/github-token`
 removes it. Both answer with the setup.
+
+`PUT /system/typesafe-key` with `{ key }` checks the key with TypeSafe, keeps it in the database and uses it from then
+on; the API never sends it back. `DELETE /system/typesafe-key` removes it. Both answer with the setup, whose
+`typesafe.source` (`env` for `TYPESAFE_API_KEY`, which wins, `board`, or null) tells whether Jev can be used. See
+[docs/JEV.md](JEV.md).
 
 `POST /system/agents/login` (202) with `{ kind: "github" | "claude" }` asks the supervisor to log the agents in
 (`409 login_in_progress` while one runs; a login stops after 15 minutes, counted from this request, and then shows as

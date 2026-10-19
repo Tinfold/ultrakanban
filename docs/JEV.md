@@ -1,8 +1,13 @@
-# Plan: optional ticket routing with Jev (TypeSafe AI)
+# Optional ticket routing with Jev (TypeSafe AI)
+
+**Status: built.** All nine items below are in place. The board routes with Jev when a TypeSafe key is set (the
+`TYPESAFE_API_KEY` variable or the Setup page) and a board switches it on in its settings, first in `dry-run` mode and
+then `on`. Settings are in [running.md](running.md), the API in [API.md](API.md#routing). The text below is the plan it
+was built from.
 
 How the board could use Jev to pick the model and effort for a ticket from structured input, as an optional add-on
-that is off by default and needs a TypeSafe API key. It is a plan, not built yet, and stands on its own: it needs
-nothing beyond what is in the repository today. Items are numbered 1–9. References are `file:line` at the time of
+that is off by default and needs a TypeSafe API key. It stands on its own: it needs
+nothing beyond what is in the repository. Items are numbered 1–9. References are `file:line` at the time of
 writing.
 
 ## What Jev is, and why it fits

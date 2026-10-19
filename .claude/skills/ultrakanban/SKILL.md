@@ -229,7 +229,9 @@ curl -s -X POST $KANBAN/api/boards/$BOARD/tickets \
 ```
 
 Pick `agentModel` and `agentEffort` for each ticket you file: the board's agent works it with them, so the cheapest
-setting that can do the work well saves tokens. Omit both (the board's defaults) when unsure, or when asked to.
+setting that can do the work well saves tokens. Omit both (the board's defaults) when unsure, or when asked to. On a
+board that routes with Jev (`jevEnabled`, `jevMode` `on`), leave them out: the claim picks the model and effort from
+the ticket, and a setting you name overrides that.
 
 - `haiku` at `low`: mechanical edits where the change is fully spelled out (a rename, bumping a version, a typo).
 - `sonnet` at `medium`: routine, well-scoped work: copy and docs, small UI changes, a clear bug with a known cause.
