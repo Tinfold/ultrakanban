@@ -1,9 +1,9 @@
 # Plan: optional ticket routing with Jev (TypeSafe AI)
 
 How the board could use Jev to pick the model and effort for a ticket from structured input, as an optional add-on
-that is off by default and needs a TypeSafe API key. It is a plan, not built yet. Items numbered like `3.1` refer to
-the main roadmap (`docs/ROADMAP.md`, pull request #1); items here are numbered 1–9. References are `file:line` at the
-time of writing.
+that is off by default and needs a TypeSafe API key. It is a plan, not built yet, and stands on its own: it needs
+nothing beyond what is in the repository today. Items are numbered 1–9. References are `file:line` at the time of
+writing.
 
 ## What Jev is, and why it fits
 
@@ -25,8 +25,8 @@ Cloudflare Workers AI and a LiteLLM pass-through (`TYPESAFE_API_BASE`).
 
 This is the shape of our routing problem: a ticket comes in as state, and we want a model (a Choice over the board's
 models) and an effort (a Score over `low` < `medium` < `high` < `xhigh` < `max`, `shared/domain.ts:13`). Each answer
-comes with a confidence the app can act on. The main roadmap's "Not recommended" list rules out an _LLM_ triage pass
-because it would add a paid turn to every ticket. Jev is the exception: it costs about a hundredth of a cent and answers
+comes with a confidence the app can act on. An _LLM_ triage pass that picks a model for every ticket isn't worth
+it, because it would add a paid turn to every ticket. Jev is the exception: it costs about a hundredth of a cent and answers
 before the claim returns.
 
 Caveats, which is why this stays **optional and off by default**:
@@ -40,8 +40,8 @@ Caveats, which is why this stays **optional and off by default**:
   versioned model (`jev-1.14.0`), not `jev-latest`.
 - Ticket titles and descriptions are sent to a third party. Cloudflare lists the model as zero data retention, but
   check TypeSafe's own terms. Turning it on must be an explicit, per-board choice.
-- Jev only replaces the _guess_. Without the history that roadmap 3.1 and 3.5 bring, there is nothing to check its picks
-  against, so build those first.
+- Jev only replaces the _guess_. Without a measure of cost per finished ticket (item 8), there is nothing to check its
+  picks against, so that measuring comes before Jev's picks are used.
 
 ## Where Jev fits, and where it doesn't
 
@@ -53,12 +53,13 @@ Caveats, which is why this stays **optional and off by default**:
   a way to fail, and changes nothing that matters.
 - **So its best use is a small, paid decision in front of an expensive one.** Picking the model and effort for a
   run is the main one. Two more come close, and could be added once item 8 shows its picks hold up: deciding whether
-  new feedback needs a run at all (a Noul like "this comment asks for a change", after the cheap rules in roadmap 1.2 have
-  run), and whether a failing CI log comes from the code or from the infrastructure, before a run is started just to
+  new feedback needs a run at all (a Noul like "this comment asks for a change", after free rules such as skipping short
+  acknowledgements like "thanks" or "LGTM" have run), and whether a failing CI log comes from the code or from the infrastructure, before a run is started just to
   find that out. Each saves a whole run when it is right, so both should start in dry-run mode like item 8.
-- **Whether it belongs at all** depends on item 8. The free history suggestion (roadmap 3.1 and 3.5) may route well enough on its
-  own. If Jev's dry-run picks don't lower cost per finished ticket against it, drop this plan. That is why it stays
-  optional, off by default, and comes after roadmap 3.1 and 3.5.
+- **Whether it belongs at all** depends on item 8. The free history suggestion the board already has (`GET /api/boards/:id/agent-suggestion`,
+  `server/routes/boards.ts:175`) may route well enough on its own. If Jev's dry-run picks don't lower cost per finished
+  ticket against it, drop this plan. That is why it stays optional and off by default, and why item 8's dry run comes
+  before Jev's picks are used.
 
 ## Items
 
@@ -68,10 +69,10 @@ Caveats, which is why this stays **optional and off by default**:
 | 2   | **Jev client** `server/jev.ts`: one `systemOne(state, questions)` built on `fetch`, with a 2 s timeout, the pinned model and the token usage it returns. Any error (timeout, 4xx/5xx, no key) returns `null` and is logged, never thrown into a claim. Add a fake Jev to `server/test-app.ts`, like its fake GitHub, so tests don't call the network.                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | S    |
 | 3   | **Board setting "Route with Jev"**, off by default and only shown when a key is set. It holds the models Jev may pick (default: the board's allowed models), a confidence threshold (start at a conservative 0.7) and a "may only lower" switch (Jev can pick a cheaper setting than the board default, never a dearer one), for boards that want savings without surprises. The setting's help text says ticket text is sent to TypeSafe.                                                                                                                                                                                                                                                                                                                                                                                    | S    |
 | 4   | **The structured input.** State is JSON: title, description (cut to about 8k characters to stay well inside 32k), tags, epic, checklist length, plan estimate when there is one, and the top similar past tickets from `suggestAgent` (`server/store/suggestions.ts:194`) with the setting each used and whether it finished. Jev then weighs the ticket's content _and_ the board's history. Questions: `model` as a Choice whose criteria come from the skill's model guidance (`haiku` = mechanical, fully spelled out; `sonnet` = routine, well scoped; `opus` = cross-file judgment; `fable` = hardest), `effort` as a Score over the five efforts, and Noul `fully_specified` ("the ticket says exactly what to change") as a tie-breaker towards lower effort. Keep the question text in one place so it can be tuned. | M    |
-| 5   | **Use it at claim time, server side.** When the claimed ticket has no `agentModel`/`agentEffort`, `claim-next` asks Jev and returns the pick on the ticket as `routed: {model, effort, source: "jev", confidence}`, without writing over the ticket's own fields, which stay the human's choice. The loop's `use_worker` (`scripts/agent-loop/tickets.sh:278-281`) uses `routed` when it is there. The order is: the ticket's own setting, then Jev above the threshold, then the suggestion endpoint (roadmap 3.1), then the board default. Cache the pick per ticket version so feedback runs don't call Jev again.                                                                                                                                                                                                         | M    |
+| 5   | **Use it at claim time, server side.** When the claimed ticket has no `agentModel`/`agentEffort`, `claim-next` asks Jev and returns the pick on the ticket as `routed: {model, effort, source: "jev", confidence}`, without writing over the ticket's own fields, which stay the human's choice. The loop's `use_worker` (`scripts/agent-loop/tickets.sh:278-281`) uses `routed` when it is there. The order is: the ticket's own setting, then Jev above the threshold, then the history suggestion (`suggestAgent`) when it is built on enough similar tickets (say 3 or more), then the board default. Cache the pick per ticket version so feedback runs don't call Jev again.                                                                                                                                            | M    |
 | 6   | **Confidence gating and escalation.** Below the threshold, fall back to the next source in item 5. When the Score's probability is spread over two efforts, take the higher one. Never route lower than the setting the ticket's last run used: a ticket whose run failed, or that came back from review with changes requested, keeps or raises its setting. Following the docs' advice, gate the riskier choice (dropping to `haiku`/`low`) at a higher threshold than staying at the default.                                                                                                                                                                                                                                                                                                                              | S    |
-| 7   | **Show it.** A "Suggest with Jev" button next to the history suggestion in the ticket form and properties (`TicketProperties.tsx:106-140`), showing the per-model probabilities. A small "Jev 0.82" badge next to the model on the card and in the plan-approval banner (roadmap 3.2), so a person can see and override a routed pick before it runs.                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | S    |
-| 8   | **Measure it.** Record each run's routing source and confidence with its usage, so the suggestion stats (roadmap 3.5) and the overview can compare cost per _finished_ ticket for Jev-routed, history-routed and default runs. Add a "dry run" mode to item 3 that records Jev's pick without using it, so a board can see how Jev would have done on its own tickets before trusting it. Count Jev's own tokens in usage too (tiny, but it should show).                                                                                                                                                                                                                                                                                                                                                                     | M    |
+| 7   | **Show it.** A "Suggest with Jev" button next to the history suggestion in the ticket form and properties (`TicketProperties.tsx:106-140`), showing the per-model probabilities. A small "Jev 0.82" badge next to the model on the card and in the plan-approval banner (`src/components/ticket/PlanApproval.tsx`), so a person can see and override a routed pick before it runs.                                                                                                                                                                                                                                                                                                                                                                                                                                            | S    |
+| 8   | **Measure it.** Record each run's routing source and confidence with its usage, and compare cost per _finished_ ticket (cost divided by success rate, not cost per ticket) for Jev-routed, history-routed and default runs, in the overview and next to the suggestion. When a run reports no cost, weight its tokens by type, since cache reads dominate the raw totals, and show no verdict until each source has a minimum number of finished tickets. Add a "dry run" mode to item 3 that records Jev's pick without using it, so a board can see how Jev would have done on its own tickets before trusting it. Count Jev's own tokens in usage too (tiny, but it should show).                                                                                                                                          | M    |
 | 9   | **Docs.** A `TYPESAFE_API_KEY` row in `docs/running.md`'s settings table and in `.env.example`, an optional prompt for it in `scripts/setup.sh` (skipped when empty), the setting and the `routed` field in `docs/API.md`, and a note in `SKILL.md` that agents filing tickets on a board that routes with Jev can leave out `agentModel`/`agentEffort`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | S    |
 
 Order: 1 → 2 → 3 with 8's dry run (collect data with no behaviour change) → 4 →
