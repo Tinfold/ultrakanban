@@ -305,11 +305,11 @@ function JevFieldset({
               />
             </div>
             <p className="text-xs text-muted-foreground">
-              Below it, the ticket is worked at the history suggestion or the board's setting instead.
+              Below it, the ticket is worked at the similar-tickets suggestion or the board's setting instead.
             </p>
           </div>
           <div className="grid gap-1">
-            <Label htmlFor="board-settings-jev-combine">When Jev and the history suggestion disagree</Label>
+            <Label htmlFor="board-settings-jev-combine">When Jev and the similar-tickets suggestion disagree</Label>
             <Select
               value={value.jevCombine ?? JEV_DEFAULTS.combine}
               onValueChange={(combine) =>
@@ -321,14 +321,14 @@ function JevFieldset({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="jev-only">Use Jev only</SelectItem>
-                <SelectItem value="jev-first">Prefer Jev (fall back to history)</SelectItem>
+                <SelectItem value="jev-first">Prefer Jev (fall back to similar tickets)</SelectItem>
                 <SelectItem value="higher">Use the higher setting</SelectItem>
                 <SelectItem value="lower">Use the lower setting</SelectItem>
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">
-              The history suggestion is the setting similar finished tickets worked at. The higher setting plays it
-              safe, the lower one saves the most usage. With Jev only, tickets below its threshold get the board's
+              The similar-tickets suggestion is the setting similar finished tickets worked at. The higher setting plays
+              it safe, the lower one saves the most usage. With Jev only, tickets below its threshold get the board's
               setting.
             </p>
           </div>
