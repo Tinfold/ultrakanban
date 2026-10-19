@@ -6,9 +6,14 @@
 # runner, and retrying it tends to loop), failures whose output or annotations mention billing, spending limits or a
 # job that was not started, and GitHub Actions jobs in which no step failed (e.g. no step ran at all). Cancelled,
 # skipped, neutral and stale checks are ignored. Legacy commit statuses count as code failures for "failure" and as
-# infra for "error". Prints {sha, code: [names], infra: [{name, why}]}.
+# infra for "error". Prints {sha, code: [names], infra: [{name, why}]}. Without a GitHub repository (a board with a
+# local one, whose pull requests have no GitHub checks), there are none.
 ci_status() {
   local repo=$1 sha=$2 runs statuses id name conclusion app count text why job
+  if [[ -z $repo || $repo == - ]]; then
+    jq -nc --arg sha "$sha" '{sha: $sha, code: [], infra: []}'
+    return 0
+  fi
   runs=$(gh api --paginate "repos/$repo/commits/$sha/check-runs?filter=latest&per_page=100" </dev/null |
     jq -rs '[.[].check_runs[]] | group_by(.name) | map(max_by(.id))[]
       | select(.status == "completed")

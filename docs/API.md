@@ -458,7 +458,7 @@ A board has either a GitHub repository or a local one: `localRepoPath` is the pa
 (absolute, or starting with `~/`), and setting it clears `githubRepo`, as setting `githubRepo` clears it. Setting both
 in one request is a `400`.
 
-`agentEnabled` can only be switched on once `githubRepo` is set (`400` otherwise). It is read by
+`agentEnabled` can only be switched on once `githubRepo` or `localRepoPath` is set (`400` otherwise). It is read by
 `scripts/agent-supervisor.sh`, which runs on the host and keeps one agent loop per enabled board; see `docs/agents.md`.
 The loop runs Claude Code with `agentModel` and `agentEffort` and claims tickets as
 `<agentName>/<agentModel>/<agentEffort>`, e.g. `claude/opus/medium` with nothing set. A ticket's own `agentModel`

@@ -457,6 +457,30 @@ board's clone and worktree has its own, so a Rust board with several parallel ru
 `MAX_BUILD_GB=0` keeps them. To clear them sooner, use **Clear build output** in the board's Disk usage dialog (its
 menu): each of the board's loops then removes its checkout's ignored files between runs, at once when idle.
 
+### Boards with a local repository
+
+A board can work on a git repository on the machine instead of one on GitHub: in its settings, turn on **Local
+repository** and give the repository's path (absolute, or starting with `~/`; `localRepoPath` in the API), then switch
+on **Run the agent on this board**. The supervisor starts its loop as for a GitHub board, and the board's clone is made
+with `git clone <path>` (`~/` is the agents' home directory) rather than `gh repo clone`, worktrees and all. The local
+repository is the clone's `origin`: the loop fetches from it before every run, and the agents push their branches to it,
+so they show up there, and you review and merge them on the board. Changing the path makes a new clone. The default branch the runs start
+from is the one the repository had checked out when the clone was made. With Docker runs on, the repository is mounted in
+each run's container too.
+
+Nothing on such a board goes to GitHub: the loop reads no GitHub pull requests, reviews or CI checks, and each run's
+prompt tells the agent not to use `gh`. It pushes a branch of its own, opens a local pull request for it on the board
+(`POST /api/tickets/:id/local-pull-request`, see [Local pull requests](API.md#local-pull-requests)), and submits the
+ticket for review. Merging that pull request moves the ticket to the done column, as for a GitHub one. For now the only
+feedback that starts a run is the ticket's own (comments, moves, approved plans and so on, as on any board): the local
+pull request's comments don't yet, nor does its state, and feedback runs start from the default branch, so the agent
+finds its branch from the pull request. A branch you have checked out in the repository can't be pushed to, so check
+out an agent's branch to try it in a worktree of its own (`git worktree add ../try <branch>`) or detached
+(`git checkout --detach <branch>`), or the agent can't push its fixes.
+
+The agents need git and the repository, nothing else: no GitHub login. In the agents container, the repository has to be
+in the container too: mount it in `docker-compose.yml`'s `agents` service at the path the board names.
+
 ### Other models
 
 The board's agent runs Claude Code, and Claude Code can run a local model or another provider's through an endpoint

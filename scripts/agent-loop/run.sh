@@ -304,7 +304,7 @@ DOCKERFILE
 # With podman, the container keeps the agent's user id (rootless podman maps it to root otherwise) and runs without
 # SELinux labels, which would deny it the mounted files.
 use_docker() {
-  local id=$1 setting git_dir home=$HOME path extra
+  local id=$1 setting git_dir origin home=$HOME path extra
   docker_args=() docker_error=
   setting=$(get "/tickets/$id" | jq -r 'if .agentDocker == null then empty else .agentDocker end')
   [[ -n $setting ]] || setting=$(get "/boards/$BOARD" | jq -r '.board.agentDocker // false')
@@ -326,6 +326,11 @@ use_docker() {
   git_dir=$(readlink -f "$(git rev-parse --git-common-dir 2>/dev/null)")
   if [[ -n $git_dir && $git_dir != "$PWD"/* ]]; then
     docker_args+=(--mount "type=bind,source=$git_dir,destination=$git_dir")
+  fi
+  # A board's local repository (origin, a directory on the machine), so the run can push its branch to it.
+  origin=$(git remote get-url origin 2>/dev/null)
+  if [[ $origin == /* && -d $origin ]]; then
+    docker_args+=(--mount "type=bind,source=$origin,destination=$origin")
   fi
   for path in .claude .claude.json .config/gh .gitconfig .config/git; do
     [[ -e $home/$path ]] && docker_args+=(--mount "type=bind,source=$home/$path,destination=$home/$path")
@@ -655,9 +660,20 @@ skipped or that doesn't apply unchecked and say why in your review comment.
 End every pull request comment, review and inline reply you post with this exact line, so the loop doesn't mistake
 your own replies for feedback:
 $MARKER"
+  local board description local_repo
+  board=$(get "/boards/$BOARD") || board='{}'
+  # A board with a local repository: the checkout's origin is that repository, and there is no GitHub to go to.
+  local_repo=$(jq -r '.board.localRepoPath // ""' <<<"$board")
+  [[ -z $local_repo ]] || printf '%s' "
+
+This board's repository is a local one, not on GitHub: origin is $(git remote get-url origin 2>/dev/null ||
+    printf '%s' "$local_repo") on this machine. Don't use gh or GitHub for it. Push your branch to origin (a new branch
+of your own: a branch checked out there can't be pushed to), then open the pull request on the board instead,
+which links it to the ticket: POST $KANBAN/api/tickets/<id>/local-pull-request with
+{\"head\":\"<your branch>\",\"title\":...,\"body\":...}. Then submit the ticket for review as usual. A person
+reviews and merges it on the board."
   # The board's description holds conventions for every ticket on it, so each run gets it rather than having to look.
-  local description
-  description=$(get "/boards/$BOARD" | jq -r '.board.description // "" | gsub("^\\s+|\\s+$"; "")') || description=
+  description=$(jq -r '.board.description // "" | gsub("^\\s+|\\s+$"; "")' <<<"$board") || description=
   [[ -z $description ]] || printf '%s' "
 
 The board's description (its conventions for every ticket on it; follow them unless the ticket says otherwise):

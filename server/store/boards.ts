@@ -205,8 +205,8 @@ export function updateBoard(id: string, input: UpdateBoardInput): BoardSummary {
     notify_url: input.notifyUrl,
   })
   const board = getBoard(id)
-  if (board.agentEnabled && !board.githubRepo) {
-    throw badRequest('Set the GitHub repository before switching the agent on')
+  if (board.agentEnabled && !board.githubRepo && !board.localRepoPath) {
+    throw badRequest('Set the GitHub or local repository before switching the agent on')
   }
   return board
 }

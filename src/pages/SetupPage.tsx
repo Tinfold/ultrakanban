@@ -314,7 +314,7 @@ export function SetupPage() {
     const online = !!agents.seenAt && serverNow - Date.parse(agents.seenAt) < AGENTS_OFFLINE_MS
     const where = agents.runsIn === 'container' ? 'in the agents container' : 'on this machine'
     const later = online ? 'todo' : 'later'
-    const boardWithAgent = boards?.find((board) => board.agentEnabled && board.githubRepo)
+    const boardWithAgent = boards?.find((board) => board.agentEnabled && (board.githubRepo || board.localRepoPath))
     const setUp = (next: SetupStatus) => {
       queryClient.setQueryData(queryKeys.setup, next)
       void queryClient.invalidateQueries({ queryKey: queryKeys.github })
@@ -451,7 +451,8 @@ export function SetupPage() {
                 <Link href={`/b/${boardWithAgent.id}`} className="text-foreground underline underline-offset-2">
                   {boardWithAgent.name}
                 </Link>{' '}
-                on {boardWithAgent.githubRepo}. Switch it on for other boards the same way.
+                on {boardWithAgent.githubRepo ?? boardWithAgent.localRepoPath}. Switch it on for other boards the same
+                way.
               </>
             ) : (
               <>

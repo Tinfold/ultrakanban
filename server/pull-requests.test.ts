@@ -397,6 +397,15 @@ describe('pull request workflow', () => {
     assert.deepEqual(repos(created), [null, '~/x'])
   })
 
+  test("a local repository is enough to switch the board's agent on", async () => {
+    const patch = (input: object) => call<BoardSummary>('PATCH', `/boards/${boardId}`, input)
+    const on = await patch({ localRepoPath: '~/Projects/App', agentEnabled: true })
+    assert.equal(on.status, 200)
+    assert.equal(on.body.agentEnabled, true)
+    assert.equal((await patch({ localRepoPath: null })).status, 400, 'the agent still needs a repository')
+    assert.equal((await patch({ githubRepo: 'acme/app' })).body.agentEnabled, true, 'switching to GitHub keeps it on')
+  })
+
   test('comments can be posted on the pull request too', async () => {
     const ticket = await addTicket({ title: 'A' })
     const comment = (body: unknown) =>

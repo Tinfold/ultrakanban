@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Runs agent-loop.sh for one board, in that board's own clone of its GitHub repository (never a working copy of
-# yours). Started by the ultrakanban-agent@<board> systemd user unit, which agent-supervisor.sh manages.
+# Runs agent-loop.sh for one board, in that board's own clone of its GitHub repository, or of its local one (the
+# board's localRepoPath, which then is the clone's origin, so the runs fetch from it and push their branches to it),
+# never a working copy of yours. Started by the ultrakanban-agent@<board> systemd user unit, which agent-supervisor.sh
+# manages.
 #
 # The board's agentConcurrency (1 when not set) is how many tickets it works at once: that many loops, the first in the
 # clone and each other one in its own git worktree of it (worktrees/<n>), sharing one state directory. If one loop
@@ -27,6 +29,9 @@ dir=$AGENT_HOME/boards/$BOARD
 
 board=$(curl -sf "$KANBAN/api/boards/$BOARD") || { echo "can't read board $BOARD from $KANBAN"; exit 1; }
 repo=$(jq -r '.board.githubRepo // ""' <<<"$board")
+local_repo=$(jq -r '.board.localRepoPath // ""' <<<"$board")
+# The local repository's path, with ~/ expanded, stands for the repository wherever the GitHub one would.
+[[ -z $repo && -n $local_repo ]] && repo=${local_repo/#\~\//$HOME/}
 agent=$(jq -r '.board.agentName // "claude"' <<<"$board")
 model=$(jq -r '.board.agentModel // "opus"' <<<"$board")
 effort=$(jq -r '.board.agentEffort // "medium"' <<<"$board")
@@ -66,9 +71,17 @@ fi
 
 mkdir -p "$dir" || exit 1
 if [[ $(git -C "$dir/repo" config --get ultrakanban.repo 2>/dev/null) != "$repo" ]]; then
+  if [[ -n $local_repo ]] && ! git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; then
+    echo "$repo (the board's local repository) isn't a git repository"
+    exit 1
+  fi
   echo "cloning $repo into $dir/repo"
   rm -rf "$dir/repo" "$dir/worktrees"
-  gh repo clone "$repo" "$dir/repo" -- --quiet || { echo "can't clone $repo"; exit 1; }
+  if [[ -n $local_repo ]]; then
+    git clone --quiet "$repo" "$dir/repo" || { echo "can't clone $repo"; exit 1; }
+  else
+    gh repo clone "$repo" "$dir/repo" -- --quiet || { echo "can't clone $repo"; exit 1; }
+  fi
   git -C "$dir/repo" config ultrakanban.repo "$repo"
 fi
 

@@ -63,9 +63,11 @@ adopt() {
 # that feedback could wait hours for one of them to be free.
 handle_feedback() {
   local board review cancelled idle tickets file id number column holder version ticket_model ticket_effort pr_url repo pr_number \
-    queued approval conflicts pr branch ci issue reviews inline activity state triage items ci_note next
+    queued approval conflicts pr branch ci issue reviews inline activity state triage items ci_note next local_repo
   claim_lock -s
   board=$(get "/boards/$BOARD") || { claim_unlock; log "can't read board $BOARD"; return 1; }
+  # A board with a local repository has nothing on GitHub to read: only its tickets' activity counts as feedback.
+  local_repo=$(jq -r '.board.localRepoPath // ""' <<<"$board")
   review=$(jq -r '.board.reviewColumnId // ""' <<<"$board")
   cancelled=$(jq -r --arg name "$CANCELLED_COLUMN" \
     '[.columns[] | select((.name | ascii_downcase) == ($name | ascii_downcase)) | .id][0] // ""' <<<"$board")
@@ -111,7 +113,7 @@ handle_feedback() {
       continue
     fi
     pr=null branch= ci=null issue='[]' reviews='[]' inline='[]'
-    if [[ $pr_url != - ]]; then
+    if [[ $pr_url != - && -z $local_repo ]]; then
       pr=$(gh pr view "$pr_url" \
         --json state,mergeable,mergeStateStatus,headRefOid,headRefName,baseRefOid,baseRefName </dev/null) ||
         { log "can't read $pr_url"; continue; }
