@@ -206,8 +206,7 @@ Ticket $id is already yours. The loop started this run for this new feedback:
 
 $items
 
-Read the ticket's activity and, if it has a pull request, its comments, reviews, inline review comments and checks,
-then address everything above: answer questions, make the requested changes, fix failing checks, and resolve merge
+The new feedback is above; fetch more only if you need context. Address everything above: answer questions, make the requested changes, fix failing checks, and resolve merge
 conflicts by rebasing the pull request's branch onto the base branch (not by merging the base branch in), keeping both
 sides' changes in every conflict: check that git diff origin/<base>...HEAD shows only the pull request's own changes.
 Commit and push to that branch, with git push --force-with-lease after a rebase.

@@ -528,8 +528,8 @@ from origin with no local changes."
     elif [[ -n $branch ]]; then
       prompt+="
 
-The repository is checked out on $branch, freshly updated from origin$(
-        [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]] && printf '%s' " with no local changes")."
+The repository is checked out on $branch$(
+        [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]] && printf '%s' ", freshly updated from origin with no local changes")."
     fi
     update_state "$id" '.session = ($v | fromjson) | del(.stopped)' \
       "$(jq -nc --arg id "$session" --arg checkout "$PWD" '{id: $id, checkout: $checkout}')"
