@@ -5,8 +5,11 @@ import {
   AGENT_MAX_CONCURRENCY,
   COLORS,
   MERGE_METHODS,
+  DIFF_SIDES,
+  LOCAL_PULL_REQUEST_STATES,
   OVERVIEW_RANGES,
   type OverviewRange,
+  parseLocalPullRequestUrl,
   parsePullRequestUrl,
   PRIORITIES,
   PULL_REQUEST_STATES,
@@ -26,13 +29,27 @@ const wipLimit = z.int().min(1).nullable()
 const isoDate = z.iso.date().nullable()
 /** Either an entity id or its (case-insensitive) name. */
 const ref = z.string().trim().min(1)
-const pullRequestUrl = z
+const githubPullRequestUrl = z
   .string()
   .trim()
   .refine(
     (url) => parsePullRequestUrl(url),
     'Must be a GitHub pull request URL, e.g. https://github.com/owner/repo/pull/123',
   )
+/** A GitHub pull request, or a local one (see `LocalPullRequest`). */
+const pullRequestUrl = z
+  .string()
+  .trim()
+  .refine(
+    (url) => parsePullRequestUrl(url) ?? parseLocalPullRequestUrl(url),
+    'Must be a GitHub pull request URL, e.g. https://github.com/owner/repo/pull/123, or a local one, /b/<board>/pr/<number>',
+  )
+/** A branch name: letters, digits and `_./+-`, not starting with `-` or `.` (git checks the rest). */
+const branch = z
+  .string()
+  .trim()
+  .max(250)
+  .regex(/^\w[\w./+-]*$/, 'Must be a branch name: letters, digits and _./+- only, starting with a letter or digit')
 const githubRepo = z
   .string()
   .trim()
@@ -495,6 +512,37 @@ export const commentSchema = z.object({
   notify: z.boolean().optional(),
 })
 
+/** Opens a local pull request for a ticket (POST /tickets/:id/local-pull-request). */
+export const openLocalPullRequestSchema = z.object({
+  /** The branch to merge. */
+  head: branch,
+  /** The branch to merge it into; the local repository's default branch (its `HEAD`) when left out. */
+  base: branch.optional(),
+  /** The ticket's title when left out. */
+  title: z.string().trim().min(1).max(300).optional(),
+  body: z.string().trim().max(60_000).default(''),
+})
+
+export const listLocalPullRequestsQuerySchema = z.object({
+  state: z.enum(LOCAL_PULL_REQUEST_STATES).optional(),
+})
+
+/** A comment on a local pull request: on the whole of it, or inline with `path` and `line` (and `side`). */
+export const localPullRequestCommentSchema = z
+  .object({
+    body: z.string().trim().min(1).max(20_000),
+    path: z.string().trim().min(1).max(1000).optional(),
+    line: z.int().min(1).optional(),
+    /** Which version of the file `line` is numbered in: `right` (the head's, the default) or `left` (the base's). */
+    side: z.enum(DIFF_SIDES).optional(),
+  })
+  .refine((input) => (input.path === undefined) === (input.line === undefined), {
+    message: 'An inline comment needs both path and line',
+  })
+  .refine((input) => input.side === undefined || input.line !== undefined, {
+    message: 'side goes with path and line',
+  })
+
 export const listTicketsQuerySchema = z.object({
   column: ref.optional(),
   assignee: name.optional(),
@@ -557,7 +605,8 @@ export const boardExportSchema = z.object({
       agentDocker: z.boolean().nullable().default(null),
       pullRequest: z
         .object({
-          url: pullRequestUrl,
+          // Local pull requests live on the board they were opened on, and aren't exported (see exportBoard).
+          url: githubPullRequestUrl,
           state: z.enum(PULL_REQUEST_STATES).default('unknown'),
           title: z.string().nullable().default(null),
         })
@@ -606,6 +655,8 @@ export type ApprovePlanInput = z.input<typeof approvePlanSchema>
 export type ClaimNextInput = z.input<typeof claimNextSchema>
 export type MergeRunInput = z.input<typeof mergeRunSchema>
 export type MergeTicketInput = z.input<typeof mergeTicketSchema>
+export type OpenLocalPullRequestInput = z.input<typeof openLocalPullRequestSchema>
+export type LocalPullRequestCommentInput = z.output<typeof localPullRequestCommentSchema>
 export type ListTicketsQuery = z.output<typeof listTicketsQuerySchema>
 export type AgentSuggestionQuery = z.output<typeof agentSuggestionQuerySchema>
 export type RecordUsage = z.output<typeof recordUsageSchema>

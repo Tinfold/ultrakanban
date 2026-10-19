@@ -403,6 +403,44 @@ const MIGRATIONS = [
   ALTER TABLE boards ADD COLUMN local_repo_path TEXT;
   `,
   `
+  -- Pull requests on the board itself, for boards with a local repository (see LocalPullRequest), numbered per board.
+  -- head_sha and base_sha are kept once merged or closed, so the diff stays readable after the branches move on.
+  CREATE TABLE local_pull_requests (
+    id TEXT PRIMARY KEY,
+    board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+    number INTEGER NOT NULL,
+    ticket_id TEXT REFERENCES tickets(id) ON DELETE SET NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL DEFAULT '',
+    head_branch TEXT NOT NULL,
+    base_branch TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'merged', 'closed')),
+    author TEXT NOT NULL,
+    head_sha TEXT,
+    base_sha TEXT,
+    merge_sha TEXT,
+    closed_by TEXT,
+    closed_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (board_id, number)
+  );
+  CREATE INDEX local_pull_requests_ticket ON local_pull_requests(ticket_id);
+  -- Comments on them: on the whole pull request, or inline on a line of a file's diff (path, line and side).
+  CREATE TABLE local_pull_request_comments (
+    id TEXT PRIMARY KEY,
+    pull_request_id TEXT NOT NULL REFERENCES local_pull_requests(id) ON DELETE CASCADE,
+    body TEXT NOT NULL,
+    author TEXT NOT NULL,
+    path TEXT,
+    line INTEGER,
+    side TEXT CHECK (side IN ('left', 'right')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX local_pull_request_comments_pull_request ON local_pull_request_comments(pull_request_id, created_at);
+  `,
+  `
   -- Whether auto-merge goes ahead when the only failing checks failed because of billing (see BoardSummary).
   ALTER TABLE boards ADD COLUMN ignore_billing_failures INTEGER NOT NULL DEFAULT 0;
   `,

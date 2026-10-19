@@ -1,3 +1,4 @@
+import { basename } from 'node:path'
 import {
   AGENT_IDLE_MINUTES,
   type AgentEffort,
@@ -10,6 +11,8 @@ import {
   type FailingCheck,
   IN_PROGRESS_COLUMN,
   isWeeklyLimit,
+  type LocalPullRequestState,
+  parseLocalPullRequestUrl,
   parsePullRequestUrl,
   PRIORITIES,
   type Priority,
@@ -142,8 +145,17 @@ const SELECT_TICKETS = `
 
 const BOARD_ORDER = 'ORDER BY (SELECT position FROM columns WHERE id = t.column_id), t.position'
 
+/** A local pull request's `repo`: `local/` and the folder name of its board's local repository. */
+function localRepoName(boardId: string) {
+  const board = sql.get<{ local_repo_path: string | null }>('SELECT local_repo_path FROM boards WHERE id = ?', boardId)
+  return `local/${(board?.local_repo_path && basename(board.local_repo_path)) || 'repository'}`
+}
+
 function toPullRequest(url: string, row: TicketRow): PullRequest {
-  const { repo, number } = parsePullRequestUrl(url)!
+  const local = parseLocalPullRequestUrl(url)
+  const { repo, number } = local
+    ? { repo: localRepoName(row.board_id), number: local.number }
+    : parsePullRequestUrl(url)!
   return {
     url,
     repo,
@@ -371,7 +383,7 @@ function isAgentOf(assignee: string, actor: string) {
  * feedback in a ticket's activity (`TRIAGE` in scripts/agent-loop/triage.sh): a comment, an approved plan, and a move
  * into the in-progress column, by anyone but the agent itself.
  */
-function wakeForFeedback(ticket: Pick<Ticket, 'boardId' | 'assignee'>, actor: string) {
+export function wakeForFeedback(ticket: Pick<Ticket, 'boardId' | 'assignee'>, actor: string) {
   if (ticket.assignee && !isAgentOf(ticket.assignee, actor)) wakeAgent(ticket.boardId)
 }
 
@@ -426,9 +438,30 @@ function assign(ticket: Ticket, assignee: string | null, actor: string) {
   if (assignee) logActivity(ticket.id, actor, 'claimed', { assignee })
 }
 
-/** Links (or with `null` unlinks) a pull request. Returns whether the link changed. */
+/**
+ * The state and title of a local pull request opened for the ticket (see `LocalPullRequest`); throws if the board has
+ * no such pull request, or it was opened for another ticket.
+ */
+function localPullRequestOf(ticket: Ticket, url: string) {
+  const { boardId, number } = parseLocalPullRequestUrl(url)!
+  const row = sql.get<{ state: LocalPullRequestState; title: string; ticket_id: string | null }>(
+    'SELECT state, title, ticket_id FROM local_pull_requests WHERE board_id = ? AND number = ?',
+    boardId,
+    number,
+  )
+  if (!row || boardId !== ticket.boardId) throw badRequest(`This board has no local pull request ${url}`)
+  if (row.ticket_id !== ticket.id) throw badRequest(`Local pull request ${url} was opened for another ticket`)
+  return row
+}
+
+/**
+ * Links (or with `null` unlinks) a pull request. A local one (see `LocalPullRequest`) must have been opened for the
+ * ticket, and takes its state from it rather than from GitHub. Returns whether the link changed.
+ */
 function linkPullRequest(ticket: Ticket, url: string | null, actor: string) {
-  const next = url === null ? null : parsePullRequestUrl(url)!.url
+  const local = url === null ? null : parseLocalPullRequestUrl(url)
+  const localState = local && localPullRequestOf(ticket, local.url)
+  const next = url === null ? null : (local?.url ?? parsePullRequestUrl(url)!.url)
   const current = ticket.pullRequest?.url ?? null
   if (next === current) return false
   sql.run(
@@ -440,6 +473,7 @@ function linkPullRequest(ticket: Ticket, url: string | null, actor: string) {
   )
   if (current) logActivity(ticket.id, actor, 'pull_request', { url: current, event: 'unlinked' })
   if (next) logActivity(ticket.id, actor, 'pull_request', { url: next, event: 'linked' })
+  if (localState) setPullRequestStatus(ticket.id, localState)
   return true
 }
 
@@ -887,7 +921,9 @@ export function approvePlan(id: string, input: ApprovePlanInput, actor: string):
 /** Tickets whose pull request may still change state. */
 export function listPendingPullRequests() {
   return sql.all<{ ticketId: string; url: string }>(
-    "SELECT id AS ticketId, pr_url AS url FROM tickets WHERE pr_url IS NOT NULL AND pr_state IN ('unknown', 'open', 'draft')",
+    // Local pull requests (`/b/<board>/pr/<number>`) aren't on GitHub: the board sets their state itself.
+    `SELECT id AS ticketId, pr_url AS url FROM tickets
+     WHERE pr_url IS NOT NULL AND pr_url NOT LIKE '/%' AND pr_state IN ('unknown', 'open', 'draft')`,
   )
 }
 
@@ -961,10 +997,16 @@ export function pullRequestChecks(ticketId: string): { headSha: string | null; f
 }
 
 /**
- * Records the latest GitHub state of a ticket's pull request. When it gets merged, the ticket moves to the
- * board's done column. Ignored if the ticket was linked to another pull request in the meantime.
+ * Records the latest GitHub state of a ticket's pull request, or a local one's (`actor` is who merged or closed it).
+ * When it gets merged, the ticket moves to the board's done column. Ignored if the ticket was linked to another pull
+ * request in the meantime.
  */
-export function applyPullRequestStatus(ticketId: string, url: string, status: PullRequestStatus): Ticket {
+export function applyPullRequestStatus(
+  ticketId: string,
+  url: string,
+  status: PullRequestStatus,
+  actor = GITHUB_ACTOR,
+): Ticket {
   const ticket = getTicket(ticketId)
   const previous = ticket.pullRequest
   // Merged is final on GitHub, so a different state can only be a stale response from an overlapping check.
@@ -986,11 +1028,11 @@ export function applyPullRequestStatus(ticketId: string, url: string, status: Pu
   // A first check finding the PR open or draft isn't news; merges and closes always are.
   const firstCheck = previous.state === 'unknown'
   if (previous.state !== status.state && (!firstCheck || status.state === 'merged' || status.state === 'closed')) {
-    logActivity(ticketId, GITHUB_ACTOR, 'pull_request', { url, event: status.state })
+    logActivity(ticketId, actor, 'pull_request', { url, event: status.state })
   }
   const done = workflowColumns(ticket.boardId).done
   if (status.state === 'merged' && done && ticket.columnId !== done.id) {
-    relocate(ticket, done.id, undefined, GITHUB_ACTOR, true)
+    relocate(ticket, done.id, undefined, actor, true)
   }
   bumpVersion(ticketId)
   return getTicket(ticketId)

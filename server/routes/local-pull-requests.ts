@@ -1,0 +1,125 @@
+import { Hono } from 'hono'
+import {
+  listLocalPullRequestsQuerySchema,
+  localPullRequestCommentSchema,
+  openLocalPullRequestSchema,
+} from '../../shared/schemas.ts'
+import { transaction } from '../db.ts'
+import { badRequest, conflict, notFound } from '../errors.ts'
+import { actorOf, readJson } from '../http.ts'
+import * as git from '../local-git.ts'
+import { getBoard } from '../store/boards.ts'
+import {
+  addLocalPullRequestComment,
+  finishLocalPullRequest,
+  getLocalPullRequest,
+  listLocalPullRequests,
+  openLocalPullRequest,
+} from '../store/local-pull-requests.ts'
+import { getTicket } from '../store/tickets.ts'
+
+/** The pull request's number from the path; 404 unless it is a whole number. */
+function numberOf(boardId: string, param: string) {
+  const number = Number(param)
+  if (!Number.isSafeInteger(number) || number < 1) throw notFound('Local pull request', `${boardId}#${param}`)
+  return number
+}
+
+const repositoryOf = (boardId: string) => git.openRepository(getBoard(boardId).localRepoPath)
+
+/** The commits a local pull request's diff and commits are between (see `git.resolveCommits`). */
+async function commitsOf(boardId: string, number: number) {
+  const pullRequest = getLocalPullRequest(boardId, number)
+  const repo = await repositoryOf(boardId)
+  return { repo, ...(await git.resolveCommits(repo, pullRequest)) }
+}
+
+/**
+ * Merges a local pull request in the board's local repository (see `git.merge`), then marks it merged, which moves its
+ * ticket to the done column.
+ */
+export async function mergeLocalPullRequest(boardId: string, number: number, actor: string) {
+  const pullRequest = getLocalPullRequest(boardId, number)
+  if (pullRequest.state !== 'open') {
+    throw conflict('pull_request_not_open', `Local pull request #${number} is ${pullRequest.state}`)
+  }
+  const repo = await repositoryOf(boardId)
+  const merged = await git.merge(repo, {
+    base: pullRequest.base,
+    head: pullRequest.head,
+    message: `Merge pull request #${number} from ${pullRequest.head}\n\n${pullRequest.title}`,
+  })
+  return transaction(() => finishLocalPullRequest(boardId, number, { state: 'merged', ...merged }, actor))
+}
+
+/** Local pull requests: on the board itself rather than on GitHub, for boards with a local repository. */
+export const localPullRequestRoutes = new Hono()
+  .post('/tickets/:ticketId/local-pull-request', async (c) => {
+    const input = await readJson(c, openLocalPullRequestSchema)
+    const ticket = getTicket(c.req.param('ticketId'))
+    const repo = await repositoryOf(ticket.boardId)
+    const base = input.base ?? (await git.defaultBranch(repo))
+    if (base === input.head) throw badRequest('The head and base branches must differ')
+    const [baseSha, headSha] = [await git.branchSha(repo, base), await git.branchSha(repo, input.head)]
+    for (const [branch, sha] of [
+      [base, baseSha],
+      [input.head, headSha],
+    ]) {
+      if (!sha) throw badRequest(`The local repository has no branch "${branch}"; push it there first`)
+    }
+    if (await git.isAncestor(repo, headSha!, baseSha!)) {
+      throw badRequest(`"${input.head}" has no commits that aren't on "${base}" yet`)
+    }
+    const pullRequest = transaction(() =>
+      openLocalPullRequest(
+        ticket.id,
+        { head: input.head, base, title: input.title ?? ticket.title, body: input.body },
+        actorOf(c),
+      ),
+    )
+    return c.json(pullRequest, 201)
+  })
+  .get('/boards/:boardId/pull-requests', (c) => {
+    const { state } = listLocalPullRequestsQuerySchema.parse(c.req.query())
+    return c.json(listLocalPullRequests(c.req.param('boardId'), state))
+  })
+  .get('/boards/:boardId/pull-requests/:number', (c) => {
+    const boardId = c.req.param('boardId')
+    return c.json(getLocalPullRequest(boardId, numberOf(boardId, c.req.param('number'))))
+  })
+  .get('/boards/:boardId/pull-requests/:number/diff', async (c) => {
+    const boardId = c.req.param('boardId')
+    const { repo, base, head } = await commitsOf(boardId, numberOf(boardId, c.req.param('number')))
+    return c.json(await git.diff(repo, base, head))
+  })
+  .get('/boards/:boardId/pull-requests/:number/commits', async (c) => {
+    const boardId = c.req.param('boardId')
+    const { repo, base, head } = await commitsOf(boardId, numberOf(boardId, c.req.param('number')))
+    return c.json(await git.commits(repo, base, head))
+  })
+  .post('/boards/:boardId/pull-requests/:number/comments', async (c) => {
+    const boardId = c.req.param('boardId')
+    const number = numberOf(boardId, c.req.param('number'))
+    const input = await readJson(c, localPullRequestCommentSchema)
+    return c.json(
+      transaction(() => addLocalPullRequestComment(boardId, number, input, actorOf(c))),
+      201,
+    )
+  })
+  .post('/boards/:boardId/pull-requests/:number/merge', async (c) => {
+    const boardId = c.req.param('boardId')
+    return c.json(await mergeLocalPullRequest(boardId, numberOf(boardId, c.req.param('number')), actorOf(c)))
+  })
+  .post('/boards/:boardId/pull-requests/:number/close', async (c) => {
+    const boardId = c.req.param('boardId')
+    const number = numberOf(boardId, c.req.param('number'))
+    const pullRequest = getLocalPullRequest(boardId, number)
+    // Its branches' commits are kept, so its diff stays readable; neither is needed to close it.
+    const repo = pullRequest.state === 'open' ? await repositoryOf(boardId).catch(() => null) : null
+    const [headSha, baseSha] = repo
+      ? [await git.branchSha(repo, pullRequest.head), await git.branchSha(repo, pullRequest.base)]
+      : [null, null]
+    return c.json(
+      transaction(() => finishLocalPullRequest(boardId, number, { state: 'closed', headSha, baseSha }, actorOf(c))),
+    )
+  })

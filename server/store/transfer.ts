@@ -1,4 +1,4 @@
-import type { BoardSummary } from '../../shared/domain.ts'
+import { type BoardSummary, parseLocalPullRequestUrl } from '../../shared/domain.ts'
 import { BOARD_EXPORT_FORMAT, type BoardExport } from '../../shared/schemas.ts'
 import { listActivity, logActivity } from './activity.ts'
 import { createBoard, getBoardDetail, updateBoard } from './boards.ts'
@@ -35,11 +35,11 @@ export function exportBoard(id: string): BoardExport {
       agentEffort: ticket.agentEffort,
       agentModel: ticket.agentModel,
       agentDocker: ticket.agentDocker,
-      pullRequest: ticket.pullRequest && {
-        url: ticket.pullRequest.url,
-        state: ticket.pullRequest.state,
-        title: ticket.pullRequest.title,
-      },
+      // A local pull request lives on this board only (see LocalPullRequest), so it isn't exported.
+      pullRequest:
+        ticket.pullRequest && !parseLocalPullRequestUrl(ticket.pullRequest.url)
+          ? { url: ticket.pullRequest.url, state: ticket.pullRequest.state, title: ticket.pullRequest.title }
+          : null,
       comments: listActivity(ticket.id).flatMap((entry) =>
         entry.type === 'comment' ? [{ actor: entry.actor, body: entry.data.body, createdAt: entry.createdAt }] : [],
       ),
