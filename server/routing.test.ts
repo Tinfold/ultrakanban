@@ -466,10 +466,7 @@ describe('routing', () => {
       jev.answers = picks('sonnet', 'low')
       const ticket = await addTicket({ title: 'Fix login bug again', tags: ['bug'] })
       const body = await claimed(ticket)
-      assert.deepEqual(
-        jev.calls[0].body.questions[0].options.map((option: { name: string }) => option.name),
-        ['opus', 'haiku'],
-      )
+      assert.deepEqual(Object.keys(jev.calls[0].body.questions.model.criteria), ['opus', 'haiku'])
       assert.equal(body.routed?.source, 'default')
     })
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, mock, test } from 'node:test'
 import type { ApiErrorBody, BoardSummary } from '../shared/domain.ts'
-import { JEV_MODEL, systemOne, type JevQuestion } from './jev.ts'
+import { fromWireAnswers, JEV_MODEL, systemOne, toWireQuestions, type JevQuestion } from './jev.ts'
 import { boardId, call, jev } from './test-app.ts'
 
 describe('jev client', () => {
@@ -28,6 +28,40 @@ describe('jev client', () => {
     assert.equal(jev.calls[0].url, 'https://api.typesafe.ai/v1/systemone')
     assert.equal(jev.calls[0].auth, 'Bearer ts_key')
     assert.equal(jev.calls[0].body.model, JEV_MODEL)
+  })
+
+  test('speaks the wire format: questions keyed by id, scores as level indexes', () => {
+    const asked: JevQuestion[] = [
+      ...questions,
+      {
+        id: 'effort',
+        type: 'score',
+        question: 'How much?',
+        levels: [{ name: 'low', description: 'easy' }, { name: 'high' }],
+      },
+      { id: 'spec', type: 'noul', question: 'Fully specified.' },
+    ]
+    const wire = toWireQuestions(asked) as Record<string, any>
+    assert.deepEqual(Object.keys(wire), ['model', 'effort', 'spec'])
+    assert.deepEqual(wire.effort.criteria, ['low: easy', 'high'])
+    assert.ok(wire.spec.instructions)
+    const answers = fromWireAnswers(
+      {
+        model: { type: 'choice', choice: 'haiku', confidence: 1, probabilities: { haiku: 1, sonnet: 0 } },
+        effort: { type: 'score', score: 1, confidence: 0.9, probabilities: { '0': 0.2, '1': 0.8 } },
+        spec: { type: 'noul', noul: 0.3 },
+      },
+      asked,
+    )
+    assert.deepEqual(answers[1], {
+      id: 'effort',
+      type: 'score',
+      score: 'high',
+      probabilities: { low: 0.2, high: 0.8 },
+      confidence: 0.9,
+      legend: null,
+    })
+    assert.deepEqual(answers[2], { id: 'spec', type: 'noul', probability: 0.3 })
   })
 
   test('returns null on a timeout, an error status or no key', async () => {
