@@ -85,6 +85,13 @@ The **Setup page** (`/setup`, the gear in the header) shows what's left and does
    (or create one there); under **Agent**, switch on **Run the agent on this board**. The agent then works the board's
    Todo tickets.
 
+**Without GitHub.** A board can work a git repository on your machine instead: in Board settings, turn on **Local
+repository**, give its path and switch on the agent. The agent then pushes its branches to that repository and opens
+pull requests on the board itself, each with a GitHub-style page (Conversation and Files changed). Comment on them,
+inline too, and the agent answers and pushes fixes; **Merge** there merges the branch in the repository and moves the
+ticket to Done. No GitHub login needed. See
+[Boards with a local repository](docs/agents.md#boards-with-a-local-repository).
+
 To update, use the update button in the header: it moves this checkout to origin's default branch and rebuilds the
 board and the agents container. It shows once something can act on it: the agent services on Linux, or the updater
 container (`--profile updater`) that `scripts/setup.sh` starts elsewhere. Or `git pull`, then run the same command

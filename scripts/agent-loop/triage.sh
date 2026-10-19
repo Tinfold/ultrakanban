@@ -1,15 +1,18 @@
 # The jq programs that find a ticket's new feedback (TRIAGE) and the columns the agent doesn't work in.
 # Part of agent-loop.sh, which sources it; the settings it uses are described there.
 
-# Finds a ticket's new feedback. Input: its activity, open pull request (gh pr view) or null, the classified checks
-# of its head commit (ci_status) or null, pull request comments, reviews and inline comments (GitHub REST), and its
-# saved state. Prints the snapshot to save after a successful run, the items to hand over, their fingerprint,
-# whether to run now (backoff after failures), whether there is human feedback among them, whether the pull request
-# has merge conflicts now, and which notes to leave (CI not running, CI run cap reached).
+# Finds a ticket's new feedback. Input: its activity, open pull request (gh pr view, or a local one in its shape with
+# its link as `url`) or null, the classified checks of its head commit (ci_status) or null, pull request comments,
+# reviews and inline comments (GitHub REST), a local pull request's comments (GET /boards/:id/pull-requests/:number,
+# inline ones included), and its saved state. Prints the snapshot to save after a successful run, the items to hand
+# over, their fingerprint, whether to run now (backoff after failures), whether there is human feedback among them,
+# whether the pull request has merge conflicts now, and which notes to leave (CI not running, CI run cap reached).
 #
 # The board wakes the loop up for the same ticket activity this counts as human feedback (comments, moves into the
-# in-progress column and approved plans by anyone but the agent; see wakeForFeedback in server/store/tickets.ts), so
-# keep the two in step.
+# in-progress column and approved plans by anyone but the agent; see wakeForFeedback in server/store/tickets.ts), and
+# for local pull request comments (addLocalPullRequestComment in server/store/local-pull-requests.ts), so keep them in
+# step. A local pull request's comment ids aren't ordered, so its comments are counted instead: the snapshot keeps how
+# many of its comments were handed over (`local`, with the pull request's link, as a new pull request starts again).
 #
 # After a person stopped a run on the ticket (the state's `stopped`, that run's snapshot), it doesn't run again until
 # there is human feedback that run wasn't handed: a comment, a move or an approval on the ticket, or pull request
@@ -19,7 +22,7 @@ def bot: (.user.type // "") == "Bot" or ((.user.login // "") | endswith("[bot]")
 def feedback: (bot | not) and ((.body // "") | contains($marker) | not);
 def ours: . == $agent or . == $loop or startswith($agent + "/");
 def clip: if length > 2000 then .[:2000] + " [...]" else . end;
-. as [$activity, $pr, $ci, $issue, $reviews, $inline, $s]
+. as [$activity, $pr, $ci, $issue, $reviews, $inline, $comments, $s]
 | ($pr // {}) as $p
 | ($s.checks | if type == "object" then . else {} end) as $seen
 | (if $ci != null and $seen.sha == $ci.sha then $seen.names // [] else [] end) as $handedOver
@@ -46,7 +49,14 @@ def clip: if length > 2000 then .[:2000] + " [...]" else . end;
          text: "Pull request review (\(.state)) from \(.user.login) (\(.html_url)):\n\(.body // "" | clip)"}),
     ($inline[] | select(.id > ($w.inline // 0) and feedback)
       | {key: "c\(.id)", text: ("Inline review comment from \(.user.login) "
-         + "on \(.path):\(.line // .original_line // "?") (\(.html_url)):\n\(.body // "" | clip)")})
+         + "on \(.path):\(.line // .original_line // "?") (\(.html_url)):\n\(.body // "" | clip)")}),
+    ($comments | to_entries[] | (.key + 1) as $n | .value
+      | select($n > ($w.local | if .pr == $p.url then .seen else 0 end))
+      | select((.author | ours | not) and ((.body // "") | contains($marker) | not))
+      | "\($p.url)#comment-\(.id)" as $link
+      | {key: "l\($n)", text: ((if .path != null
+          then "Inline review comment from \(.author) on \(.path):\(.line // "?") (\($link)):\n"
+          else "Pull request comment from \(.author) (\($link)):\n" end) + (.body // "" | clip))})
   ];
 human($s) as $human
 | ($s.stopped | if type == "object" then human(.) != [] else true end) as $resumable
@@ -65,6 +75,8 @@ human($s) as $human
       issue: ([$issue[].id, $s.issue // 0] | max),
       review: ([$reviews[].id, $s.review // 0] | max),
       inline: ([$inline[].id, $s.inline // 0] | max),
+      local: (if $p.url != null and $comments != [] then {pr: $p.url, seen: ([$comments | length,
+        ($s.local | if .pr == $p.url then .seen else 0 end)] | max)} else $s.local end),
       checks: (if $ci == null or $capped then $seen else {sha: $ci.sha, names: ($handedOver + $ci.code | unique)} end),
       conflict: $conflict,
       ciRuns: $ciRuns,

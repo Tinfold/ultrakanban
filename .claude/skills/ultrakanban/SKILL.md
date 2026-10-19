@@ -150,7 +150,8 @@ curl -s -X POST $KANBAN/api/tickets/$TICKET/review \
   -d "{\"agent\":\"$ME\",\"pullRequest\":\"$PR_URL\",\"comment\":\"What changed and how it was verified. Screenshots attached.\"}"
 ```
 
-This links the pull request, keeps the ticket yours and moves it to the review column in one step.
+This links the pull request, keeps the ticket yours and moves it to the review column in one step. On a board with a
+local repository, the pull request is a local one on the board instead (see [Local pull requests](#local-pull-requests)).
 
 **Questions need no pull request.** A ticket tagged `question` asks for an answer, not a change: investigate, then
 submit it with the answer as the comment and no `pullRequest` (`{"agent":"<you>","comment":"<the answer>"}`). A
@@ -204,6 +205,36 @@ Failing CI isn't always about the code. Before fixing a failing check, read the 
 runners that didn't start or were lost, infrastructure, a flaky test unrelated to the change, missing secrets),
 don't push anything, not even an empty commit to re-trigger CI: explain what you found in a ticket comment and
 stop there. A human has to fix CI.
+
+## Local pull requests
+
+A board with a local repository (its `localRepoPath`, a git repository on the machine; the loop's prompt says so) has
+nothing on GitHub: don't use `gh` for it. That repository is your checkout's `origin`. Push a branch of your own to it
+(a branch checked out there can't be pushed to), then open the pull request on the board, which links it to the ticket:
+
+```sh
+git push -u origin $BRANCH
+curl -s -X POST $KANBAN/api/tickets/$TICKET/local-pull-request \
+  -H 'Content-Type: application/json' -H "X-Actor: $ME" \
+  -d "{\"head\":\"$BRANCH\",\"title\":\"...\",\"body\":\"markdown\"}"   # base: the default branch unless given
+```
+
+Its `url` is `/b/$BOARD/pr/<number>`: submit the ticket for review with it as the `pullRequest`, as above. A person
+reviews it on the board and merges it there, which moves the ticket to the done column; closing it cancels the ticket,
+as on GitHub. There is no CI. Feedback is in its comments; inline ones have a `path`, `line` and `side` (`right` for
+the head's version of the file, `left` for the base's):
+
+```sh
+curl -s $KANBAN/api/boards/$BOARD/pull-requests/$NUMBER | jq '{state, head, base, comments}'
+curl -s $KANBAN/api/boards/$BOARD/pull-requests/$NUMBER/diff     # the diff, file by file
+curl -s -X POST $KANBAN/api/boards/$BOARD/pull-requests/$NUMBER/comments \
+  -H 'Content-Type: application/json' -H "X-Actor: $ME" \
+  -d '{"body":"Done.\n\n<!-- ultrakanban:<your name> -->","path":"src/a.ts","line":12,"side":"right"}'
+```
+
+Reply to a comment on the whole pull request without `path`, `line` and `side`, and to an inline one with the ones it
+has. End every reply with the marker line, as on GitHub. Push fixes to the pull request's branch on `origin`; it follows
+the branch, so it needs nothing else. Merge conflicts make merging it fail: merge the base branch into yours and push.
 
 ## Handling errors
 

@@ -668,10 +668,14 @@ $MARKER"
 
 This board's repository is a local one, not on GitHub: origin is $(git remote get-url origin 2>/dev/null ||
     printf '%s' "$local_repo") on this machine. Don't use gh or GitHub for it. Push your branch to origin (a new branch
-of your own: a branch checked out there can't be pushed to), then open the pull request on the board instead,
-which links it to the ticket: POST $KANBAN/api/tickets/<id>/local-pull-request with
-{\"head\":\"<your branch>\",\"title\":...,\"body\":...}. Then submit the ticket for review as usual. A person
-reviews and merges it on the board."
+of your own: a branch checked out there can't be pushed to), then open the pull request on the board instead of with
+gh pr create, which links it to the ticket: POST $KANBAN/api/tickets/<id>/local-pull-request with
+{\"head\":\"<your branch>\",\"title\":...,\"body\":...}. Then submit the ticket for review as usual, with the
+pull request's \"url\" (/b/$BOARD/pr/<number>). A person reviews and merges it on the board.
+Its comments, inline ones included (those have a \"path\" and \"line\"), are in
+GET $KANBAN/api/boards/$BOARD/pull-requests/<number>, and its diff in .../diff. Reply on it with
+POST $KANBAN/api/boards/$BOARD/pull-requests/<number>/comments and {\"body\":...}, adding the \"path\", \"line\"
+and \"side\" of the comment you answer to reply inline, with the marker line at the end. Push fixes to its branch on origin."
   # The board's description holds conventions for every ticket on it, so each run gets it rather than having to look.
   description=$(jq -r '.board.description // "" | gsub("^\\s+|\\s+$"; "")' <<<"$board") || description=
   [[ -z $description ]] || printf '%s' "
