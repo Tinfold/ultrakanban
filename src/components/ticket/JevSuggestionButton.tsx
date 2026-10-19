@@ -1,5 +1,5 @@
 import { SparklesIcon } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AGENT_DEFAULTS, type AgentEffort, type JevSuggestion } from '@shared/domain'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -17,6 +17,12 @@ interface JevSuggestionButtonProps {
   agentEffort: AgentEffort | null
   onApply: (model: string, effort: AgentEffort) => void
 }
+
+/** Jev is a paid call, so wait this long after the input stops changing before asking by itself. */
+const ASK_DELAY_MS = 3000
+
+/** What Jev already answered, by board and input, so re-rendering or reopening a ticket doesn't ask again. */
+const answered = new Map<string, JevSuggestion>()
 
 const percent = (probability: number) => `${Math.round(probability * 100)}%`
 
@@ -42,18 +48,47 @@ export function JevSuggestionButton({
 }: JevSuggestionButtonProps) {
   const { detail } = useBoardContext()
   const hasKey = !!useSetup().data?.typesafe.source
+  const boardId = detail.board.id
   const [state, setState] = useState<{ asking: boolean; suggestion: JevSuggestion | null; failed: boolean }>({
     asking: false,
     suggestion: null,
     failed: false,
   })
+  const canAsk = hasKey && !!title.trim()
+  const key = JSON.stringify([boardId, title, description, tagIds, epicId])
+
+  useEffect(() => {
+    if (!canAsk) return
+    const known = answered.get(key)
+    if (known) {
+      setState({ asking: false, suggestion: known, failed: false })
+      return
+    }
+    let current = true
+    const timer = setTimeout(() => {
+      setState({ asking: true, suggestion: null, failed: false })
+      api
+        .jevSuggestion(boardId, { title, description, tagIds, epicId })
+        .then((result) => {
+          answered.set(key, result)
+          if (current) setState({ asking: false, suggestion: result, failed: false })
+        })
+        .catch(() => current && setState({ asking: false, suggestion: null, failed: true }))
+    }, ASK_DELAY_MS)
+    return () => {
+      current = false
+      clearTimeout(timer)
+    }
+  }, [canAsk, key])
+
   if (!hasKey) return null
   const { asking, suggestion, failed } = state
 
   const ask = async () => {
     setState({ asking: true, suggestion: null, failed: false })
     try {
-      const result = await api.jevSuggestion(detail.board.id, { title, description, tagIds, epicId })
+      const result = await api.jevSuggestion(boardId, { title, description, tagIds, epicId })
+      answered.set(key, result)
       setState({ asking: false, suggestion: result, failed: false })
     } catch {
       setState({ asking: false, suggestion: null, failed: true })
