@@ -440,6 +440,11 @@ const MIGRATIONS = [
   ALTER TABLE token_usage ADD COLUMN jev_confidence REAL;
   `,
   `
+  -- What Jev was told about the ticket when it picked (a hash of its content, see contentKey in server/jev-routing.ts),
+  -- so a ticket whose content hasn't changed since isn't sent to Jev again.
+  ALTER TABLE ticket_routes ADD COLUMN content_key TEXT;
+  `,
+  `
   -- Whether auto-merge goes ahead when the only failing checks failed because of billing (see BoardSummary).
   ALTER TABLE boards ADD COLUMN ignore_billing_failures INTEGER NOT NULL DEFAULT 0;
   `,

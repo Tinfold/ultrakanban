@@ -9,19 +9,20 @@ import {
   parseWorkerName,
   ROUTING_MIN_FINISHED,
   ROUTING_MIN_SETTING_TICKETS,
+  type RoutedSetting,
   type RoutedSource,
   type RoutingComparison,
   type RoutingPick,
   type RoutingSource,
   type RoutingSourceStats,
   type RunRouting,
+  type Ticket,
   type TokenCounts,
   weightedTokens,
   workerSetting,
 } from '../../shared/domain.ts'
 import type { RecordUsage } from '../../shared/schemas.ts'
 import { JEV_MODEL, type JevUsage } from '../jev.ts'
-import type { TicketRoute } from '../jev-routing.ts'
 import { now, sql } from '../db.ts'
 import { getBoard } from './boards.ts'
 import { decidedTickets, suggestAgent } from './suggestions.ts'
@@ -41,6 +42,7 @@ interface RouteRow {
   jev_model: string | null
   jev_effort: AgentEffort | null
   jev_confidence: number | null
+  content_key: string | null
   created_at: string
 }
 
@@ -50,7 +52,7 @@ const sameSetting = (a: Setting, b: Setting) => a.model === b.model && a.effort 
 const settingKey = (setting: Setting) => `${setting.model}/${setting.effort}`
 
 /** The model and effort the board's agent works tickets at when they don't name their own. */
-function boardDefault(boardId: string): { model: string; effort: AgentEffort } {
+export function boardDefault(boardId: string): { model: string; effort: AgentEffort } {
   const board = getBoard(boardId)
   return { model: board.agentModel ?? AGENT_DEFAULTS.model, effort: board.agentEffort ?? AGENT_DEFAULTS.effort }
 }
@@ -70,36 +72,64 @@ const jevRun = (usage: JevUsage): RecordUsage => {
   }
 }
 
-/**
- * Records how a ticket that was just claimed is routed (docs/JEV.md, item 8): the setting it is worked at and where it
- * came from (its own, else the board's default), and what the history suggestion and Jev (`jev`, asked beforehand on a
- * board that routes with it) picked, so the sources can be compared later. Jev's pick is only recorded, never used, and
- * its tokens (`jevUsage`) are recorded as a run on the ticket.
- */
-export function saveRoute(ticketId: string, jev: TicketRoute | null, jevUsage: JevUsage | null) {
-  const ticket = getTicket(ticketId)
-  const fallback = boardDefault(ticket.boardId)
-  const own = ticket.agentModel !== null || ticket.agentEffort !== null
-  const used = own
-    ? { model: ticket.agentModel ?? fallback.model, effort: ticket.agentEffort ?? fallback.effort }
-    : fallback
+const jevPick = (row: Pick<RouteRow, 'jev_model' | 'jev_effort' | 'jev_confidence'>): RoutingPick | null =>
+  row.jev_model && row.jev_effort
+    ? { model: row.jev_model, effort: row.jev_effort, confidence: row.jev_confidence }
+    : null
+
+/** The history suggestion's pick for the ticket, when it is built on enough similar tickets to route with. */
+export function historyPick(ticket: Ticket): { model: string; effort: AgentEffort } | null {
   const { suggestion } = suggestAgent(ticket.boardId, {
     title: ticket.title,
     tag: ticket.tagIds,
     steps: parseChecklist(ticket.description).length,
   })
-  const history = suggestion && suggestion.tickets >= HISTORY_MIN_TICKETS ? suggestion : null
+  return suggestion && suggestion.tickets >= HISTORY_MIN_TICKETS
+    ? { model: suggestion.model, effort: suggestion.effort }
+    : null
+}
+
+/** Jev's pick recorded for the ticket when its content had `contentKey` (see `saveRoute`); null when there is none. */
+export function cachedJevPick(ticketId: string, contentKey: string): RoutingPick | null {
+  const route = sql.get<RouteRow>(
+    'SELECT * FROM ticket_routes WHERE ticket_id = ? AND content_key = ? AND jev_model IS NOT NULL',
+    ticketId,
+    contentKey,
+  )
+  return route ? jevPick(route) : null
+}
+
+/**
+ * Records how a ticket that was just claimed is routed (docs/JEV.md, item 8): the setting it is worked at and where it
+ * came from (`routed` on a board that routes with Jev, else its own setting or the board's default), and what the
+ * history suggestion and Jev (`jev`, asked beforehand on a board that routes with it) picked, so the sources can be
+ * compared later. Jev's tokens (`jevUsage`, when it was asked this time) are recorded as a run on the ticket, and its
+ * pick is kept with the `contentKey` of what it was told, so it isn't asked again until the ticket changes.
+ */
+export function saveRoute(
+  ticketId: string,
+  jev: RoutingPick | null,
+  jevUsage: JevUsage | null,
+  { routed = null, contentKey = null }: { routed?: RoutedSetting | null; contentKey?: string | null } = {},
+) {
+  const ticket = getTicket(ticketId)
+  const fallback = boardDefault(ticket.boardId)
+  const own = ticket.agentModel !== null || ticket.agentEffort !== null
+  const used =
+    routed ??
+    (own ? { model: ticket.agentModel ?? fallback.model, effort: ticket.agentEffort ?? fallback.effort } : fallback)
+  const history = historyPick(ticket)
   if (jevUsage) recordUsage(ticket.id, jevRun(jevUsage))
   sql.run(
     `INSERT OR REPLACE INTO ticket_routes
        (ticket_id, source, model, effort, confidence, default_model, default_effort, history_model, history_effort,
-        jev_model, jev_effort, jev_confidence, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        jev_model, jev_effort, jev_confidence, content_key, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ticket.id,
-    own ? 'ticket' : 'default',
+    routed?.source ?? (own ? 'ticket' : 'default'),
     used.model,
     used.effort,
-    null,
+    routed?.confidence ?? null,
     fallback.model,
     fallback.effort,
     history?.model ?? null,
@@ -107,14 +137,10 @@ export function saveRoute(ticketId: string, jev: TicketRoute | null, jevUsage: J
     jev?.model ?? null,
     jev?.effort ?? null,
     jev?.confidence ?? null,
+    jev ? contentKey : null,
     now(),
   )
 }
-
-const jevPick = (row: Pick<RouteRow, 'jev_model' | 'jev_effort' | 'jev_confidence'>): RoutingPick | null =>
-  row.jev_model && row.jev_effort
-    ? { model: row.jev_model, effort: row.jev_effort, confidence: row.jev_confidence }
-    : null
 
 /** A run's routing as recorded with its usage (see `RunRouting`). */
 export function toRunRouting(row: {

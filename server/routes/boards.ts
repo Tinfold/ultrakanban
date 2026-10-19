@@ -148,8 +148,8 @@ export const boardRoutes = ({ pullRequests, mergeQueue, attachmentFiles }: AppSe
       try {
         const ticket = transaction(() => claimNextTicket(boardId, input))
         transaction(() => recordClaim(boardId, null))
-        await routeClaim(ticket)
-        return c.json(ticket)
+        const routed = await routeClaim(ticket)
+        return c.json(routed ? { ...ticket, routed } : ticket)
       } catch (error) {
         // Nothing to do, or the usage reserve holding agents back on purpose (the overview says so), isn't a failure.
         const waiting =

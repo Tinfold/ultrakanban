@@ -5,6 +5,7 @@ import {
   type AgentEffort,
   JEV_AGENT,
   type Overview,
+  type RoutedSetting,
   type RoutingComparison,
   type Ticket,
   type TokenUsage,
@@ -297,5 +298,203 @@ describe('routing', () => {
       { picked: history.picked, tickets: history.tickets, unmeasured: history.unmeasured, costUsd: history.costUsd },
       { picked: 1, tickets: 1, unmeasured: 3, costUsd: 0.2 },
     )
+  })
+
+  describe('when Jev’s picks are used', () => {
+    type Claimed = Ticket & { routed?: RoutedSetting }
+    const routeOn = (body: Record<string, unknown> = {}) => routeWithJev({ jevMode: 'on', ...body })
+    const claimed = async (ticket: Ticket) =>
+      (
+        await call<Claimed>('POST', `/tickets/${ticket.id}/claim`, {
+          agent: 'claude/opus/medium',
+          moveTo: 'In progress',
+        })
+      ).body
+    const route = async (ticket: Ticket) =>
+      (await call<{ routed: RoutedSetting | null }>('GET', `/tickets/${ticket.id}/route`)).body.routed
+    /** Three finished tickets worked at sonnet/low, so the history suggestion picks it for tickets like them. */
+    async function history() {
+      for (const index of [0, 1, 2]) {
+        await routed(`Fix login bug ${index}`, 'claude/sonnet/low', 'Done', {
+          input: { agentModel: 'sonnet', agentEffort: 'low', tags: ['bug'] },
+        })
+      }
+      jev.calls.length = 0
+    }
+
+    test('returns Jev’s pick as routed, leaving the ticket’s own fields alone, and records it on the runs', async () => {
+      await routeOn()
+      const ticket = await addTicket({ title: 'Fix a typo in the README' })
+      jev.answers = picks('haiku', 'low', 0.85)
+      const body = await claimed(ticket)
+      assert.deepEqual(body.routed, { model: 'haiku', effort: 'low', source: 'jev', confidence: 0.85 })
+      assert.equal(body.agentModel, null)
+      assert.equal(body.agentEffort, null)
+      assert.equal((await call<Ticket>('GET', `/tickets/${ticket.id}`)).body.agentModel, null)
+      assert.deepEqual((await run(ticket, 'claude/haiku/low')).routing, {
+        source: 'jev',
+        confidence: 0.85,
+        jev: { model: 'haiku', effort: 'low', confidence: 0.85 },
+      })
+
+      const next = await addTicket({ title: 'Next one' })
+      const { body: fromNext } = await call<Claimed>('POST', `/boards/${boardId}/tickets/claim-next`, {
+        agent: 'claude/opus/medium',
+        column: 'Todo',
+      })
+      assert.equal(fromNext.id, next.id)
+      assert.equal(fromNext.routed?.source, 'jev')
+    })
+
+    test('the ticket’s own setting wins, and Jev isn’t asked for it', async () => {
+      await routeOn()
+      const own = await addTicket({ title: 'Own', agentModel: 'sonnet' })
+      assert.deepEqual((await claimed(own)).routed, {
+        model: 'sonnet',
+        effort: 'medium',
+        source: 'ticket',
+        confidence: null,
+      })
+      assert.equal(jev.calls.length, 0)
+    })
+
+    test('below the threshold, falls back to the history suggestion, then the default', async () => {
+      await history()
+      await routeOn({ jevThreshold: 0.8 })
+      jev.answers = picks('haiku', 'low', 0.75)
+      const like = await addTicket({ title: 'Fix login bug again', tags: ['bug'] })
+      assert.deepEqual((await claimed(like)).routed, {
+        model: 'sonnet',
+        effort: 'low',
+        source: 'history',
+        confidence: null,
+      })
+      assert.equal(jev.calls.length, 1)
+      assert.equal((await run(like, 'claude/sonnet/low')).routing?.source, 'history')
+
+      const unlike = await addTicket({ title: 'Write release notes' })
+      assert.deepEqual((await claimed(unlike)).routed, {
+        model: 'opus',
+        effort: 'medium',
+        source: 'default',
+        confidence: null,
+      })
+    })
+
+    test('the history suggestion needs 3 similar tickets', async () => {
+      await routed('Fix login bug 0', 'claude/sonnet/low', 'Done', {
+        input: { agentModel: 'sonnet', agentEffort: 'low', tags: ['bug'] },
+      })
+      await routed('Fix login bug 1', 'claude/sonnet/low', 'Done', {
+        input: { agentModel: 'sonnet', agentEffort: 'low', tags: ['bug'] },
+      })
+      await routeOn()
+      jev.answers = picks('haiku', 'low', 0.1)
+      const ticket = await addTicket({ title: 'Fix login bug again', tags: ['bug'] })
+      assert.equal((await claimed(ticket)).routed?.source, 'default')
+    })
+
+    test('keeps to the board’s models for Jev', async () => {
+      await history()
+      await routeOn({ jevModels: ['opus', 'haiku'] })
+      // Jev is only offered the board's models; an answer outside them is left out, and so is a history pick.
+      jev.answers = picks('sonnet', 'low')
+      const ticket = await addTicket({ title: 'Fix login bug again', tags: ['bug'] })
+      const body = await claimed(ticket)
+      assert.deepEqual(
+        jev.calls[0].body.questions[0].options.map((option: { name: string }) => option.name),
+        ['opus', 'haiku'],
+      )
+      assert.equal(body.routed?.source, 'default')
+    })
+
+    test('may only lower: holds Jev’s and the history suggestion’s picks to the board’s default', async () => {
+      await history()
+      await call('PATCH', `/boards/${boardId}`, { agentModel: 'sonnet', agentEffort: 'medium' })
+      await routeOn({ jevOnlyLower: true })
+      jev.answers = picks('fable', 'low')
+      const dearer = await addTicket({ title: 'Redesign the store' })
+      assert.deepEqual((await claimed(dearer)).routed, {
+        model: 'sonnet',
+        effort: 'low',
+        source: 'jev',
+        confidence: 0.9,
+      })
+      jev.answers = picks('haiku', 'max')
+      const harder = await addTicket({ title: 'Untangle the merge queue' })
+      assert.deepEqual((await claimed(harder)).routed, {
+        model: 'haiku',
+        effort: 'medium',
+        source: 'jev',
+        confidence: 0.9,
+      })
+
+      await call('PATCH', `/boards/${boardId}`, { agentModel: 'haiku', agentEffort: 'medium' })
+      jev.answers = picks('fable', 'max', 0.1)
+      const like = await addTicket({ title: 'Fix login bug again', tags: ['bug'] })
+      assert.deepEqual((await claimed(like)).routed, {
+        model: 'haiku',
+        effort: 'low',
+        source: 'history',
+        confidence: null,
+      })
+    })
+
+    test('keeps Jev’s pick while the ticket doesn’t change, so claims again and feedback runs don’t ask it', async () => {
+      await routeOn()
+      jev.answers = picks('haiku', 'low', 0.85)
+      const ticket = await addTicket({ title: 'Fix a typo', description: '- [ ] fix it\n- [ ] test it' })
+      await claimed(ticket)
+      assert.equal(jev.calls.length, 1)
+      jev.answers = picks('fable', 'max')
+      await call('POST', `/tickets/${ticket.id}/checklist/0`, { checked: true })
+      await call('PATCH', `/tickets/${ticket.id}`, { assignee: 'claude/haiku/low' })
+      assert.deepEqual(await route(ticket), { model: 'haiku', effort: 'low', source: 'jev', confidence: 0.85 })
+      await call('POST', `/tickets/${ticket.id}/release`, { agent: 'claude/haiku/low', moveTo: 'Todo' })
+      assert.equal((await claimed(ticket)).routed?.model, 'haiku')
+      assert.equal(jev.calls.length, 1)
+      assert.equal((await usage(ticket)).filter((entry) => entry.agent === JEV_AGENT).length, 1)
+
+      // Edited, it is routed again.
+      await call('PATCH', `/tickets/${ticket.id}`, { description: 'Rewrite the parser.' })
+      assert.deepEqual(await route(ticket), { model: 'fable', effort: 'max', source: 'jev', confidence: 0.9 })
+      assert.equal(jev.calls.length, 2)
+      assert.equal((await run(ticket, 'claude/fable/max')).routing?.source, 'jev')
+    })
+
+    test('the route is null unless Jev’s picks are used, and asks nothing then', async () => {
+      const ticket = await addTicket({ title: 'Anything' })
+      assert.equal(await route(ticket), null)
+      await routeWithJev()
+      assert.equal(await route(ticket), null)
+      assert.equal(jev.calls.length, 0)
+      assert.equal((await claimed(ticket)).routed, undefined)
+      assert.equal(jev.calls.length, 1)
+    })
+
+    test('Jev failing or timing out doesn’t fail the claim, which goes to the next source, and isn’t kept', async () => {
+      await history()
+      await routeOn()
+      jev.status = 500
+      const like = await addTicket({ title: 'Fix login bug again', tags: ['bug'] })
+      const failed = await claimed(like)
+      assert.equal(failed.assignee, 'claude/opus/medium')
+      assert.equal(failed.routed?.source, 'history')
+
+      jev.status = 200
+      jev.hang = true
+      const unlike = await addTicket({ title: 'Write release notes' })
+      const timedOut = await claimed(unlike)
+      assert.equal(timedOut.assignee, 'claude/opus/medium')
+      assert.equal(timedOut.routed?.source, 'default')
+      assert.equal((await usage(unlike)).length, 0)
+
+      // A failed request isn't kept: the next run asks again.
+      jev.hang = false
+      jev.answers = picks('haiku', 'low')
+      jev.calls.length = 0
+      assert.equal((await route(unlike))?.source, 'jev')
+      assert.equal(jev.calls.length, 1)
+    })
   })
 })

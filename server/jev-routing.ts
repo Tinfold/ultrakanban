@@ -1,10 +1,20 @@
+import { createHash } from 'node:crypto'
 import { parseChecklist } from '../shared/checklist.ts'
-import { AGENT_EFFORTS, AGENT_MODELS, type AgentEffort, type Ticket } from '../shared/domain.ts'
+import {
+  AGENT_EFFORTS,
+  AGENT_MODELS,
+  type AgentEffort,
+  type BoardSummary,
+  JEV_DEFAULTS,
+  type RoutedSetting,
+  type RoutingPick,
+  type Ticket,
+} from '../shared/domain.ts'
 import { transaction } from './db.ts'
 import { systemOne, type JevAnswer, type JevQuestion, type JevUsage } from './jev.ts'
 import { getBoard } from './store/boards.ts'
 import { getEpic } from './store/epics.ts'
-import { saveRoute } from './store/routing.ts'
+import { boardDefault, cachedJevPick, historyPick, saveRoute } from './store/routing.ts'
 import { suggestAgent } from './store/suggestions.ts'
 import { listTags } from './store/tags.ts'
 import { typesafeKey } from './typesafe.ts'
@@ -144,21 +154,103 @@ export async function routeTicket(
   }
 }
 
+/** Models from cheapest to dearest, for boards whose routing may only lower the setting. */
+const MODEL_COST = ['haiku', 'sonnet', 'opus', 'fable']
+
+/** Where a model stands in `MODEL_COST`, from its alias or a full name such as claude-opus-5-5; null when unknown. */
+const modelRank = (model: string) => {
+  const rank = MODEL_COST.findIndex((alias) => model.toLowerCase().includes(alias))
+  return rank < 0 ? null : rank
+}
+
+type Setting = { model: string; effort: AgentEffort }
+
 /**
- * Records how a ticket that was just claimed is routed (see `saveRoute`). On a board that routes with Jev it asks Jev
- * first, in either mode: for now Jev's pick is only recorded (dry run), so the board can see how Jev would have done.
- * Never throws: a claim doesn't fail over its routing record.
+ * `pick` held to no dearer than `limit`, its model and effort each. A model that can't be ranked against the limit's
+ * (a name that isn't one of Claude's) gives way to the limit's.
  */
-export async function routeClaim(ticket: Ticket) {
+export function capSetting(pick: Setting, limit: Setting): Setting {
+  const rank = modelRank(pick.model)
+  const limitRank = modelRank(limit.model)
+  const cheaper = pick.model === limit.model || (rank !== null && limitRank !== null && rank <= limitRank)
+  return {
+    model: cheaper ? pick.model : limit.model,
+    effort: AGENT_EFFORTS.indexOf(pick.effort) <= AGENT_EFFORTS.indexOf(limit.effort) ? pick.effort : limit.effort,
+  }
+}
+
+/**
+ * What Jev is told about the ticket that a person writes: its title, description (with every checklist step
+ * unchecked, so checking steps off doesn't count as a change), tags and epic, and the models it may pick from. Jev's
+ * pick is kept with it, and Jev isn't asked again while it stays the same.
+ */
+export function contentKey(ticket: Ticket, models: readonly string[]) {
+  const description = ticket.description.replace(/^(\s*[-*+]\s+\[)[xX](\]\s)/gm, '$1 $2')
+  return createHash('sha256')
+    .update(JSON.stringify([ticket.title, description, [...ticket.tagIds].sort(), ticket.epicId, models]))
+    .digest('hex')
+}
+
+/**
+ * Picks the setting a ticket is worked at on a board that routes with Jev, in order: the ticket's own setting (the
+ * board's default for the half it leaves out), Jev's pick at or above the board's threshold, the history suggestion
+ * when it is built on enough similar tickets, then the board's default. Jev's and the history suggestion's picks must
+ * be among the board's models for Jev, and are held to the board's default when Jev may only lower the setting.
+ */
+export function pickRoute(ticket: Ticket, board: BoardSummary, jev: RoutingPick | null): RoutedSetting {
+  const fallback = boardDefault(board.id)
+  if (ticket.agentModel !== null || ticket.agentEffort !== null) {
+    const model = ticket.agentModel ?? fallback.model
+    return { model, effort: ticket.agentEffort ?? fallback.effort, source: 'ticket', confidence: null }
+  }
+  const models: readonly string[] = board.jevModels ?? AGENT_MODELS
+  const allowed = (pick: Setting) => models.includes(pick.model)
+  const held = ({ model, effort }: Setting) =>
+    board.jevOnlyLower ? capSetting({ model, effort }, fallback) : { model, effort }
+  const threshold = board.jevThreshold ?? JEV_DEFAULTS.threshold
+  if (jev && allowed(jev) && (jev.confidence ?? 0) >= threshold) {
+    return { ...held(jev), source: 'jev', confidence: jev.confidence }
+  }
+  const history = historyPick(ticket)
+  if (history && allowed(history)) return { ...held(history), source: 'history', confidence: null }
+  return { ...fallback, source: 'default', confidence: null }
+}
+
+/**
+ * Routes a ticket and records it (see `saveRoute`). On a board that routes with Jev, Jev is asked first, in either
+ * mode (but in `on` only for tickets without their own setting), unless it already picked for the ticket as it is now
+ * (see `contentKey`): a failed request is never kept, so the next one asks again. Returns the setting to work the
+ * ticket at when the board's Jev mode is `on` (see `pickRoute`), else null: in dry run Jev's pick is only recorded, so
+ * the board can see how Jev would have done. Never throws: a claim doesn't fail over its routing.
+ */
+export async function routeClaim(ticket: Ticket): Promise<RoutedSetting | null> {
   try {
     const board = getBoard(ticket.boardId)
+    const models = board.jevModels ?? AGENT_MODELS
+    const key = contentKey(ticket, models)
+    const on = board.jevEnabled && board.jevMode === 'on'
+    const own = ticket.agentModel !== null || ticket.agentEffort !== null
     let usage: JevUsage | null = null
-    const jev =
-      board.jevEnabled && typesafeKey()
-        ? await routeTicket(ticket, { models: board.jevModels ?? AGENT_MODELS, onUsage: (used) => (usage = used) })
-        : null
-    transaction(() => saveRoute(ticket.id, jev, usage))
+    let jev: RoutingPick | null = null
+    // Once Jev's picks are used, a ticket with its own setting isn't sent to Jev: that setting wins anyway.
+    if (board.jevEnabled && typesafeKey() && !(on && own)) {
+      jev = cachedJevPick(ticket.id, key) ?? (await routeTicket(ticket, { models, onUsage: (used) => (usage = used) }))
+    }
+    const routed = on ? pickRoute(ticket, board, jev) : null
+    transaction(() => saveRoute(ticket.id, jev, usage, { routed, contentKey: key }))
+    return routed
   } catch (error) {
     console.warn(`Routing ticket ${ticket.id}: ${(error as Error).message}`)
+    return null
   }
+}
+
+/**
+ * The setting to work an already claimed ticket at, for runs on feedback (`GET /tickets/:id/route`): as `routeClaim`,
+ * but only on a board whose Jev mode is `on`, so it asks Jev only when the ticket changed since Jev last picked. Null
+ * on other boards, without recording anything.
+ */
+export async function routeRun(ticket: Ticket): Promise<RoutedSetting | null> {
+  const board = getBoard(ticket.boardId)
+  return board.jevEnabled && board.jevMode === 'on' ? routeClaim(ticket) : null
 }

@@ -43,6 +43,21 @@ worked on again."
   log "ticket #$number ($id): moved back to $column; released it"
 }
 
+# Sets the worker for a run on feedback: the ticket's own model and effort (- when it has none), else the setting the
+# board routed it to when it routes with Jev (kept from the claim, so Jev isn't asked again while the ticket doesn't
+# change), else MODEL and EFFORT.
+use_ticket_worker() {
+  local id=$1 model=${2#-} effort=${3#-} routed
+  if [[ -z $model && -z $effort ]]; then
+    routed=$(get "/tickets/$id/route" | jq -r '.routed // empty | "\(.model)\t\(.effort)"') || routed=
+    if [[ -n $routed ]]; then
+      model=${routed%%$'\t'*}
+      effort=${routed#*$'\t'}
+    fi
+  fi
+  use_worker "$model" "$effort"
+}
+
 # Reassigns a ticket held under another of the agent's names (another model or effort, or the bare agent name) to
 # the worker set by use_worker, in one versioned update.
 adopt() {
@@ -165,7 +180,7 @@ loop stopped starting runs for CI on this ticket. Comment on the ticket to let i
     fi
     [[ $(jq -r .run <<<"$triage") == true ]] || continue
 
-    use_worker "${ticket_model#-}" "${ticket_effort#-}"
+    use_ticket_worker "$id" "$ticket_model" "$ticket_effort"
     adopt "$id" "$number" "$holder" "$version" || continue
     items=$(jq -r '.items | map(.text) | join("\n\n---\n\n")' <<<"$triage")
     run_step=$(jq -r '.items | map(.text | split("\n")[0] | rtrimstr(":")) | join("; ")' <<<"$triage")
@@ -285,9 +300,10 @@ their first run yet (CLAIM_LIMIT $CLAIM_LIMIT)"
     log "ticket #$(jq -r .number <<<"$ticket") ($id): another loop is already working it"
     return 0
   fi
-  # The claim can't know the ticket's model and effort beforehand, so a ticket that sets them is handed to that worker
-  # now.
-  use_worker "$(jq -r '.agentModel // ""' <<<"$ticket")" "$(jq -r '.agentEffort // ""' <<<"$ticket")"
+  # The claim can't know the ticket's model and effort beforehand, so a ticket that sets them, or that the board routed
+  # (its routed setting, on a board that routes with Jev), is handed to that worker now.
+  use_worker "$(jq -r '.routed.model // .agentModel // ""' <<<"$ticket")" \
+    "$(jq -r '.routed.effort // .agentEffort // ""' <<<"$ticket")"
   adopt "$id" "$(jq -r .number <<<"$ticket")" "$WORKER" "$(jq -r .version <<<"$ticket")" || use_worker "" ""
   # Everything on the ticket so far is handed to this run. Until it succeeds, the claim itself counts as feedback,
   # so a failed or interrupted run is retried with backoff.
