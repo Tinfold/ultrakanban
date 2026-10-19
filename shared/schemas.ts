@@ -354,6 +354,9 @@ export const attachmentCleanupSchema = z.object({
   olderThanDays: z.int().min(1).max(3650).nullable().optional(),
 })
 
+/** A TypeSafe API key for the board, set on the Setup page. */
+export const setTypesafeKeySchema = z.object({ key: z.string().trim().min(1).max(500) })
+
 /** The agent supervisor checking in, and reporting on an update it is doing. */
 export const reportAppUpdateSchema = z.object({
   state: z.enum(['running', 'done', 'failed']).optional(),

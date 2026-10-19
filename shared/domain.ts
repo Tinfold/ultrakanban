@@ -1309,6 +1309,8 @@ export interface SetupStatus {
     login: string | null
     error: string | null
   }
+  /** Where the TypeSafe API key for Jev comes from; null without one, and Jev's features stay hidden. Never the key. */
+  typesafe: { source: 'env' | 'board' | null }
   agents: AgentHost
   /**
    * The server's time when it answered: the page judges the agents' check-in by it, since the server's clock can be off

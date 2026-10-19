@@ -5,6 +5,7 @@ import { conflict } from '../errors.ts'
 
 interface SetupRow {
   github_token: string | null
+  typesafe_api_key: string | null
   agents_seen_at: string | null
   agents_run_in: AgentHost['runsIn']
   agents_github_login: string | null
@@ -82,6 +83,13 @@ export const getStoredGitHubToken = () => getRow().github_token
 
 export function setStoredGitHubToken(token: string | null) {
   sql.run('UPDATE setup SET github_token = ? WHERE id = 1', token)
+}
+
+/** The TypeSafe API key set on the Setup page; the API never sends it back. */
+export const getStoredTypesafeKey = () => getRow().typesafe_api_key
+
+export function setStoredTypesafeKey(key: string | null) {
+  sql.run('UPDATE setup SET typesafe_api_key = ? WHERE id = 1', key)
 }
 
 export function reportAgentHost(input: ReportAgentHostInput): AgentHost {

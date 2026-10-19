@@ -399,6 +399,10 @@ const MIGRATIONS = [
   ALTER TABLE boards ADD COLUMN agent_conflict_concurrency INTEGER;
   `,
   `
+  -- The TypeSafe API key set on the Setup page (see docs/JEV.md); the API never sends it back.
+  ALTER TABLE setup ADD COLUMN typesafe_api_key TEXT;
+  `,
+  `
   -- Whether auto-merge goes ahead when the only failing checks failed because of billing (see BoardSummary).
   ALTER TABLE boards ADD COLUMN ignore_billing_failures INTEGER NOT NULL DEFAULT 0;
   `,
