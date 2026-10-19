@@ -238,9 +238,8 @@ function JevFieldset({ value, onChange }: { value: JevSettings; onChange: (value
           Route with Jev
         </label>
         <p className="pl-6 text-xs text-muted-foreground">
-          Lets TypeSafe's Jev pick the model and effort for tickets that don't set their own. Each ticket's title,
-          description and tags are sent to TypeSafe to do that. Starts in dry run, which only records Jev's picks, so
-          you can see how it would have done before using them.
+          Jev (TypeSafe) picks the model and effort for tickets that don't set their own, from each ticket's title,
+          description and tags. Starts in dry run: picks are recorded but not used.
         </p>
       </div>
       {value.jevEnabled && (
@@ -254,9 +253,9 @@ function JevFieldset({ value, onChange }: { value: JevSettings; onChange: (value
               <SelectTrigger id="board-settings-jev-mode" className="w-full">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="dry-run">Dry run: record Jev's pick, don't use it</SelectItem>
-                <SelectItem value="on">On: work tickets with Jev's pick</SelectItem>
+              <SelectContent position="popper">
+                <SelectItem value="dry-run">Dry run — record Jev's picks only</SelectItem>
+                <SelectItem value="on">On — work tickets at Jev's pick</SelectItem>
               </SelectContent>
             </Select>
           </div>
