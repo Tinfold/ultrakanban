@@ -87,7 +87,71 @@ on the board default (`opus/medium`).
 | 5.8 | Show live tokens/cost on a running ticket's status line (`RunStatus.tsx`) and tokens on run records (`ActivityFeed.tsx:200-221`), so runaway runs show up while they run.                                                                    | M    |
 | 5.9 | Filter and sort the board by model, effort, estimate and cost (`src/lib/board-view.ts`, `FilterMenu.tsx`).                                                                                                                                   | M    |
 
-## 6. Docs
+## 6. Optional: route tickets with Jev (TypeSafe AI)
+
+### 6.0 What Jev is, and why it fits
+
+[Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) is TypeSafe AI's first "System One" model, in
+early access since September 15, 2026. It doesn't write text. You send it a piece of state (text or JSON) and a set of
+typed questions, and it returns typed answers with probabilities:
+
+- **Choice**: picks one of up to 255 named options. Returns `choice`, `probabilities` per option and `confidence`.
+- **Score**: places the state on an ordered rubric of 2 to 10 levels. Returns `score`, `probabilities` per level,
+  `confidence` and a `legend`.
+- **Noul**: a yes/no statement. Returns a probability from 0 to 1, with no `confidence`.
+
+All the questions in one request are answered in parallel against the same state, in 70–500 ms. Input costs
+$0.042 per million tokens and output is free, so routing one ticket (about 1–3k tokens of state) costs around
+$0.0001. That is far below the cost of a single `claude -p` turn. The API is one call,
+`POST https://api.typesafe.ai/v1/systemone` with `Authorization: Bearer $TYPESAFE_API_KEY`. The context window is
+32k tokens. There are Python and TypeScript SDKs (`@typesafe-ai/sdk`), and Jev is also served through OpenRouter,
+Cloudflare Workers AI and a LiteLLM pass-through (`TYPESAFE_API_BASE`).
+
+This is the shape of our routing problem: a ticket comes in as state, and we want a model (a Choice over the board's
+models) and an effort (a Score over `low` < `medium` < `high` < `xhigh` < `max`, `shared/domain.ts:13`). Each answer
+comes with a confidence the app can act on. The "Not recommended" list below rules out an _LLM_ triage pass because it
+would add a paid turn to every ticket. Jev is the exception: it costs about a hundredth of a cent and answers before the
+claim returns.
+
+Caveats, which is why this stays **optional and off by default**:
+
+- It is in early access, proprietary and hosted only. There may be a waitlist for a key, and no self-hosting.
+- The benchmarks (speed and price against LLMs) are the vendor's own. TypeSafe calls its 0% hallucination figure
+  "not empirical": it means the schema always matches, not that the answer is right.
+- `confidence` measures how concentrated the probabilities are, not whether the answer is correct. The docs give no
+  universal thresholds and say to tune them on your own data.
+- The SDKs are young, and minor versions have already changed the question types. Use plain `fetch` and pin a
+  versioned model (`jev-1.14.0`), not `jev-latest`.
+- Ticket titles and descriptions are sent to a third party. Cloudflare lists the model as zero data retention, but
+  check TypeSafe's own terms. Turning it on must be an explicit, per-board choice.
+- Jev only replaces the _guess_. Without the history that 3.1 and 3.5 bring, there is nothing to check its picks
+  against, so build those first.
+
+### Items
+
+| #   | Item                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Size |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| 6.1 | **Optional API key.** Read `TYPESAFE_API_KEY` (and `TYPESAFE_API_BASE`, default `https://api.typesafe.ai`, so a LiteLLM or other proxy works) from the environment, or take one on the Setup page. It works like the GitHub token: a `typesafe_api_key` column on `setup` (a new migration at the end of `server/db.ts`), `PUT /api/setup/typesafe-key` (next to `/github-token`, `server/routes/system.ts:79`), which checks the key with `GET /v1/models` before saving it, and an API that only ever reports whether a key is set. With no key, every Jev feature is hidden and nothing else changes.                                                                                                                                                                                                                      | S    |
+| 6.2 | **Jev client** `server/jev.ts`: one `systemOne(state, questions)` built on `fetch`, with a 2 s timeout, the pinned model and the token usage it returns. Any error (timeout, 4xx/5xx, no key) returns `null` and is logged, never thrown into a claim. Add a fake Jev to `server/test-app.ts`, like its fake GitHub, so tests don't call the network.                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | S    |
+| 6.3 | **Board setting "Route with Jev"**, off by default and only shown when a key is set. It holds the models Jev may pick (default: the board's allowed models), a confidence threshold (start at a conservative 0.7) and a "may only lower" switch (Jev can pick a cheaper setting than the board default, never a dearer one), for boards that want savings without surprises. The setting's help text says ticket text is sent to TypeSafe.                                                                                                                                                                                                                                                                                                                                                                                    | S    |
+| 6.4 | **The structured input.** State is JSON: title, description (cut to about 8k characters to stay well inside 32k), tags, epic, checklist length, plan estimate when there is one, and the top similar past tickets from `suggestAgent` (`server/store/suggestions.ts:194`) with the setting each used and whether it finished. Jev then weighs the ticket's content _and_ the board's history. Questions: `model` as a Choice whose criteria come from the skill's model guidance (`haiku` = mechanical, fully spelled out; `sonnet` = routine, well scoped; `opus` = cross-file judgment; `fable` = hardest), `effort` as a Score over the five efforts, and Noul `fully_specified` ("the ticket says exactly what to change") as a tie-breaker towards lower effort. Keep the question text in one place so it can be tuned. | M    |
+| 6.5 | **Use it at claim time, server side.** When the claimed ticket has no `agentModel`/`agentEffort`, `claim-next` asks Jev and returns the pick on the ticket as `routed: {model, effort, source: "jev", confidence}`, without writing over the ticket's own fields, which stay the human's choice. The loop's `use_worker` (`scripts/agent-loop/tickets.sh:278-281`) uses `routed` when it is there. The order is: the ticket's own setting, then Jev above the threshold, then the suggestion endpoint (3.1), then the board default. Cache the pick per ticket version so feedback runs don't call Jev again.                                                                                                                                                                                                                 | M    |
+| 6.6 | **Confidence gating and escalation.** Below the threshold, fall back to the next source in 6.5. When the Score's probability is spread over two efforts, take the higher one. Never route lower than the setting the ticket's last run used: a ticket whose run failed, or that came back from review with changes requested, keeps or raises its setting. Following the docs' advice, gate the riskier choice (dropping to `haiku`/`low`) at a higher threshold than staying at the default.                                                                                                                                                                                                                                                                                                                                 | S    |
+| 6.7 | **Show it.** A "Suggest with Jev" button next to the history suggestion in the ticket form and properties (`TicketProperties.tsx:106-140`), showing the per-model probabilities. A small "Jev 0.82" badge next to the model on the card and in the plan-approval banner (3.2), so a person can see and override a routed pick before it runs.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | S    |
+| 6.8 | **Measure it.** Record each run's routing source and confidence with its usage, so the suggestion stats (3.5) and the overview can compare cost per _finished_ ticket for Jev-routed, history-routed and default runs. Add a "dry run" mode to 6.3 that records Jev's pick without using it, so a board can see how Jev would have done on its own tickets before trusting it. Count Jev's own tokens in usage too (tiny, but it should show).                                                                                                                                                                                                                                                                                                                                                                                | M    |
+| 6.9 | **Docs.** A `TYPESAFE_API_KEY` row in `docs/running.md`'s settings table and in `.env.example`, an optional prompt for it in `scripts/setup.sh` (skipped when empty), the setting and the `routed` field in `docs/API.md`, and a note in `SKILL.md` that agents filing tickets on a board that routes with Jev can leave out `agentModel`/`agentEffort`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | S    |
+
+Order within this section: 6.1 → 6.2 → 6.3 with 6.8's dry run (collect data with no behaviour change) → 6.4 →
+6.5/6.6 → 6.7 → 6.9.
+
+Sources: [TypeSafe announcement](https://typesafe.ai/blog/introducing-system-one-models-and-jev),
+[docs](https://docs.typesafe.ai) ([quick start](https://docs.typesafe.ai/introduction/quickstart),
+[Score](https://docs.typesafe.ai/primitives/score), [confidence](https://docs.typesafe.ai/confidence)),
+[Cloudflare model page](https://developers.cloudflare.com/ai/models/typesafe/jev/),
+[LiteLLM pass-through](https://docs.litellm.ai/docs/pass_through/typesafe.md),
+[MarkTechPost coverage](https://www.marktechpost.com/2026/09/19/typesafe-ai-releases-jev/).
+
+## 7. Docs
 
 Small fixes, one ticket for the lot:
 
@@ -101,11 +165,13 @@ Small fixes, one ticket for the lot:
 2. 4.1, 4.2, 4.3, 4.6: data loss and a reserve that can lift itself.
 3. 3.1, 3.2, 3.6: get tickets onto cheaper models by default.
 4. 2.1, 2.2, 2.5: the larger per-run savings.
-5. The rest as capacity allows.
+5. Section 6 (Jev), optional, after 3.1 and 3.5 so its picks can be compared with the history.
+6. The rest as capacity allows.
 
 ## Not recommended (would add usage)
 
 - An LLM triage pass that picks a model for every ticket. Use the suggestion endpoint (3.1) instead: it costs nothing.
+  Jev (section 6) is not an LLM pass: it costs about $0.0001 per ticket and stays optional.
 - Having agents post more progress comments, or screenshots of non-visual changes.
 - Automatic reviewer agents on every PR. If wanted, make it opt-in per ticket.
 - Retrying failed runs more often, or with a higher effort automatically.
