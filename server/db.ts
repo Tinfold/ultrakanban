@@ -398,6 +398,10 @@ const MIGRATIONS = [
   -- default (AGENT_DEFAULTS.conflictConcurrency) when NULL.
   ALTER TABLE boards ADD COLUMN agent_conflict_concurrency INTEGER;
   `,
+  `
+  -- The TypeSafe API key set on the Setup page (see docs/JEV.md); the API never sends it back.
+  ALTER TABLE setup ADD COLUMN typesafe_api_key TEXT;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'
