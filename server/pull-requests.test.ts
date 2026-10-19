@@ -374,6 +374,29 @@ describe('pull request workflow', () => {
     )
   })
 
+  test('a board has a GitHub repository or a local one, not both', async () => {
+    const patch = (input: object) => call<BoardSummary>('PATCH', `/boards/${boardId}`, input)
+    const repos = (board: BoardSummary) => [board.githubRepo, board.localRepoPath]
+
+    assert.deepEqual(repos((await patch({ githubRepo: 'acme/app' })).body), ['acme/app', null])
+    assert.deepEqual(repos((await patch({ localRepoPath: ' ~/Projects/App ' })).body), [null, '~/Projects/App'])
+    assert.deepEqual(repos((await patch({ name: 'Renamed' })).body), [null, '~/Projects/App'], 'kept by other edits')
+    assert.deepEqual(repos((await patch({ localRepoPath: '/srv/git/app' })).body), [null, '/srv/git/app'])
+    assert.deepEqual(repos((await patch({ githubRepo: 'acme/app' })).body), ['acme/app', null])
+    assert.deepEqual(repos((await patch({ githubRepo: null, localRepoPath: '~/app' })).body), [null, '~/app'])
+    assert.deepEqual(repos((await patch({ localRepoPath: null })).body), [null, null])
+
+    for (const localRepoPath of ['', 'relative/path', '~', '~user/app', './app', '/', '/ app', 'a'.repeat(1001)]) {
+      assert.equal((await patch({ localRepoPath })).status, 400, localRepoPath)
+    }
+    const both = await patch({ githubRepo: 'acme/app', localRepoPath: '~/app' })
+    assert.equal(both.status, 400)
+    assert.deepEqual(repos((await call<BoardDetail>('GET', `/boards/${boardId}`)).body.board), [null, null])
+
+    const { body: created } = await call<BoardSummary>('POST', '/boards', { name: 'Local', localRepoPath: '~/x' })
+    assert.deepEqual(repos(created), [null, '~/x'])
+  })
+
   test('comments can be posted on the pull request too', async () => {
     const ticket = await addTicket({ title: 'A' })
     const comment = (body: unknown) =>

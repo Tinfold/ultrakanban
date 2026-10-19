@@ -211,6 +211,8 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
   const [agentConcurrency, setAgentConcurrency] = useState(detail.board.agentConcurrency)
   const [agentConflictConcurrency, setAgentConflictConcurrency] = useState(detail.board.agentConflictConcurrency)
   const [githubRepo, setGithubRepo] = useState(detail.board.githubRepo ?? '')
+  const [localRepo, setLocalRepo] = useState(!!detail.board.localRepoPath)
+  const [localRepoPath, setLocalRepoPath] = useState(detail.board.localRepoPath ?? `~/Projects/${detail.board.name}`)
   const [notifyUrl, setNotifyUrl] = useState(detail.board.notifyUrl ?? '')
   const [creatingRepo, setCreatingRepo] = useState(false)
   const signedIn = !!useGitHubStatus().data?.auth
@@ -283,7 +285,9 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
       description: String(data.get('description') ?? ''),
       reviewColumnId: columnId('reviewColumn'),
       doneColumnId: columnId('doneColumn'),
-      githubRepo: text('githubRepo'),
+      // A board has a GitHub repository or a local one: the toggle says which, and the other is cleared.
+      githubRepo: localRepo ? null : text('githubRepo'),
+      localRepoPath: localRepo ? text('localRepoPath') : null,
       agentName: text('agentName'),
       agentModel: text('agentModel'),
       agentEffort: agent.agentEffort,
@@ -369,29 +373,53 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
           >
             <div className="grid gap-2">
               <div className="flex items-center justify-between gap-2">
-                <Label htmlFor="board-settings-repo">GitHub repository</Label>
-                <Button
-                  type="button"
-                  variant="link"
-                  size="xs"
-                  className="h-auto p-0"
-                  disabled={!signedIn}
-                  title={signedIn ? 'Create a repository on GitHub for this board' : 'Sign in to GitHub first'}
-                  onClick={() => setCreatingRepo(true)}
-                >
-                  <PlusIcon />
-                  New
-                </Button>
+                <Label htmlFor="board-settings-repo">{localRepo ? 'Local repository path' : 'GitHub repository'}</Label>
+                {!localRepo && (
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="xs"
+                    className="h-auto p-0"
+                    disabled={!signedIn}
+                    title={signedIn ? 'Create a repository on GitHub for this board' : 'Sign in to GitHub first'}
+                    onClick={() => setCreatingRepo(true)}
+                  >
+                    <PlusIcon />
+                    New
+                  </Button>
+                )}
               </div>
-              <Input
-                id="board-settings-repo"
-                name="githubRepo"
-                value={githubRepo}
-                onChange={(event) => setGithubRepo(event.target.value)}
-                placeholder="owner/name"
-                pattern="[\w.\-]+/[\w.\-]+"
-                title="owner/name"
-              />
+              {localRepo ? (
+                <Input
+                  id="board-settings-repo"
+                  name="localRepoPath"
+                  value={localRepoPath}
+                  onChange={(event) => setLocalRepoPath(event.target.value)}
+                  placeholder="~/Projects/name"
+                  pattern="\s*(/|~/)\S.*"
+                  maxLength={1000}
+                  title="An absolute path, or one starting with ~/"
+                />
+              ) : (
+                <Input
+                  id="board-settings-repo"
+                  name="githubRepo"
+                  value={githubRepo}
+                  onChange={(event) => setGithubRepo(event.target.value)}
+                  placeholder="owner/name"
+                  pattern="[\w.\-]+/[\w.\-]+"
+                  title="owner/name"
+                />
+              )}
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={localRepo}
+                  onChange={(event) => setLocalRepo(event.target.checked)}
+                  className="size-4 accent-primary"
+                />
+                Local repository
+              </label>
               <Hint>The agent works in its own clone of this repository and opens its pull requests there.</Hint>
               <GitHubStatus />
             </div>

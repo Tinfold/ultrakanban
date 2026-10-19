@@ -21,6 +21,7 @@ interface BoardRow {
   review_column_id: string | null
   done_column_id: string | null
   github_repo: string | null
+  local_repo_path: string | null
   agent_enabled: number
   agent_name: string | null
   agent_model: string | null
@@ -67,6 +68,7 @@ const toBoard = (row: BoardRow): BoardSummary => ({
   reviewColumnId: row.review_column_id,
   doneColumnId: row.done_column_id,
   githubRepo: row.github_repo,
+  localRepoPath: row.local_repo_path,
   agentEnabled: row.agent_enabled === 1,
   agentName: row.agent_name,
   agentModel: row.agent_model,
@@ -131,6 +133,7 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     reviewColumn,
     doneColumn,
     githubRepo,
+    localRepoPath,
     agentEnabled,
     agentName,
     agentModel,
@@ -151,6 +154,7 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     reviewColumn,
     doneColumn,
     githubRepo,
+    localRepoPath,
     agentEnabled,
     agentName,
     agentModel,
@@ -170,6 +174,9 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
 }
 
 export function updateBoard(id: string, input: UpdateBoardInput): BoardSummary {
+  if (input.githubRepo && input.localRepoPath) {
+    throw badRequest('Set either a GitHub repository or a local repository path, not both')
+  }
   touchBoard(id)
   const columnId = (ref: string | null | undefined) => (ref ? resolveColumn(id, ref).id : ref)
   updateRow('boards', id, {
@@ -177,7 +184,9 @@ export function updateBoard(id: string, input: UpdateBoardInput): BoardSummary {
     description: input.description,
     review_column_id: columnId(input.reviewColumn),
     done_column_id: columnId(input.doneColumn),
-    github_repo: input.githubRepo,
+    // A board has a GitHub repository or a local one, not both: setting one clears the other.
+    github_repo: input.localRepoPath ? null : input.githubRepo,
+    local_repo_path: input.githubRepo ? null : input.localRepoPath,
     agent_enabled: input.agentEnabled === undefined ? undefined : Number(input.agentEnabled),
     agent_name: input.agentName,
     agent_model: input.agentModel,

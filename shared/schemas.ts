@@ -38,6 +38,13 @@ const githubRepo = z
   .trim()
   .regex(/^[\w.-]+\/[\w.-]+$/, 'Must be a GitHub repository as owner/name')
   .nullable()
+/** A git repository on the host: an absolute path, or one in the home directory (`~/...`). */
+const localRepoPath = z
+  .string()
+  .trim()
+  .max(1000)
+  .regex(/^(\/|~\/)\S/, 'Must be an absolute path or one starting with ~/')
+  .nullable()
 const agentName = z
   .string()
   .trim()
@@ -71,6 +78,7 @@ export const createBoardSchema = z.object({
   reviewColumn: ref.optional(),
   doneColumn: ref.optional(),
   githubRepo: githubRepo.optional(),
+  localRepoPath: localRepoPath.optional(),
   agentEnabled: z.boolean().optional(),
   agentName: agentName.optional(),
   agentModel: agentModel.optional(),
@@ -94,6 +102,7 @@ export const updateBoardSchema = z.object({
   reviewColumn: ref.nullable().optional(),
   doneColumn: ref.nullable().optional(),
   githubRepo: githubRepo.optional(),
+  localRepoPath: localRepoPath.optional(),
   agentEnabled: z.boolean().optional(),
   agentName: agentName.optional(),
   agentModel: agentModel.optional(),

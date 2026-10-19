@@ -399,6 +399,10 @@ const MIGRATIONS = [
   ALTER TABLE boards ADD COLUMN agent_conflict_concurrency INTEGER;
   `,
   `
+  -- Path of a git repository on the host the board works on instead of a GitHub one (see BoardSummary).
+  ALTER TABLE boards ADD COLUMN local_repo_path TEXT;
+  `,
+  `
   -- Whether auto-merge goes ahead when the only failing checks failed because of billing (see BoardSummary).
   ALTER TABLE boards ADD COLUMN ignore_billing_failures INTEGER NOT NULL DEFAULT 0;
   `,

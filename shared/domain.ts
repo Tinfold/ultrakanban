@@ -341,6 +341,11 @@ export interface BoardSummary {
   doneColumnId: string | null
   /** GitHub repository (`owner/name`) the board's tickets are about. */
   githubRepo: string | null
+  /**
+   * Path of a git repository on the host (absolute, or starting with `~/`) the board works on instead of a GitHub
+   * one. A board has one or the other: setting either clears the other.
+   */
+  localRepoPath: string | null
   /** Whether the host's agent supervisor runs an agent loop for this board (see scripts/agent-supervisor.sh). */
   agentEnabled: boolean
   /** Name of the board's agent (its controller); `claude` when not set. Its workers are named by `agentWorkerName`. */
