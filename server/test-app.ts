@@ -5,6 +5,7 @@ import { beforeEach } from 'node:test'
 import { parsePullRequestUrl, type Ticket } from '../shared/domain.ts'
 import { createApp } from './app.ts'
 import { createAttachmentFiles } from './attachment-files.ts'
+import { setJevFetch, type JevAnswer } from './jev.ts'
 import { createMergeQueue } from './merge-queue.ts'
 import { createNotifier, type Notification } from './notifications.ts'
 import {
@@ -63,6 +64,25 @@ export const pull = (repo: string, number: number) => {
   if (!found) throw new Error(`GitHub responded 404 for ${repo}#${number}`)
   return found
 }
+/**
+ * Fake Jev: answers `/v1/systemone` with `jev.answers` unless `jev.status` or `jev.hang` says otherwise; `jev.calls`
+ * has what it was sent, with the Authorization header.
+ */
+export const jev = {
+  answers: [] as JevAnswer[],
+  status: 200,
+  hang: false,
+  calls: [] as { url: string; auth: string | null; body: any }[],
+}
+setJevFetch(async (input, init) => {
+  const headers = new Headers(init?.headers)
+  jev.calls.push({ url: String(input), auth: headers.get('authorization'), body: JSON.parse(String(init?.body)) })
+  if (jev.hang) {
+    await new Promise((_, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal!.reason)))
+  }
+  if (jev.status !== 200) return new Response('{}', { status: jev.status })
+  return Response.json({ answers: jev.answers, usage: { input_tokens: 1200, output_tokens: 0 } })
+})
 export const attachmentDir = mkdtempSync(join(tmpdir(), 'ultrakanban-attachments-'))
 const pullRequests = createPullRequestSync({
   auth: async () => (getStoredGitHubToken() ? 'board' : github.auth),
