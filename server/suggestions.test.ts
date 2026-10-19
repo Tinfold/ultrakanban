@@ -129,7 +129,8 @@ describe('agent suggestions', () => {
   })
 
   test('suggests nothing without similar finished tickets', async () => {
-    assert.deepEqual(await suggest('title=Anything'), { suggestion: null, options: [] })
+    const { suggestion, options } = await suggest('title=Anything')
+    assert.deepEqual({ suggestion, options }, { suggestion: null, options: [] })
 
     await pastTicket('Migrate the database', 'cancelled', [['claude/opus/high', 4]], { tags: ['infra'] })
     const failed = await suggest('title=Migrate+the+queue')

@@ -82,6 +82,26 @@ interface RunTotalsRow {
   cost_usd: number | null
 }
 
+/**
+ * The board's decided tickets: finished (in the done column or with a merged pull request) or given up on (in the
+ * cancelled column, or with its pull request closed unmerged).
+ */
+export function decidedTickets(boardId: string): PastTicketRow[] {
+  const done = workflowColumns(boardId).done ?? listColumns(boardId).at(-1)
+  return sql.all<PastTicketRow>(
+    `SELECT t.id, t.number, t.title, t.description,
+       (t.pr_state = 'merged' OR t.column_id IS ?) AS finished,
+       (SELECT group_concat(tag_id) FROM ticket_tags WHERE ticket_id = t.id) AS tag_ids
+     FROM tickets t
+     WHERE t.board_id = ?
+       AND (t.pr_state IN ('merged', 'closed') OR t.column_id IS ? OR t.column_id IN
+         (SELECT id FROM columns WHERE board_id = t.board_id AND lower(name) = '${CANCELLED_COLUMN}'))`,
+    done?.id ?? null,
+    boardId,
+    done?.id ?? null,
+  )
+}
+
 /** A decided ticket with the setting that did most of its work, and what all its runs cost. */
 interface PastTicket {
   ticket: SimilarTicket
@@ -96,19 +116,7 @@ interface PastTicket {
  * board's agent (`agent`) works a ticket at, and it can't run theirs.
  */
 function pastTickets(boardId: string, agent: string, features: Features): PastTicket[] {
-  const done = workflowColumns(boardId).done ?? listColumns(boardId).at(-1)
-  const rows = sql.all<PastTicketRow>(
-    `SELECT t.id, t.number, t.title, t.description,
-       (t.pr_state = 'merged' OR t.column_id IS ?) AS finished,
-       (SELECT group_concat(tag_id) FROM ticket_tags WHERE ticket_id = t.id) AS tag_ids
-     FROM tickets t
-     WHERE t.board_id = ?
-       AND (t.pr_state IN ('merged', 'closed') OR t.column_id IS ? OR t.column_id IN
-         (SELECT id FROM columns WHERE board_id = t.board_id AND lower(name) = '${CANCELLED_COLUMN}'))`,
-    done?.id ?? null,
-    boardId,
-    done?.id ?? null,
-  )
+  const rows = decidedTickets(boardId)
   const runs = new Map<string, RunTotalsRow[]>()
   for (const row of sql.all<RunTotalsRow>(
     `SELECT ticket_id, agent,
@@ -191,7 +199,7 @@ const cheaper = (a: AgentSettingStats, b: AgentSettingStats) =>
  * worked at, the cheapest one whose success rate is within `SUCCESS_TOLERANCE` of the best. A cheaper setting that
  * finishes the same kind of work wins; one that keeps getting its work cancelled or closed doesn't.
  */
-export function suggestAgent(boardId: string, query: AgentSuggestionQuery): AgentSuggestion {
+export function suggestAgent(boardId: string, query: AgentSuggestionQuery): Omit<AgentSuggestion, 'routing'> {
   const board = getBoard(boardId)
   const tags = listTags(boardId)
   const tagIds = query.tag.flatMap((ref) => {

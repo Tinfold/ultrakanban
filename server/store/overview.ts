@@ -29,6 +29,7 @@ import { sql } from '../db.ts'
 import { type ActivityRow, toActivity } from './activity.ts'
 import { listBoards } from './boards.ts'
 import { agentDiskUsage, attachmentBytes } from './disk-usage.ts'
+import { compareAllRouting } from './routing.ts'
 import { type TagRow, toTag } from './tags.ts'
 import { WAITING_SINCE } from './tickets.ts'
 import { queryUsage } from './usage.ts'
@@ -463,6 +464,7 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
     completions: completions.sort((a, b) => a.at.localeCompare(b.at)),
     usage,
     tickets: ticketUsage,
+    routing: compareAllRouting(),
     recent,
   }
 }

@@ -21,6 +21,7 @@ import { transaction } from '../db.ts'
 import { gitHubFailure, HttpError } from '../errors.ts'
 import { wake } from '../events.ts'
 import { actorOf, readJson } from '../http.ts'
+import { routeClaim } from '../jev-routing.ts'
 import type { AppServices } from '../app.ts'
 import { createBoard, deleteBoard, getBoard, getBoardDetail, listBoards, updateBoard } from '../store/boards.ts'
 import { recordClaim } from '../store/agent-services.ts'
@@ -37,6 +38,7 @@ import {
   listTickets,
   requestConflictFixes,
 } from '../store/tickets.ts'
+import { compareRouting } from '../store/routing.ts'
 import { suggestAgent } from '../store/suggestions.ts'
 import { exportBoard, importBoard } from '../store/transfer.ts'
 import { listBoardUsage, recordBoardUsage } from '../store/usage.ts'
@@ -146,6 +148,7 @@ export const boardRoutes = ({ pullRequests, mergeQueue, attachmentFiles }: AppSe
       try {
         const ticket = transaction(() => claimNextTicket(boardId, input))
         transaction(() => recordClaim(boardId, null))
+        await routeClaim(ticket)
         return c.json(ticket)
       } catch (error) {
         // Nothing to do, or the usage reserve holding agents back on purpose (the overview says so), isn't a failure.
@@ -178,7 +181,8 @@ export const boardRoutes = ({ pullRequests, mergeQueue, attachmentFiles }: AppSe
         tag: c.req.queries('tag'),
         steps: c.req.query('steps'),
       })
-      return c.json(suggestAgent(c.req.param('boardId'), query))
+      const boardId = c.req.param('boardId')
+      return c.json({ ...suggestAgent(boardId, query), routing: compareRouting([boardId]) })
     })
     .get('/:boardId/usage', (c) => c.json(listBoardUsage(c.req.param('boardId'))))
     .post('/:boardId/usage', async (c) => {

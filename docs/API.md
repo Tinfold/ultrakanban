@@ -537,7 +537,59 @@ interface TokenUsage {
   durationMs: number | null
   // The same split by model (e.g. claude-opus-5-5), most tokens first; empty if the agent didn't report it
   models: { model; inputTokens; outputTokens; cacheReadTokens; cacheWriteTokens; costUsd: number | null }[]
+  routing: RunRouting | null // how the run was routed (see below); null for runs on no ticket or at a setting no source picked
   createdAt: string
+}
+
+interface RunRouting {
+  source: 'ticket' | 'jev' | 'history' | 'default' // where the model and effort the run worked at came from
+  confidence: number | null // the source's confidence in it, when it has one (Jev's)
+  jev: { model; effort; confidence } | null // Jev's pick when the ticket was claimed, used or not (dry run)
+}
+```
+
+### Routing
+
+Each claim (`claim` and `claim-next`) records how the ticket is routed: the setting it is worked at and where that came
+from (`ticket` when it names its own `agentModel`/`agentEffort`, else the board's `default`), and what the other sources
+would have picked: the [history suggestion](#suggested-model-and-effort) when it is built on 3 or more similar tickets,
+and, on a board that routes with Jev (`jevEnabled`, see [docs/JEV.md](JEV.md)), Jev's pick and confidence. Jev is asked
+before the claim returns, and in `dry-run` mode its pick is only recorded, never used. A Jev request that fails is
+left out and never fails the claim. Each Jev request is recorded as a run on the ticket (agent `jev`, model
+`jev-1.14.0`, at $0.042 per million input tokens), so its tokens and cost count in the usage too.
+
+Each run's usage then carries its `routing`: the source whose setting the run's `<agent>/<model>/<effort>` name
+matches. The [suggestion](#suggested-model-and-effort) and the [overview](#overview) compare the sources by cost per
+_finished_ ticket (cost divided by success rate), on the tickets decided since routing was recorded:
+
+- Each source is counted as if it had picked every ticket's setting: Jev when its confidence is at least the board's
+  `jevThreshold` (else it falls back to the history suggestion, then the default, as routing would), the history
+  suggestion (else the default), and the default.
+- A ticket worked at the setting a source picked counts as it went. One worked at another setting counts at the
+  board's average for the pick (its cost per decided ticket and its success rate), once the board has decided 3 or
+  more tickets at it; until then it is left out of that source (`unmeasured`).
+- Costs are in US dollars when every counted run reported one, else in tokens weighted by kind (input 1, output 5,
+  cache write 1.25, cache read 0.1: cache reads are cheap but dominate raw totals).
+- `verdict` names the cheapest source only once two or more are compared and each has 10 finished tickets.
+
+```ts
+interface RoutingComparison {
+  unit: 'usd' | 'tokens'
+  // Each source that picked a ticket for itself, and the default; cheapest per finished ticket first
+  sources: {
+    source: 'jev' | 'history' | 'default'
+    tickets: number // decided tickets counted
+    picked: number // tickets it picked for itself (counted or not); for the rest it fell back to the next source
+    worked: number // counted tickets worked at its pick; the rest count at the board's average for the pick
+    unmeasured: number // tickets left out: too few decided at its pick
+    finished: number // may be fractional: tickets counted at an average count by its success rate
+    successRate: number | null
+    costUsd: number | null // null unless every counted run reported a cost
+    weightedTokens: number
+    costPerFinished: number | null // in unit
+  }[]
+  verdict: 'jev' | 'history' | 'default' | null
+  jev: { calls: number; costUsd: number } // what asking Jev cost (not in the sources' costs)
 }
 ```
 
@@ -604,6 +656,7 @@ when unknown).
 interface AgentSuggestion {
   suggestion: AgentSettingStats | null
   options: AgentSettingStats[] // every setting similar tickets were worked at, the suggestion first
+  routing: RoutingComparison // how the board's routing sources compare (see Routing)
 }
 
 interface AgentSettingStats {
@@ -726,6 +779,7 @@ interface Overview {
   // Tickets with runs within the range, most tokens first, with the usage of all their runs (as in Ticket)
   tickets: { id; boardId; boardName; number; title; column: string; tags: Tag[]; usage }[]
   recent: (Activity & { ticket: { number; title; boardId; boardName } })[] // latest 30, newest first
+  routing: RoutingComparison // routing sources compared on every board, over all time (see Routing)
 }
 
 // Token usage added up over runs; costUsd sums the runs that reported a cost (null when none did).

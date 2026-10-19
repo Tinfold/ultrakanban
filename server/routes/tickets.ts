@@ -25,6 +25,7 @@ import { newId, transaction } from '../db.ts'
 import { badRequest, gitHubFailure, HttpError } from '../errors.ts'
 import type { GitHubClient } from '../github.ts'
 import { actorOf, errorBody, readJson } from '../http.ts'
+import { routeClaim } from '../jev-routing.ts'
 import { listActivity } from '../store/activity.ts'
 import { createAttachment, listAttachments } from '../store/attachments.ts'
 import {
@@ -175,7 +176,9 @@ export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles, notifi
     })
     .post('/:ticketId/claim', async (c) => {
       const input = await readJson(c, claimTicketSchema)
-      return c.json(transaction(() => claimTicket(c.req.param('ticketId'), input)))
+      const ticket = transaction(() => claimTicket(c.req.param('ticketId'), input))
+      await routeClaim(ticket)
+      return c.json(ticket)
     })
     .post('/:ticketId/release', async (c) => {
       const input = await readJson(c, releaseTicketSchema)

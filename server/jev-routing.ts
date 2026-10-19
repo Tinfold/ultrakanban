@@ -1,9 +1,13 @@
 import { parseChecklist } from '../shared/checklist.ts'
 import { AGENT_EFFORTS, AGENT_MODELS, type AgentEffort, type Ticket } from '../shared/domain.ts'
-import { systemOne, type JevAnswer, type JevQuestion } from './jev.ts'
+import { transaction } from './db.ts'
+import { systemOne, type JevAnswer, type JevQuestion, type JevUsage } from './jev.ts'
+import { getBoard } from './store/boards.ts'
 import { getEpic } from './store/epics.ts'
+import { saveRoute } from './store/routing.ts'
 import { suggestAgent } from './store/suggestions.ts'
 import { listTags } from './store/tags.ts'
+import { typesafeKey } from './typesafe.ts'
 
 /**
  * Everything Jev is asked when it routes a ticket (docs/JEV.md, item 4), kept here so it can be tuned in one place.
@@ -107,15 +111,17 @@ const answer = <T extends JevAnswer['type']>(answers: JevAnswer[], id: string, t
 
 /**
  * Asks Jev which model (of `models`, by default every model alias) and effort to work `ticket` at. Null when Jev
- * can't be asked or its answers don't fit the questions, so the caller falls back to another source.
+ * can't be asked or its answers don't fit the questions, so the caller falls back to another source. `onUsage` gets
+ * the tokens the request used whenever Jev answered, fitting answers or not.
  */
 export async function routeTicket(
   ticket: Ticket,
-  { models = AGENT_MODELS }: { models?: readonly string[] } = {},
+  { models = AGENT_MODELS, onUsage }: { models?: readonly string[]; onUsage?: (usage: JevUsage) => void } = {},
 ): Promise<TicketRoute | null> {
   if (!models.length) return null
   const result = await systemOne(routingState(ticket), routingQuestions(models))
   if (!result) return null
+  onUsage?.(result.usage)
   const model = answer(result.answers, 'model', 'choice')
   const effort = answer(result.answers, 'effort', 'score')
   const fullySpecified = answer(result.answers, 'fully_specified', 'noul')?.probability ?? 0
@@ -135,5 +141,24 @@ export async function routeTicket(
     effort: AGENT_EFFORTS[level],
     confidence: Math.min(model.confidence, effort.confidence),
     probabilities: { model: model.probabilities, effort: effort.probabilities, fullySpecified },
+  }
+}
+
+/**
+ * Records how a ticket that was just claimed is routed (see `saveRoute`). On a board that routes with Jev it asks Jev
+ * first, in either mode: for now Jev's pick is only recorded (dry run), so the board can see how Jev would have done.
+ * Never throws: a claim doesn't fail over its routing record.
+ */
+export async function routeClaim(ticket: Ticket) {
+  try {
+    const board = getBoard(ticket.boardId)
+    let usage: JevUsage | null = null
+    const jev =
+      board.jevEnabled && typesafeKey()
+        ? await routeTicket(ticket, { models: board.jevModels ?? AGENT_MODELS, onUsage: (used) => (usage = used) })
+        : null
+    transaction(() => saveRoute(ticket.id, jev, usage))
+  } catch (error) {
+    console.warn(`Routing ticket ${ticket.id}: ${(error as Error).message}`)
   }
 }

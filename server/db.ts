@@ -413,6 +413,33 @@ const MIGRATIONS = [
   ALTER TABLE boards ADD COLUMN jev_mode TEXT;
   `,
   `
+  -- How a ticket was routed when it was last claimed (see RoutingSource and docs/JEV.md, item 8): the setting it is
+  -- worked at and where that came from, and what each source picked, so sources can be compared by cost per finished
+  -- ticket. Jev's pick is only there on boards that route with Jev, the history pick when the suggestion was built on
+  -- enough similar tickets.
+  CREATE TABLE ticket_routes (
+    ticket_id TEXT PRIMARY KEY REFERENCES tickets(id) ON DELETE CASCADE,
+    source TEXT NOT NULL,
+    model TEXT NOT NULL,
+    effort TEXT NOT NULL,
+    confidence REAL,
+    default_model TEXT NOT NULL,
+    default_effort TEXT NOT NULL,
+    history_model TEXT,
+    history_effort TEXT,
+    jev_model TEXT,
+    jev_effort TEXT,
+    jev_confidence REAL,
+    created_at TEXT NOT NULL
+  );
+  -- Each run's routing, from its ticket's route when its usage is recorded (see RunRouting).
+  ALTER TABLE token_usage ADD COLUMN routing_source TEXT;
+  ALTER TABLE token_usage ADD COLUMN routing_confidence REAL;
+  ALTER TABLE token_usage ADD COLUMN jev_model TEXT;
+  ALTER TABLE token_usage ADD COLUMN jev_effort TEXT;
+  ALTER TABLE token_usage ADD COLUMN jev_confidence REAL;
+  `,
+  `
   -- Whether auto-merge goes ahead when the only failing checks failed because of billing (see BoardSummary).
   ALTER TABLE boards ADD COLUMN ignore_billing_failures INTEGER NOT NULL DEFAULT 0;
   `,
