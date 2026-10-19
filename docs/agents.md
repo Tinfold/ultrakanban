@@ -220,7 +220,8 @@ create one on GitHub with the server's login and link it) and switch on
 ([`scripts/agent-supervisor.sh`](../scripts/agent-supervisor.sh)) checks the boards every 30 seconds and keeps one
 `ultrakanban-agent@<board>` unit running per enabled board. It stops the loop when the board is switched off or
 deleted, and systemd restarts a loop that dies, with backoff up to 15 minutes. Each board gets its own clone,
-made with `gh repo clone`, under `~/.local/share/ultrakanban-agent/boards/<board>/repo`; your own working copies
+made with `gh repo clone`, under `~/.local/share/ultrakanban-agent/boards/<board>/repo` (when the repository is a fork,
+gh there is pointed at it rather than at its parent, so pull requests go to the fork); your own working copies
 are never touched. Before every run the loop fetches and checks out the default branch (detached, so create a branch
 from it) or, for feedback on a pull request, its branch, with no local changes, and goes back to the default branch
 afterwards. Logs: `journalctl --user -u ultrakanban-agent -u 'ultrakanban-agent@*' -f`.
