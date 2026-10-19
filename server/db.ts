@@ -403,6 +403,16 @@ const MIGRATIONS = [
   ALTER TABLE setup ADD COLUMN typesafe_api_key TEXT;
   `,
   `
+  -- Routing tickets with Jev (see BoardSummary.jevEnabled and docs/JEV.md): whether it is on, the models it may pick (a
+  -- JSON array, every alias when NULL), the confidence its pick needs (JEV_DEFAULTS when NULL), whether it may only pick
+  -- a cheaper setting than the board's, and its mode ('dry-run' or 'on'; NULL until first switched on).
+  ALTER TABLE boards ADD COLUMN jev_enabled INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE boards ADD COLUMN jev_models TEXT;
+  ALTER TABLE boards ADD COLUMN jev_threshold REAL;
+  ALTER TABLE boards ADD COLUMN jev_only_lower INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE boards ADD COLUMN jev_mode TEXT;
+  `,
+  `
   -- Whether auto-merge goes ahead when the only failing checks failed because of billing (see BoardSummary).
   ALTER TABLE boards ADD COLUMN ignore_billing_failures INTEGER NOT NULL DEFAULT 0;
   `,

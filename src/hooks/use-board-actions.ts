@@ -84,9 +84,15 @@ export function useBoardActions(boardId: string) {
 
     return {
       updateBoard: (patch: updates.BoardPatch) => {
-        const { reviewColumnId, doneColumnId, ...fields } = patch
+        const { reviewColumnId, doneColumnId, jevMode, ...fields } = patch
+        const input = {
+          ...fields,
+          reviewColumn: reviewColumnId,
+          doneColumn: doneColumnId,
+          jevMode: jevMode ?? undefined,
+        }
         return run(
-          () => api.updateBoard(boardId, { ...fields, reviewColumn: reviewColumnId, doneColumn: doneColumnId }),
+          () => api.updateBoard(boardId, input),
           (d) => updates.patchBoard(d, patch),
         )
       },

@@ -18,6 +18,7 @@ export type AgentEffort = (typeof AGENT_EFFORTS)[number]
  * that an Anthropic-compatible endpoint serves the agent instead of Claude, e.g. qwen3-coder:30b (see docs/agents.md).
  */
 export const AGENT_MODELS = ['fable', 'opus', 'sonnet', 'haiku'] as const
+export type AgentModelAlias = (typeof AGENT_MODELS)[number]
 
 /** Whether a model is one of Claude's: an alias (`AGENT_MODELS`) or a full name such as claude-opus-5-5. */
 export const isClaudeModel = (model: string) =>
@@ -331,6 +332,13 @@ export interface Attachment {
   url: string
 }
 
+/** How a board routes with Jev (see `BoardSummary.jevMode`). */
+export const JEV_MODES = ['dry-run', 'on'] as const
+export type JevMode = (typeof JEV_MODES)[number]
+
+/** Jev routing settings used when a board doesn't set its own. */
+export const JEV_DEFAULTS = { threshold: 0.7, mode: 'dry-run' as JevMode }
+
 export interface BoardSummary {
   id: string
   name: string
@@ -409,6 +417,22 @@ export interface BoardSummary {
    * /boards/:id/agent-cleanup`); each loop does it before its next run, or at once when idle. Null if never asked.
    */
   agentCleanupRequestedAt: string | null
+  /**
+   * Whether the board routes tickets with Jev (see docs/JEV.md): picks the model and effort for tickets that don't
+   * name their own, from their text, which is sent to TypeSafe. Only offered when a TypeSafe API key is set.
+   */
+  jevEnabled: boolean
+  /** Models Jev may pick from; every model in `AGENT_MODELS` when not set. */
+  jevModels: AgentModelAlias[] | null
+  /** Smallest confidence at which Jev's pick is used; `JEV_DEFAULTS.threshold` when not set. */
+  jevThreshold: number | null
+  /** Whether Jev may only pick a cheaper setting than the board's default, never a dearer one. */
+  jevOnlyLower: boolean
+  /**
+   * `dry-run` records Jev's pick without using it, `on` uses it. Set to `dry-run` when Jev is first switched on; null
+   * until then.
+   */
+  jevMode: JevMode | null
   /** Open tickets: all but those in the done column or the cancelled one (see `CANCELLED_COLUMN`). */
   ticketCount: number
   /**

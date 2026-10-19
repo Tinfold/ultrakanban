@@ -1,14 +1,18 @@
 import {
   type AgentEffort,
+  type AgentModelAlias,
   BACKLOG_COLUMN,
   CANCELLED_COLUMN,
   type BoardDetail,
   type BoardSummary,
+  JEV_DEFAULTS,
+  type JevMode,
   type TicketSize,
 } from '../../shared/domain.ts'
 import type { CreateBoardInput, UpdateBoardInput } from '../../shared/schemas.ts'
 import { newId, now, sql, touchBoard, updateRow } from '../db.ts'
 import { badRequest, notFound } from '../errors.ts'
+import { typesafeKey } from '../typesafe.ts'
 import { createColumn, listColumns, resolveColumn } from './columns.ts'
 import { listEpics } from './epics.ts'
 import { listTags } from './tags.ts'
@@ -37,6 +41,11 @@ interface BoardRow {
   approval_size: TicketSize | null
   notify_url: string | null
   agent_cleanup_requested_at: string | null
+  jev_enabled: number
+  jev_models: string | null
+  jev_threshold: number | null
+  jev_only_lower: number
+  jev_mode: JevMode | null
   ticket_count: number
   waiting_count: number
   review_count: number
@@ -83,6 +92,11 @@ const toBoard = (row: BoardRow): BoardSummary => ({
   approvalSize: row.approval_size,
   notifyUrl: row.notify_url,
   agentCleanupRequestedAt: row.agent_cleanup_requested_at,
+  jevEnabled: row.jev_enabled === 1,
+  jevModels: row.jev_models === null ? null : (JSON.parse(row.jev_models) as AgentModelAlias[]),
+  jevThreshold: row.jev_threshold,
+  jevOnlyLower: row.jev_only_lower === 1,
+  jevMode: row.jev_mode,
   ticketCount: row.ticket_count,
   waitingCount: row.waiting_count,
   reviewCount: row.review_count,
@@ -146,6 +160,11 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     archiveDoneDays,
     approvalSize,
     notifyUrl,
+    jevEnabled,
+    jevModels,
+    jevThreshold,
+    jevOnlyLower,
+    jevMode,
   } = input
   return updateBoard(id, {
     reviewColumn,
@@ -166,11 +185,17 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     archiveDoneDays,
     approvalSize,
     notifyUrl,
+    jevEnabled,
+    jevModels,
+    jevThreshold,
+    jevOnlyLower,
+    jevMode,
   })
 }
 
 export function updateBoard(id: string, input: UpdateBoardInput): BoardSummary {
   touchBoard(id)
+  if (input.jevEnabled && !typesafeKey()) throw badRequest('Set a TypeSafe API key before routing with Jev')
   const columnId = (ref: string | null | undefined) => (ref ? resolveColumn(id, ref).id : ref)
   updateRow('boards', id, {
     name: input.name,
@@ -194,7 +219,16 @@ export function updateBoard(id: string, input: UpdateBoardInput): BoardSummary {
     archive_done_days: input.archiveDoneDays,
     approval_size: input.approvalSize,
     notify_url: input.notifyUrl,
+    jev_enabled: input.jevEnabled === undefined ? undefined : Number(input.jevEnabled),
+    jev_models: input.jevModels === undefined ? undefined : input.jevModels && JSON.stringify(input.jevModels),
+    jev_threshold: input.jevThreshold,
+    jev_only_lower: input.jevOnlyLower === undefined ? undefined : Number(input.jevOnlyLower),
+    jev_mode: input.jevMode,
   })
+  // A board that switches Jev on for the first time starts in dry run: it records Jev's picks without using them.
+  if (input.jevEnabled && input.jevMode === undefined) {
+    sql.run('UPDATE boards SET jev_mode = ? WHERE id = ? AND jev_mode IS NULL', JEV_DEFAULTS.mode, id)
+  }
   const board = getBoard(id)
   if (board.agentEnabled && !board.githubRepo) {
     throw badRequest('Set the GitHub repository before switching the agent on')

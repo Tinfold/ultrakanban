@@ -1,9 +1,11 @@
 import { z } from 'zod'
 import {
   AGENT_EFFORTS,
+  AGENT_MODELS,
   AGENT_LOGIN_KINDS,
   AGENT_MAX_CONCURRENCY,
   COLORS,
+  JEV_MODES,
   MERGE_METHODS,
   OVERVIEW_RANGES,
   type OverviewRange,
@@ -61,6 +63,12 @@ const notifyUrl = z
   .max(2000)
   .regex(/^https?:\/\/\S+$/, 'Must be an http(s) URL')
   .nullable()
+const jevModels = z
+  .array(z.enum(AGENT_MODELS))
+  .min(1, 'Pick at least one model')
+  .refine((models) => new Set(models).size === models.length, 'Models must be unique')
+  .nullable()
+const jevThreshold = z.number().min(0).max(1).nullable()
 /** Skips the merged-pull-request requirement of the board's done column. Meant for humans, not agents. */
 const force = z.boolean().optional()
 
@@ -86,6 +94,11 @@ export const createBoardSchema = z.object({
   archiveDoneDays: archiveDoneDays.optional(),
   approvalSize: ticketSize.nullable().optional(),
   notifyUrl: notifyUrl.optional(),
+  jevEnabled: z.boolean().optional(),
+  jevModels: jevModels.optional(),
+  jevThreshold: jevThreshold.optional(),
+  jevOnlyLower: z.boolean().optional(),
+  jevMode: z.enum(JEV_MODES).optional(),
 })
 
 export const updateBoardSchema = z.object({
@@ -109,6 +122,11 @@ export const updateBoardSchema = z.object({
   archiveDoneDays: archiveDoneDays.optional(),
   approvalSize: ticketSize.nullable().optional(),
   notifyUrl: notifyUrl.optional(),
+  jevEnabled: z.boolean().optional(),
+  jevModels: jevModels.optional(),
+  jevThreshold: jevThreshold.optional(),
+  jevOnlyLower: z.boolean().optional(),
+  jevMode: z.enum(JEV_MODES).optional(),
 })
 
 /** Creates a repository on GitHub and links it to the board. */
