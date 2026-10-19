@@ -381,6 +381,66 @@ describe('routing', () => {
       })
     })
 
+    test('uses Jev’s pick at the threshold, and goes to the next source just below it', async () => {
+      await routeOn({ jevThreshold: 0.8 })
+      jev.answers = picks('opus', 'high', 0.8)
+      assert.equal((await claimed(await addTicket({ title: 'Untangle the merge queue' }))).routed?.source, 'jev')
+      jev.answers = picks('opus', 'high', 0.79)
+      assert.equal((await claimed(await addTicket({ title: 'Redesign the store' }))).routed?.source, 'default')
+    })
+
+    test('dropping to haiku or low needs a higher confidence than staying at the default', async () => {
+      await routeOn()
+      const source = async (title: string, model: string, effort: AgentEffort, confidence: number) => {
+        jev.answers = picks(model, effort, confidence)
+        return (await claimed(await addTicket({ title }))).routed?.source
+      }
+      // The board's default is opus/medium and its threshold 0.7, so haiku or low need 0.85.
+      assert.equal(await source('Raise the effort', 'opus', 'high', 0.75), 'jev')
+      assert.equal(await source('Lower the model', 'sonnet', 'medium', 0.75), 'jev')
+      assert.equal(await source('Drop to haiku', 'haiku', 'medium', 0.8), 'default')
+      assert.equal(await source('Drop to low', 'opus', 'low', 0.8), 'default')
+      assert.equal(await source('Drop to both', 'haiku', 'low', 0.85), 'jev')
+
+      // Where the default is haiku/low already, staying there isn't a drop.
+      await call('PATCH', `/boards/${boardId}`, { agentModel: 'haiku', agentEffort: 'low' })
+      assert.equal(await source('Stay at the default', 'haiku', 'low', 0.75), 'jev')
+    })
+
+    test('never routes below the setting the ticket’s last run used', async () => {
+      await routeOn()
+      jev.answers = picks('haiku', 'low')
+      const ticket = await addTicket({ title: 'Fix a typo in the README' })
+      assert.deepEqual((await claimed(ticket)).routed, {
+        model: 'haiku',
+        effort: 'low',
+        source: 'jev',
+        confidence: 0.9,
+      })
+      // Its run failed, or came back with changes requested, after a run at sonnet/high: the next run keeps it.
+      await run(ticket, 'claude/sonnet/high')
+      assert.deepEqual(await route(ticket), { model: 'sonnet', effort: 'high', source: 'jev', confidence: 0.9 })
+      // Only the newest run counts, and only one of the board's agent; each half is raised on its own.
+      await run(ticket, 'claude/opus/low')
+      await run(ticket, 'codex/gpt-5-codex/max')
+      assert.deepEqual(await route(ticket), { model: 'opus', effort: 'low', source: 'jev', confidence: 0.9 })
+      // A dearer pick isn't lowered.
+      await call('PATCH', `/tickets/${ticket.id}`, { title: 'Fix the typos in the README' })
+      jev.answers = picks('sonnet', 'xhigh')
+      assert.deepEqual(await route(ticket), { model: 'opus', effort: 'xhigh', source: 'jev', confidence: 0.9 })
+
+      // The default is raised too, but a ticket's own setting is a person's choice and stays.
+      const plain = await addTicket({ title: 'Write release notes' })
+      jev.answers = picks('haiku', 'low', 0.1)
+      await claimed(plain)
+      await run(plain, 'claude/fable/high')
+      assert.deepEqual(await route(plain), { model: 'fable', effort: 'high', source: 'default', confidence: null })
+      const own = await addTicket({ title: 'Bump the version', agentModel: 'haiku', agentEffort: 'low' })
+      await claimed(own)
+      await run(own, 'claude/fable/high')
+      assert.deepEqual(await route(own), { model: 'haiku', effort: 'low', source: 'ticket', confidence: null })
+    })
+
     test('the history suggestion needs 3 similar tickets', async () => {
       await routed('Fix login bug 0', 'claude/sonnet/low', 'Done', {
         input: { agentModel: 'sonnet', agentEffort: 'low', tags: ['bug'] },

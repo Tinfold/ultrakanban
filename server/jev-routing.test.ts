@@ -127,6 +127,20 @@ describe('routing a ticket with Jev', () => {
     assert.equal((await routeTicket(ticket))?.effort, 'medium')
   })
 
+  test('takes the higher effort when the probability is spread over two', async () => {
+    const ticket = await addTicket({ title: 'Untangle the merge queue' })
+    jev.answers = answers({ opus: 1 }, { medium: 0.45, high: 0.4, xhigh: 0.15 })
+    assert.equal((await routeTicket(ticket))?.effort, 'high')
+    // The two needn't be next to each other, nor the higher one Jev's own pick.
+    jev.answers = answers({ opus: 1 }, { low: 0.38, medium: 0.12, high: 0.4, max: 0.1 })
+    assert.equal((await routeTicket(ticket))?.effort, 'high')
+    jev.answers = answers({ opus: 1 }, { low: 0.4, high: 0.38, max: 0.22 })
+    assert.equal((await routeTicket(ticket))?.effort, 'high')
+    // Not spread: Jev's pick stands.
+    jev.answers = answers({ opus: 1 }, { medium: 0.55, high: 0.35, xhigh: 0.1 })
+    assert.equal((await routeTicket(ticket))?.effort, 'medium')
+  })
+
   test('returns null when Jev fails or its answers do not fit', async () => {
     const ticket = await addTicket({ title: 'Anything' })
     jev.status = 500

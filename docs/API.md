@@ -563,12 +563,17 @@ In `on` mode the claim also returns the setting to work the ticket at as `routed
 `agentModel`/`agentEffort`, and the agent loop works the ticket at it. The first source that has a pick wins:
 
 1. `ticket`: the ticket's own setting (the board's default for the half it leaves out). Jev isn't asked then.
-2. `jev`: Jev's pick, when its confidence is at least the board's `jevThreshold`.
+2. `jev`: Jev's pick, when its confidence is at least the board's `jevThreshold`. A pick that drops below the
+   board's default to `haiku` or to `low` effort needs more: halfway from the threshold to 1 (0.85 at 0.7). When
+   Jev's effort probability is spread over two efforts (within 0.1 of each other), the higher one is taken, or the
+   lower one when Jev thinks the ticket is fully specified.
 3. `history`: the history suggestion, when it is built on 3 or more similar tickets.
 4. `default`: the board's `agentModel` and `agentEffort`.
 
 Jev's and the history suggestion's picks must be among the board's `jevModels`, and with `jevOnlyLower` each is held to
-the board's default (its model and its effort each no dearer). Jev's pick is kept with a hash of what it was told about
+the board's default (its model and its effort each no dearer). Whichever of `jev`, `history` and `default` routes, the
+ticket never goes below the setting the board agent's newest run on it worked at, its model and its effort each: a
+ticket whose run failed or that came back from review with changes keeps or raises its setting. Jev's pick is kept with a hash of what it was told about
 the ticket (title, description with its checklist unchecked, tags, epic, and the models it may pick from), and Jev isn't
 asked again until one of those changes: claiming the ticket again, checking off steps or reassigning it doesn't. A
 failed or timed-out Jev request (2 s) is never kept: routing goes on to the next source, and the next claim or route

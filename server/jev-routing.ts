@@ -14,7 +14,7 @@ import { transaction } from './db.ts'
 import { systemOne, type JevAnswer, type JevQuestion, type JevUsage } from './jev.ts'
 import { getBoard } from './store/boards.ts'
 import { getEpic } from './store/epics.ts'
-import { boardDefault, cachedJevPick, historyPick, saveRoute } from './store/routing.ts'
+import { boardDefault, cachedJevPick, historyPick, lastRunSetting, saveRoute } from './store/routing.ts'
 import { suggestAgent } from './store/suggestions.ts'
 import { listTags } from './store/tags.ts'
 import { typesafeKey } from './typesafe.ts'
@@ -47,8 +47,8 @@ export const DESCRIPTION_LIMIT = 8000
 /** How many similar past tickets (from `suggestAgent`) go into the state. */
 export const SIMILAR_LIMIT = 5
 /**
- * When Jev thinks the ticket is fully specified (`fully_specified` above one half) and the effort one level below its
- * pick is within this much probability of it, the lower effort wins.
+ * When the next likeliest effort is within this much probability of Jev's pick, the probability is spread over the
+ * two, and the higher one wins (the lower one when Jev thinks the ticket is fully specified, see `spreadEffort`).
  */
 export const TIE_MARGIN = 0.1
 
@@ -136,22 +136,28 @@ export async function routeTicket(
   const effort = answer(result.answers, 'effort', 'score')
   const fullySpecified = answer(result.answers, 'fully_specified', 'noul')?.probability ?? 0
   if (!model || !models.includes(model.choice) || !effort) return null
-  let level = AGENT_EFFORTS.indexOf(effort.score as AgentEffort)
-  if (level < 0) return null
-  const below = AGENT_EFFORTS[level - 1]
-  if (
-    below &&
-    fullySpecified > 0.5 &&
-    (effort.probabilities[effort.score] ?? 0) - (effort.probabilities[below] ?? 0) <= TIE_MARGIN
-  ) {
-    level--
-  }
+  const top = AGENT_EFFORTS.indexOf(effort.score as AgentEffort)
+  if (top < 0) return null
   return {
     model: model.choice,
-    effort: AGENT_EFFORTS[level],
+    effort: AGENT_EFFORTS[spreadEffort(top, effort.probabilities, fullySpecified)],
     confidence: Math.min(model.confidence, effort.confidence),
     probabilities: { model: model.probabilities, effort: effort.probabilities, fullySpecified },
   }
+}
+
+/**
+ * The effort level to route with when Jev's Score picked level `top`: when its probability is spread over two efforts
+ * (the next likeliest one is within `TIE_MARGIN` of it), the higher of the two, or the lower one when Jev thinks the
+ * ticket is fully specified (`fullySpecified` above one half).
+ */
+function spreadEffort(top: number, probabilities: Record<string, number>, fullySpecified: number) {
+  const chance = (level: number) => probabilities[AGENT_EFFORTS[level]] ?? 0
+  const next = AGENT_EFFORTS.map((_, level) => level)
+    .filter((level) => level !== top)
+    .sort((a, b) => chance(b) - chance(a))[0]
+  if (next === undefined || chance(top) - chance(next) > TIE_MARGIN) return top
+  return fullySpecified > 0.5 ? Math.min(top, next) : Math.max(top, next)
 }
 
 /** Models from cheapest to dearest, for boards whose routing may only lower the setting. */
@@ -191,11 +197,37 @@ export function contentKey(ticket: Ticket, models: readonly string[]) {
     .digest('hex')
 }
 
+/** `pick` raised to no cheaper than `floor`, its model and effort each: the opposite of `capSetting`. */
+export function raiseSetting(pick: Setting, floor: Setting): Setting {
+  const rank = modelRank(pick.model)
+  const floorRank = modelRank(floor.model)
+  const dearer = pick.model === floor.model || rank === null || floorRank === null || rank >= floorRank
+  return {
+    model: dearer ? pick.model : floor.model,
+    effort: AGENT_EFFORTS.indexOf(pick.effort) >= AGENT_EFFORTS.indexOf(floor.effort) ? pick.effort : floor.effort,
+  }
+}
+
+/**
+ * The confidence Jev's pick needs before it is used when it drops below the board's default to `haiku` or to `low`
+ * effort: halfway from the board's threshold to 1 (0.85 at the default 0.7), as the docs advise gating riskier
+ * choices higher. Staying at or above the default needs only the threshold.
+ */
+export const riskyThreshold = (threshold: number) => threshold + (1 - threshold) / 2
+
+/** Whether `pick` drops to `haiku` or to `low` effort where the board's default `fallback` doesn't. */
+const risky = (pick: Setting, fallback: Setting) =>
+  (modelRank(pick.model) === 0 && modelRank(fallback.model) !== 0) ||
+  (pick.effort === 'low' && fallback.effort !== 'low')
+
 /**
  * Picks the setting a ticket is worked at on a board that routes with Jev, in order: the ticket's own setting (the
- * board's default for the half it leaves out), Jev's pick at or above the board's threshold, the history suggestion
- * when it is built on enough similar tickets, then the board's default. Jev's and the history suggestion's picks must
- * be among the board's models for Jev, and are held to the board's default when Jev may only lower the setting.
+ * board's default for the half it leaves out), Jev's pick at or above the board's threshold (or `riskyThreshold` when
+ * it drops to `haiku` or `low`), the history suggestion when it is built on enough similar tickets, then the board's
+ * default. Jev's and the history suggestion's picks must be among the board's models for Jev, and are held to the
+ * board's default when Jev may only lower the setting. Whichever of them routes, the ticket never goes below the
+ * setting its last run worked at (`lastRunSetting`): a run that failed or came back with changes requested isn't
+ * followed by a cheaper one.
  */
 export function pickRoute(ticket: Ticket, board: BoardSummary, jev: RoutingPick | null): RoutedSetting {
   const fallback = boardDefault(board.id)
@@ -207,13 +239,17 @@ export function pickRoute(ticket: Ticket, board: BoardSummary, jev: RoutingPick 
   const allowed = (pick: Setting) => models.includes(pick.model)
   const held = ({ model, effort }: Setting) =>
     board.jevOnlyLower ? capSetting({ model, effort }, fallback) : { model, effort }
+  const last = lastRunSetting(ticket)
+  const floored = (pick: Setting) => (last ? raiseSetting(pick, last) : pick)
   const threshold = board.jevThreshold ?? JEV_DEFAULTS.threshold
-  if (jev && allowed(jev) && (jev.confidence ?? 0) >= threshold) {
-    return { ...held(jev), source: 'jev', confidence: jev.confidence }
+  if (jev && allowed(jev)) {
+    const pick = held(jev)
+    const needed = risky(pick, fallback) ? riskyThreshold(threshold) : threshold
+    if ((jev.confidence ?? 0) >= needed) return { ...floored(pick), source: 'jev', confidence: jev.confidence }
   }
   const history = historyPick(ticket)
-  if (history && allowed(history)) return { ...held(history), source: 'history', confidence: null }
-  return { ...fallback, source: 'default', confidence: null }
+  if (history && allowed(history)) return { ...floored(held(history)), source: 'history', confidence: null }
+  return { ...floored(fallback), source: 'default', confidence: null }
 }
 
 /**

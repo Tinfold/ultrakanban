@@ -89,6 +89,23 @@ export function historyPick(ticket: Ticket): { model: string; effort: AgentEffor
     : null
 }
 
+/**
+ * The model and effort the newest run of the board's agent on the ticket worked at; null when it has none. Routing
+ * never goes below it, so a ticket whose run failed or that came back with changes requested keeps or raises it.
+ */
+export function lastRunSetting(ticket: Ticket): { model: string; effort: AgentEffort } | null {
+  const agent = getBoard(ticket.boardId).agentName ?? AGENT_DEFAULTS.name
+  const runs = sql.all<{ agent: string }>(
+    'SELECT agent FROM token_usage WHERE ticket_id = ? ORDER BY created_at DESC, id DESC',
+    ticket.id,
+  )
+  for (const run of runs) {
+    const setting = workerSetting(run.agent)
+    if (setting && parseWorkerName(run.agent)?.agent === agent) return setting
+  }
+  return null
+}
+
 /** Jev's pick recorded for the ticket when its content had `contentKey` (see `saveRoute`); null when there is none. */
 export function cachedJevPick(ticketId: string, contentKey: string): RoutingPick | null {
   const route = sql.get<RouteRow>(
