@@ -290,3 +290,17 @@ export async function routeRun(ticket: Ticket): Promise<RoutedSetting | null> {
   const board = getBoard(ticket.boardId)
   return board.jevEnabled && board.jevMode === 'on' ? routeClaim(ticket) : null
 }
+
+/**
+ * Asks Jev on demand which model and effort a ticket as written in the form needs (`POST /boards/:id/jev-suggestion`),
+ * choosing among the board's models. Nothing is recorded. Null when Jev can't be asked or its answers don't fit.
+ */
+export async function suggestWithJev(
+  boardId: string,
+  draft: { title: string; description: string; tagIds: string[]; epicId: string | null },
+): Promise<TicketRoute | null> {
+  const board = getBoard(boardId)
+  const tagIds = listTags(boardId).flatMap((tag) => (draft.tagIds.includes(tag.id) ? tag.id : []))
+  const ticket = { ...draft, boardId, tagIds, estimate: null } as Ticket
+  return routeTicket(ticket, { models: board.jevModels ?? AGENT_MODELS })
+}

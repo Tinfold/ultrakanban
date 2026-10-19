@@ -12,6 +12,7 @@ import {
   createGitHubRepoSchema,
   createTagSchema,
   createTicketSchema,
+  jevSuggestionSchema,
   listTicketsQuerySchema,
   mergeRunSchema,
   recordUsageSchema,
@@ -21,7 +22,8 @@ import { transaction } from '../db.ts'
 import { gitHubFailure, HttpError } from '../errors.ts'
 import { wake } from '../events.ts'
 import { actorOf, readJson } from '../http.ts'
-import { routeClaim } from '../jev-routing.ts'
+import { routeClaim, suggestWithJev } from '../jev-routing.ts'
+import { typesafeKey } from '../typesafe.ts'
 import type { AppServices } from '../app.ts'
 import { createBoard, deleteBoard, getBoard, getBoardDetail, listBoards, updateBoard } from '../store/boards.ts'
 import { recordClaim } from '../store/agent-services.ts'
@@ -183,6 +185,17 @@ export const boardRoutes = ({ pullRequests, mergeQueue, attachmentFiles }: AppSe
       })
       const boardId = c.req.param('boardId')
       return c.json({ ...suggestAgent(boardId, query), routing: compareRouting([boardId]) })
+    })
+    .post('/:boardId/jev-suggestion', async (c) => {
+      const boardId = c.req.param('boardId')
+      getBoard(boardId)
+      const draft = await readJson(c, jevSuggestionSchema)
+      if (!typesafeKey()) {
+        throw new HttpError(409, 'jev_unavailable', 'Jev needs a TypeSafe key; set one up in the setup page')
+      }
+      const suggestion = await suggestWithJev(boardId, draft)
+      if (!suggestion) throw new HttpError(502, 'jev_failed', 'Jev could not be asked, or its answer did not fit')
+      return c.json(suggestion)
     })
     .get('/:boardId/usage', (c) => c.json(listBoardUsage(c.req.param('boardId'))))
     .post('/:boardId/usage', async (c) => {

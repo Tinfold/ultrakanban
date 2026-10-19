@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, mock, test } from 'node:test'
 import { AGENT_EFFORTS, type Ticket } from '../shared/domain.ts'
 import type { JevAnswer } from './jev.ts'
-import { DESCRIPTION_LIMIT, routeTicket, routingState } from './jev-routing.ts'
+import { DESCRIPTION_LIMIT, routeTicket, routingState, type TicketRoute } from './jev-routing.ts'
 import { addTicket, boardId, call, jev } from './test-app.ts'
 
 describe('routing a ticket with Jev', () => {
@@ -156,5 +156,30 @@ describe('routing a ticket with Jev', () => {
     jev.calls.length = 0
     assert.equal(await routeTicket(ticket, { models: [] }), null)
     assert.equal(jev.calls.length, 0)
+  })
+
+  test('suggests a setting on demand for a draft, recording nothing', async () => {
+    await call('POST', `/boards/${boardId}/epics`, { title: 'Login' })
+    jev.answers = answers({ haiku: 0.1, sonnet: 0.7, opus: 0.2 }, { low: 0.2, medium: 0.6, high: 0.2 })
+    const { status, body } = await call<TicketRoute>('POST', `/boards/${boardId}/jev-suggestion`, {
+      title: 'Fix login timeout',
+      description: '- [ ] one',
+      tagIds: ['no-such-tag'],
+    })
+    assert.equal(status, 200)
+    assert.equal(body.model, 'sonnet')
+    assert.equal(body.effort, 'medium')
+    assert.deepEqual(body.probabilities.model, { haiku: 0.1, sonnet: 0.7, opus: 0.2 })
+    assert.equal(jev.calls[0].body.state.title, 'Fix login timeout')
+    assert.deepEqual(jev.calls[0].body.state.tags, [])
+  })
+
+  test('the on-demand suggestion needs a key and an answer from Jev', async () => {
+    jev.status = 500
+    assert.equal((await call('POST', `/boards/${boardId}/jev-suggestion`, { title: 'Anything' })).status, 502)
+    delete process.env.TYPESAFE_API_KEY
+    const { status, body } = await call<{ error: { code: string } }>('POST', `/boards/${boardId}/jev-suggestion`, {})
+    assert.equal(status, 409)
+    assert.equal(body.error.code, 'jev_unavailable')
   })
 })

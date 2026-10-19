@@ -81,6 +81,9 @@ interface TicketRow {
   stop_requested_by: string | null
   estimate: TicketSize | null
   approval: Approval | null
+  routed_model: string | null
+  routed_effort: AgentEffort | null
+  routed_confidence: number | null
   position: number
   version: number
   moved_at: string
@@ -133,6 +136,9 @@ const SELECT_TICKETS = `
     (SELECT sum(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) FROM token_usage
       WHERE ticket_id = t.id) AS usage_tokens,
     (SELECT sum(cost_usd) FROM token_usage WHERE ticket_id = t.id) AS usage_cost,
+    (SELECT model FROM ticket_routes WHERE ticket_id = t.id AND source = 'jev') AS routed_model,
+    (SELECT effort FROM ticket_routes WHERE ticket_id = t.id AND source = 'jev') AS routed_effort,
+    (SELECT confidence FROM ticket_routes WHERE ticket_id = t.id AND source = 'jev') AS routed_confidence,
     ${WAITING_SINCE} AS waiting_since,
     (SELECT count(*) ${SUBTICKETS}) AS subtickets_total,
     (SELECT count(*) ${SUBTICKETS} AND ${SUBTICKET_DONE}) AS subtickets_done,
@@ -209,6 +215,10 @@ const toTicket = (row: TicketRow): Ticket => ({
   waitingSince: row.waiting_since,
   estimate: row.estimate,
   approval: row.approval,
+  jevPick:
+    row.routed_model && row.routed_effort
+      ? { model: row.routed_model, effort: row.routed_effort, confidence: row.routed_confidence }
+      : null,
   movedAt: row.moved_at,
   archived: row.archive_days !== null && Date.parse(row.moved_at) < Date.now() - row.archive_days * DAY_MS,
   autoMergeWait: autoMergeWaitOf(row),

@@ -232,6 +232,7 @@ interface Ticket {
   waitingSince: string | null // when its agent started waiting on a person: the newest comment is its assignee's, or its plan is newer than every comment and waits for approval, and it isn't in review or done
   estimate: 'S' | 'M' | 'L' | null // the size its agent estimated it at in its latest plan (see Plans and approval)
   approval: 'pending' | 'approved' | null // its plan waits for approval, or has it; null when it needs none
+  jevPick: { model; effort; confidence: number | null } | null // Jev's pick, when it was claimed at it (shown as a "Jev 0.82" badge)
   movedAt: string // when it entered its current column
   archived: boolean // in the done column for longer than the board's archiveDoneDays (see Boards)
   // Why the board's auto-merge hasn't merged its pull request yet, as its latest round found (see Auto-merge): only
@@ -578,6 +579,12 @@ the ticket (title, description with its checklist unchecked, tags, epic, and the
 asked again until one of those changes: claiming the ticket again, checking off steps or reassigning it doesn't. A
 failed or timed-out Jev request (2 s) is never kept: routing goes on to the next source, and the next claim or route
 asks again. Runs on feedback get the same setting from `GET /tickets/:ticketId/route`.
+
+`POST /boards/:boardId/jev-suggestion` with `{ title?, description?, tagIds?: id[], epicId?: id | null }` asks Jev on
+demand which model (among the board's `jevModels`) and effort a ticket as written needs, for the "Suggest with Jev"
+button in the ticket form and properties. It answers `{ model, effort, confidence, probabilities: { model: {name: p},
+effort: {name: p}, fullySpecified: p } }` and records nothing. `409 jev_unavailable` without a TypeSafe key, `502
+jev_failed` when Jev can't be asked or its answer doesn't fit.
 
 ```ts
 interface RoutedSetting {

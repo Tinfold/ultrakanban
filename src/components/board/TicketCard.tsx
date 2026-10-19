@@ -17,13 +17,14 @@ import { openBlockers } from '@shared/blockers'
 import type { Ticket, TicketUsage } from '@shared/domain'
 import { AutoMergeHint } from '@/components/common/AutoMergeHint'
 import { CheckStatusIcon } from '@/components/common/CheckStatusIcon'
+import { JevBadge } from '@/components/common/JevBadge'
 import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { PullRequestIcon } from '@/components/common/PullRequestIcon'
 import { EpicChip } from '@/components/common/EpicChip'
 import { TagChip } from '@/components/common/TagChip'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { WaitingBadge } from '@/components/common/WaitingBadge'
-import { COST_NOTE, dueState, formatDueDate, formatUsage, formatUsageShort, ticketRef } from '@/lib/format'
+import { COST_NOTE, dueState, formatDueDate, formatModel, formatUsage, formatUsageShort, ticketRef } from '@/lib/format'
 import { checklistProgress } from '@/lib/markdown'
 import { CONFLICTS_HINT } from '@/lib/pull-request'
 import { cn } from '@/lib/utils'
@@ -70,6 +71,7 @@ export function TicketCard({ ticket, overlay, selecting, selected }: TicketCardP
     ticket.pullRequest ||
     ticket.waitingSince ||
     ticket.estimate ||
+    ticket.jevPick ||
     ticket.approval === 'pending'
   const canMerge =
     !overlay &&
@@ -123,6 +125,12 @@ export function TicketCard({ ticket, overlay, selecting, selected }: TicketCardP
               title={`Its agent estimated it at size ${ticket.estimate} (S, M or L)`}
             >
               {ticket.estimate}
+            </span>
+          )}
+          {ticket.jevPick && (
+            <span className="flex items-center gap-1">
+              {formatModel(ticket.jevPick.model)}
+              <JevBadge pick={ticket.jevPick} />
             </span>
           )}
           {blockers.length > 0 && (

@@ -527,6 +527,15 @@ export const agentSuggestionQuerySchema = z.object({
   steps: z.coerce.number().int().min(0).max(1000).optional(),
 })
 
+/** What Jev is asked to route on demand: a ticket as it is being written, or edited and not saved yet. */
+export const jevSuggestionSchema = z.object({
+  title: z.string().max(500).default(''),
+  description: z.string().max(100_000).default(''),
+  /** Its tags, by id; ones the board doesn't have are ignored. */
+  tagIds: z.array(z.string().max(100)).max(50).default([]),
+  epicId: z.string().max(100).nullable().default(null),
+})
+
 export const boardDetailQuerySchema = z.object({
   archived: z.stringbool().default(false),
 })
@@ -620,6 +629,7 @@ export type MergeRunInput = z.input<typeof mergeRunSchema>
 export type MergeTicketInput = z.input<typeof mergeTicketSchema>
 export type ListTicketsQuery = z.output<typeof listTicketsQuerySchema>
 export type AgentSuggestionQuery = z.output<typeof agentSuggestionQuerySchema>
+export type JevSuggestionInput = z.input<typeof jevSuggestionSchema>
 export type RecordUsage = z.output<typeof recordUsageSchema>
 export type RecordRun = z.output<typeof recordRunSchema>
 export type BoardExport = z.output<typeof boardExportSchema>

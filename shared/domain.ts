@@ -524,6 +524,8 @@ export interface Ticket {
   estimate: TicketSize | null
   /** Whether its agent's plan waits for approval or has it (see `Approval`); null when it doesn't need any. */
   approval: Approval | null
+  /** The setting Jev picked for it when its agent claimed it and the board worked it at the pick; null otherwise. */
+  jevPick: RoutingPick | null
   /** When the ticket entered its current column. */
   movedAt: string
   /** Whether it has been in the board's done column for longer than the board's `archiveDoneDays`. */
@@ -1465,4 +1467,17 @@ export interface SetupStatus {
    * from the browser's (Docker Desktop's VM's drifts, e.g. after the machine sleeps).
    */
   serverTime: string
+}
+
+/** Jev's answer to `POST /boards/:id/jev-suggestion`: its pick for a ticket and how likely each choice is. */
+export interface JevSuggestion {
+  model: string
+  effort: AgentEffort
+  /** The lower of the model's and the effort's confidence, from 0 to 1. */
+  confidence: number
+  probabilities: {
+    model: Record<string, number>
+    effort: Record<string, number>
+    fullySpecified: number
+  }
 }

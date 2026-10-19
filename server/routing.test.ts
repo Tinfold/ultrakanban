@@ -331,6 +331,11 @@ describe('routing', () => {
       assert.equal(body.agentModel, null)
       assert.equal(body.agentEffort, null)
       assert.equal((await call<Ticket>('GET', `/tickets/${ticket.id}`)).body.agentModel, null)
+      assert.deepEqual((await call<Ticket>('GET', `/tickets/${ticket.id}`)).body.jevPick, {
+        model: 'haiku',
+        effort: 'low',
+        confidence: 0.85,
+      })
       assert.deepEqual((await run(ticket, 'claude/haiku/low')).routing, {
         source: 'jev',
         confidence: 0.85,
