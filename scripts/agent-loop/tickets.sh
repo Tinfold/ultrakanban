@@ -313,6 +313,20 @@ their first run yet (CLAIM_LIMIT $CLAIM_LIMIT)"
   # Everything on the ticket so far is handed to this run. Until it succeeds, the claim itself counts as feedback,
   # so a failed or interrupted run is retried with backoff.
   snapshot=$(get "/tickets/$id/activity" | jq -c '{activity: (map(.id) | max // 0)}') || snapshot='{}'
+  # A re-claimed ticket may already have a pull request: its comments and reviews so far were handed over before, so
+  # they go into the snapshot too, or they would come back as new feedback.
+  local pr_repo pr_number issue reviews inline
+  pr_repo=$(jq -r '.pullRequest.repo // empty' <<<"$ticket")
+  pr_number=$(jq -r '.pullRequest.number // empty' <<<"$ticket")
+  if [[ -n $pr_repo && -n $pr_number ]]; then
+    if issue=$(gh_list "repos/$pr_repo/issues/$pr_number/comments?per_page=100") &&
+      reviews=$(gh_list "repos/$pr_repo/pulls/$pr_number/reviews?per_page=100") &&
+      inline=$(gh_list "repos/$pr_repo/pulls/$pr_number/comments?per_page=100"); then
+      snapshot=$(jq -c --argjson i "$issue" --argjson r "$reviews" --argjson c "$inline" \
+        '. + {issue: ([$i[].id] | max // 0), review: ([$r[].id] | max // 0), inline: ([$c[].id] | max // 0)}' \
+        <<<"$snapshot") || true
+    fi
+  fi
   write_state "$id" "$(jq -c '. + {claim: true}' <<<"$snapshot")"
   claim_unlock
   run_step="Working the ticket"
