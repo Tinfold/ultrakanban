@@ -127,6 +127,23 @@ Caveats, which is why this stays **optional and off by default**:
 - Jev only replaces the _guess_. Without the history that 3.1 and 3.5 bring, there is nothing to check its picks
   against, so build those first.
 
+### Where Jev fits, and where it doesn't
+
+- **It can't replace the model that works the tickets.** Jev returns typed answers, not text. It can't read the code,
+  call tools, write a patch, open a pull request or reply to a review, and that is what every `claude -p` run does.
+- **There is no AI orchestrator to replace.** Everything that decides what happens next is free code: the agent loop
+  (`scripts/agent-loop.sh`), the triage jq (`scripts/agent-loop/triage.sh`) and the server's `claim-next`. The only
+  paid model calls are the runs themselves. Swapping deterministic code for a model call adds cost, latency and
+  a way to fail, and changes nothing that matters.
+- **So its best use is a small, paid decision in front of an expensive one.** Picking the model and effort for a
+  run is the main one. Two more come close, and could be added once 6.8 shows its picks hold up: deciding whether
+  new feedback needs a run at all (a Noul like "this comment asks for a change", after the cheap rules in 1.2 have
+  run), and whether a failing CI log comes from the code or from the infrastructure, before a run is started just to
+  find that out. Each saves a whole run when it is right, so both should start in dry-run mode like 6.8.
+- **Whether it belongs at all** depends on 6.8. The free history suggestion (3.1, 3.5) may route well enough on its
+  own. If Jev's dry-run picks don't lower cost per finished ticket against it, drop section 6. That is why it stays
+  optional, off by default, and comes after 3.1 and 3.5.
+
 ### Items
 
 | #   | Item                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Size |
