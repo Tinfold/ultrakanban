@@ -17,6 +17,10 @@
 read -r -d '' TRIAGE <<'JQ'
 def bot: (.user.type // "") == "Bot" or ((.user.login // "") | endswith("[bot]"));
 def feedback: (bot | not) and ((.body // "") | contains($marker) | not);
+# A short acknowledgement ("thanks", "LGTM", a lone emoji) asks for nothing, so it doesn't start a run.
+def ack: (.body // "") | gsub("^[\\s[:punct:]]+|[\\s[:punct:]]+$"; "") | ascii_downcase
+  | (length <= 40) and (test("^([^a-z0-9]*|(thanks?|thank you|thx|ty|lgtm|looks good( to me)?|nice|great|perfect|awesome|cool|ok(ay)?|done|"
+    + "good|approved?|\\+1|ship it|merged?|sounds good|great work|good job|nice work)( (you|so much|a lot|everyone|all))?)$"));
 def ours: . == $agent or . == $loop or startswith($agent + "/");
 def clip: if length > 2000 then .[:2000] + " [...]" else . end;
 . as [$activity, $pr, $ci, $issue, $reviews, $inline, $s]
@@ -29,6 +33,7 @@ def clip: if length > 2000 then .[:2000] + " [...]" else . end;
 # The human feedback above the given watermarks (a snapshot's activity, issue, review and inline ids).
 | def human($w): [
     ($activity[] | select(.type == "comment" and .id > ($w.activity // 0) and (.actor | ours | not))
+      | select(.data | ack | not)
       | {key: "t\(.id)", text: "Ticket comment from \(.actor):\n\(.data.body // "" | clip)"}),
     ($activity[] | select(.type == "moved" and .id > ($w.activity // 0) and (.actor | ours | not))
       | select((.data.to // "" | ascii_downcase) == ($working | ascii_downcase))
@@ -38,13 +43,13 @@ def clip: if length > 2000 then .[:2000] + " [...]" else . end;
     ($activity[] | select(.type == "approved" and .id > ($w.activity // 0) and (.actor | ours | not))
       | {key: "t\(.id)", text: ("\(.actor) approved your plan:\n"
          + "Go on with the work you planned, and take the ticket through to review.")}),
-    ($issue[] | select(.id > ($w.issue // 0) and feedback)
+    ($issue[] | select(.id > ($w.issue // 0) and feedback and (ack | not))
       | {key: "i\(.id)", text: "Pull request comment from \(.user.login) (\(.html_url)):\n\(.body // "" | clip)"}),
     ($reviews[] | select(.id > ($w.review // 0) and feedback and .state != "PENDING")
-      | select(.state != "COMMENTED" or (.body // "") != "")
+      | select((.body // "") != "" and (ack | not))
       | {key: "r\(.id)",
          text: "Pull request review (\(.state)) from \(.user.login) (\(.html_url)):\n\(.body // "" | clip)"}),
-    ($inline[] | select(.id > ($w.inline // 0) and feedback)
+    ($inline[] | select(.id > ($w.inline // 0) and feedback and (ack | not))
       | {key: "c\(.id)", text: ("Inline review comment from \(.user.login) "
          + "on \(.path):\(.line // .original_line // "?") (\(.html_url)):\n\(.body // "" | clip)")})
   ];
