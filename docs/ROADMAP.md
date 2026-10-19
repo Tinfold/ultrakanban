@@ -8,6 +8,20 @@ Each item gives a size (S, M or L). It doesn't pick a model or effort for the wo
 defaults, templates and the suggestion endpoint). Section 3 instead suggests changes to how the app makes that choice.
 References are `file:line` at the time of writing.
 
+## Tracking
+
+The roadmap is filed on the board as five epics. Each has an integration branch: its tickets open their pull
+requests into that branch, and a parent ticket then merges the whole epic into `main` in one pull request, to be
+tested before it merges. Item 3.1 isn't filed, because routing at claim time with Jev (`docs/JEV.md`) already does it.
+
+| Epic                          | Branch                  | Parent | Items                                            |
+| ----------------------------- | ----------------------- | ------ | ------------------------------------------------ |
+| Loop: stop wasted runs        | `epic/loop-wasted-runs` | #15    | 1.1–1.5, 2.4, 2.7, 4.10–4.14, 5.3                |
+| Cheaper runs                  | `epic/cheaper-runs`     | #26    | 2.1–2.3, 2.5, 2.6, 2.8, 4.15, 5.1, 5.2, 5.4, 5.7 |
+| Server: data safety and bugs  | `epic/server-bugs`      | #37    | 4.1, 4.2, 4.5–4.9, 4.16, 5.5, 5.6                |
+| Routing and cost visibility   | `epic/routing-ui`       | #48    | 3.2–3.8, 5.8, 5.9                                |
+| UI fixes, API polish and docs | `epic/ui-api-docs`      | #57    | 2.9, 4.3, 4.4, 4.17, 4.18, section 6             |
+
 ## 1. Stop runs that do nothing (biggest savings)
 
 Each of these starts a full `claude -p` run, at the board's model (Opus by default), that has nothing to do.
