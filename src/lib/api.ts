@@ -14,6 +14,9 @@ import type {
   BoardSummary,
   Column,
   Epic,
+  LocalPullRequestDetail,
+  LocalPullRequestComment,
+  LocalPullRequestDiff,
   MergeMethod,
   MergePlan,
   MergeRun,
@@ -33,6 +36,7 @@ import type {
   CreateGitHubRepoInput,
   CreateTagInput,
   CreateTicketInput,
+  LocalPullRequestCommentInput,
   MoveTicketInput,
   SetAgentApiKeyInput,
   SetUsageReserveInput,
@@ -146,6 +150,17 @@ export const api = {
   requestAgentCleanup: (boardId: string) => request<BoardSummary>('POST', `/boards/${boardId}/agent-cleanup`),
   addComment: (ticketId: string, body: string, pullRequest = false) =>
     request<Activity>('POST', `/tickets/${ticketId}/comments`, { body, pullRequest }),
+  /** A local pull request (see `LocalPullRequest`), with its comments. */
+  getLocalPullRequest: (boardId: string, number: number) =>
+    request<LocalPullRequestDetail>('GET', `/boards/${boardId}/pull-requests/${number}`),
+  localPullRequestDiff: (boardId: string, number: number) =>
+    request<LocalPullRequestDiff>('GET', `/boards/${boardId}/pull-requests/${number}/diff`),
+  commentOnLocalPullRequest: (boardId: string, number: number, input: LocalPullRequestCommentInput) =>
+    request<LocalPullRequestComment>('POST', `/boards/${boardId}/pull-requests/${number}/comments`, input),
+  mergeLocalPullRequest: (boardId: string, number: number) =>
+    request<LocalPullRequestDetail>('POST', `/boards/${boardId}/pull-requests/${number}/merge`),
+  closeLocalPullRequest: (boardId: string, number: number) =>
+    request<LocalPullRequestDetail>('POST', `/boards/${boardId}/pull-requests/${number}/close`),
   mergePlan: (boardId: string) => request<MergePlan>('GET', `/boards/${boardId}/merge-plan`),
   mergeRun: (boardId: string) => request<MergeRun | null>('GET', `/boards/${boardId}/merge-run`),
   startMergeRun: (boardId: string, method: MergeMethod) =>

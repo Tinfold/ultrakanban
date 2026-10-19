@@ -1,8 +1,9 @@
 import { CircleXIcon, GitMergeConflictIcon, GitPullRequestIcon, MoreHorizontalIcon, RefreshCwIcon } from 'lucide-react'
 import { type FormEvent, useState } from 'react'
-import { type FailingCheck, parsePullRequestUrl, type Ticket } from '@shared/domain'
+import { type FailingCheck, parseLocalPullRequestUrl, parsePullRequestUrl, type Ticket } from '@shared/domain'
 import { AutoMergeHint } from '@/components/common/AutoMergeHint'
 import { CheckStatusIcon } from '@/components/common/CheckStatusIcon'
+import { PullRequestAnchor } from '@/components/common/PullRequestAnchor'
 import { PullRequestIcon } from '@/components/common/PullRequestIcon'
 import { Button } from '@/components/ui/button'
 import {
@@ -64,11 +65,14 @@ export function PullRequestField({ ticket }: { ticket: Ticket }) {
   const [error, setError] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
   const pullRequest = ticket.pullRequest
+  // The board keeps a local pull request's state itself (see `LocalPullRequest`): there is nothing to check.
+  const local = !!pullRequest && !!parseLocalPullRequestUrl(pullRequest.url)
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const url = String(new FormData(event.currentTarget).get('url') ?? '').trim()
-    if (!parsePullRequestUrl(url)) return setError('Paste a link like https://github.com/owner/repo/pull/123')
+    if (!parsePullRequestUrl(url) && !parseLocalPullRequestUrl(url))
+      return setError('Paste a link like https://github.com/owner/repo/pull/123')
     setEditing(false)
     void actions.linkPullRequest(ticket.id, url)
   }
@@ -91,10 +95,8 @@ export function PullRequestField({ ticket }: { ticket: Ticket }) {
         <PopoverAnchor asChild>
           {pullRequest ? (
             <div className="flex min-h-7 items-center gap-1 rounded-md pl-2 hover:bg-muted">
-              <a
+              <PullRequestAnchor
                 href={pullRequest.url}
-                target="_blank"
-                rel="noreferrer"
                 title={`${pullRequest.repo}#${pullRequest.number} (${PULL_REQUEST_STATE_LABELS[pullRequest.state]})${pullRequest.title ? `: ${pullRequest.title}` : ''}`}
                 className="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-sm"
               >
@@ -102,7 +104,7 @@ export function PullRequestField({ ticket }: { ticket: Ticket }) {
                 <span className="truncate">
                   {pullRequest.repo.split('/')[1]}#{pullRequest.number}
                 </span>
-              </a>
+              </PullRequestAnchor>
               {pullRequest.checks && (
                 <CheckStatusIcon status={pullRequest.checks} failingChecks={pullRequest.failingChecks} />
               )}
@@ -122,16 +124,18 @@ export function PullRequestField({ ticket }: { ticket: Ticket }) {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-52">
-                  <DropdownMenuItem disabled={syncing} onSelect={refresh}>
-                    <RefreshCwIcon className={syncing ? 'animate-spin' : undefined} />
-                    Check status now
-                  </DropdownMenuItem>
+                  {!local && (
+                    <DropdownMenuItem disabled={syncing} onSelect={refresh}>
+                      <RefreshCwIcon className={syncing ? 'animate-spin' : undefined} />
+                      Check status now
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem onSelect={() => setEditing(true)}>Change link</DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem variant="destructive" onSelect={() => actions.linkPullRequest(ticket.id, null)}>
                     Unlink
                   </DropdownMenuItem>
-                  {pullRequest.checkedAt && (
+                  {pullRequest.checkedAt && !local && (
                     <p className="px-1.5 pt-1.5 pb-1 text-xs text-muted-foreground">
                       Checked {formatRelative(pullRequest.checkedAt)}
                     </p>
