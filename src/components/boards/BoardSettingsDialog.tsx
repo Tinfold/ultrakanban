@@ -39,6 +39,7 @@ import {
   agentWorkerName,
   type BoardSummary,
   JEV_DEFAULTS,
+  type JevCombine,
   type JevMode,
   TICKET_SIZES,
   type TicketSize,
@@ -205,7 +206,10 @@ export function BoardSettingsDialog({ open, onOpenChange }: { open: boolean; onO
   )
 }
 
-type JevSettings = Pick<BoardSummary, 'jevEnabled' | 'jevModels' | 'jevThreshold' | 'jevOnlyLower' | 'jevMode'>
+type JevSettings = Pick<
+  BoardSummary,
+  'jevEnabled' | 'jevModels' | 'jevThreshold' | 'jevOnlyLower' | 'jevCombine' | 'jevMode'
+>
 
 /** The board's "Route with Jev" settings (see docs/JEV.md); only shown when a TypeSafe API key is set. */
 function JevFieldset({ value, onChange }: { value: JevSettings; onChange: (value: JevSettings) => void }) {
@@ -297,6 +301,30 @@ function JevFieldset({ value, onChange }: { value: JevSettings; onChange: (value
             </p>
           </div>
           <div className="grid gap-1">
+            <Label htmlFor="board-settings-jev-combine">When Jev and the history suggestion disagree</Label>
+            <Select
+              value={value.jevCombine ?? JEV_DEFAULTS.combine}
+              onValueChange={(combine) =>
+                onChange({ ...value, jevCombine: combine === JEV_DEFAULTS.combine ? null : (combine as JevCombine) })
+              }
+            >
+              <SelectTrigger id="board-settings-jev-combine" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="jev-only">Use Jev only</SelectItem>
+                <SelectItem value="jev-first">Prefer Jev (fall back to history)</SelectItem>
+                <SelectItem value="higher">Use the higher setting</SelectItem>
+                <SelectItem value="lower">Use the lower setting</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              The history suggestion is the setting similar finished tickets worked at. The higher setting plays it
+              safe, the lower one saves the most usage. With Jev only, tickets below its threshold get the board's
+              setting.
+            </p>
+          </div>
+          <div className="grid gap-1">
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -334,8 +362,8 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
   const hasBacklog = detail.columns.some((column) => column.name.toLowerCase() === 'backlog')
   const hasTypesafeKey = !!useSetup().data?.typesafe.source
   const [jev, setJev] = useState<JevSettings>(() => {
-    const { jevEnabled, jevModels, jevThreshold, jevOnlyLower, jevMode } = detail.board
-    return { jevEnabled, jevModels, jevThreshold, jevOnlyLower, jevMode }
+    const { jevEnabled, jevModels, jevThreshold, jevOnlyLower, jevCombine, jevMode } = detail.board
+    return { jevEnabled, jevModels, jevThreshold, jevOnlyLower, jevCombine, jevMode }
   })
   const tabs = useRef<(HTMLButtonElement | null)[]>([])
   const form = useRef<HTMLFormElement>(null)

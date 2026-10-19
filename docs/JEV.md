@@ -83,6 +83,22 @@ Caveats, which is why this stays **optional and off by default**:
 Order: 1 → 2 → 3 with 8's dry run (collect data with no behaviour change) → 4 →
 5 and 6 → 7 → 9.
 
+## Combining Jev with the history suggestion
+
+The history suggestion is plain code over the board's own data and uses no Claude or TypeSafe usage, so a board can
+choose how it and Jev's pick combine (`jevCombine`, under Route with Jev in Board settings, "When Jev and the history
+suggestion disagree"):
+
+- `jev-only` (Use Jev only): never use the history suggestion; below the threshold, go straight to the board's default.
+- `jev-first` (Prefer Jev, fall back to history), the default: Jev's pick above the threshold, else the history
+  suggestion (item 5).
+- `higher` (Use the higher setting) and `lower` (Use the lower setting): when both have a pick, take the more or the
+  less capable model and effort of the two, each compared on its own (by their order in `AGENT_MODELS` and
+  `AGENT_EFFORTS`); with only one pick, use it. The lower one saves the most usage, the higher one plays it safe.
+
+The caps still apply first (the board's models for Jev, "may only lower"), and the last run's setting is still the
+floor. The route records the source whose model won (Jev on a full tie), so item 8's cost comparison counts it there.
+
 Sources: [TypeSafe announcement](https://typesafe.ai/blog/introducing-system-one-models-and-jev),
 [docs](https://docs.typesafe.ai) ([quick start](https://docs.typesafe.ai/introduction/quickstart),
 [Score](https://docs.typesafe.ai/primitives/score), [confidence](https://docs.typesafe.ai/confidence)),
