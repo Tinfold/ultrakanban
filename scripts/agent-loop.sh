@@ -305,7 +305,11 @@ followup=
 # The run in progress and the process watching its ticket (see run_claude), if any.
 running=
 watcher=
-trap 'log "stopped"; kill $sleeper $listener $running $watcher 2>/dev/null; exit 0' INT TERM
+# Set by the trap: a run in progress is stopped, then run_claude ends and records it (end_run, stop_leftovers,
+# record_run) before the loop exits.
+stopping=
+trap 'log "stopped"; kill $sleeper $listener $watcher 2>/dev/null
+  if [[ -n $running ]]; then stopping=1; kill $running 2>/dev/null; else exit 0; fi' INT TERM
 
 # `agent-loop.sh save-work` only keeps the work of an unfinished run in the current checkout (see save_work):
 # agent-board.sh does this before it removes a worktree.

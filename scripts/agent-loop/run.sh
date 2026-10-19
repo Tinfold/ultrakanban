@@ -424,7 +424,7 @@ in memory and is never cleaned up. \$TMPDIR is on disk, and the loop empties it 
     # The agents' API key reaches only a run that goes on it, as claude's own.
     if [[ -n $api_key_budget ]]; then export ANTHROPIC_API_KEY=$AGENT_API_KEY; fi
     unset AGENT_API_KEY
-    exec timeout --foreground "$TICKET_TIMEOUT" ${docker_args[@]+"${docker_args[@]}"} claude -p ${claude_args[@]+"${claude_args[@]}"} \
+    exec timeout --foreground -k "${TICKET_KILL_AFTER:-30}" "$TICKET_TIMEOUT" ${docker_args[@]+"${docker_args[@]}"} claude -p ${claude_args[@]+"${claude_args[@]}"} \
       ${skill_args[@]+"${skill_args[@]}"} ${budget_args[@]+"${budget_args[@]}"} --model "$model" --effort "$effort" \
       --output-format stream-json --verbose "$@"
   ) <<<"$prompt" >"$output" 2>"$errors" &
@@ -434,6 +434,8 @@ in memory and is never cleaned up. \$TMPDIR is on disk, and the loop empties it 
   watcher=$!
   wait "$running"
   code=$?
+  # A signal for the loop interrupts wait while the run is still stopping (see the INT/TERM trap).
+  while kill -0 "$running" 2>/dev/null; do wait "$running"; code=$?; done
   kill "$watcher" 2>/dev/null
   wait "$watcher" 2>/dev/null
   end_run "$id"
@@ -465,6 +467,7 @@ in memory and is never cleaned up. \$TMPDIR is on disk, and the loop empties it 
   fi
   record_run "$id" "$code" "$summary" "$usage" "$(($(date +%s%3N) - started))"
   rm -f "$output" "$errors" "$stopped"
+  if [[ -n $stopping ]]; then exit 0; fi
   return "$code"
 }
 
