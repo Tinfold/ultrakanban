@@ -242,6 +242,8 @@ function CreateTicketForm({ initialEpicId, onDone, onCreated }: CreateTicketForm
             description={description}
             tagIds={tagIds}
             epicId={epicId}
+            agentModel={agentModel}
+            agentEffort={agentEffort}
             onApply={(model, effort) => {
               setAgentModel(model)
               setAgentEffort(effort)

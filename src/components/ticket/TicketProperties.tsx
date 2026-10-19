@@ -148,6 +148,8 @@ export function TicketProperties({ ticket }: { ticket: Ticket }) {
             description={ticket.description}
             tagIds={ticket.tagIds}
             epicId={ticket.epicId}
+            agentModel={ticket.agentModel}
+            agentEffort={ticket.agentEffort}
             onApply={(agentModel, agentEffort) => actions.updateTicket(ticket.id, { agentModel, agentEffort })}
           />
           {ticket.jevPick && <JevBadge pick={ticket.jevPick} className="ml-2 inline-block" />}
