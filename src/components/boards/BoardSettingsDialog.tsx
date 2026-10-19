@@ -211,15 +211,23 @@ type JevSettings = Pick<
   'jevEnabled' | 'jevModels' | 'jevThreshold' | 'jevOnlyLower' | 'jevCombine' | 'jevMode'
 >
 
-/** The board's "Route with Jev" settings (see docs/JEV.md); only shown when a TypeSafe API key is set. */
-function JevFieldset({ value, onChange }: { value: JevSettings; onChange: (value: JevSettings) => void }) {
+/** The board's "Route with Jev" settings (see docs/JEV.md); greyed out and not saved without a TypeSafe API key. */
+function JevFieldset({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: JevSettings
+  onChange: (value: JevSettings) => void
+  disabled: boolean
+}) {
   const models = value.jevModels ?? [...AGENT_MODELS]
   const toggleModel = (model: AgentModelAlias, checked: boolean) => {
     const next = AGENT_MODELS.filter((each) => (each === model ? checked : models.includes(each)))
     if (next.length) onChange({ ...value, jevModels: next.length === AGENT_MODELS.length ? null : next })
   }
   return (
-    <fieldset className="grid gap-3 border-t pt-4">
+    <fieldset disabled={disabled} className="grid gap-3 border-t pt-4 disabled:opacity-50">
       <legend className="sr-only">Route with Jev</legend>
       <div className="grid gap-1">
         <label className="flex items-center gap-2 text-sm font-medium">
@@ -240,6 +248,7 @@ function JevFieldset({ value, onChange }: { value: JevSettings; onChange: (value
         <p className="pl-6 text-xs text-muted-foreground">
           Jev (TypeSafe) picks the model and effort for tickets that don't set their own, from each ticket's title,
           description and tags. Starts in dry run: picks are recorded but not used.
+          {disabled && ' Needs a TypeSafe API key.'}
         </p>
       </div>
       {value.jevEnabled && (
@@ -793,7 +802,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
                 listed in each request a run makes, which costs tokens.
               </CheckboxField>
             </Group>
-            {hasTypesafeKey && <JevFieldset value={jev} onChange={setJev} />}
+            <JevFieldset value={jev} onChange={setJev} disabled={!hasTypesafeKey} />
           </Section>
 
           <Section
