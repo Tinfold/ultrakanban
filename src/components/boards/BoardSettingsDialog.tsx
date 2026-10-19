@@ -227,7 +227,7 @@ function JevFieldset({
     if (next.length) onChange({ ...value, jevModels: next.length === AGENT_MODELS.length ? null : next })
   }
   return (
-    <fieldset disabled={disabled} className="grid gap-3 border-t pt-4 disabled:opacity-50">
+    <fieldset disabled={disabled} className="grid gap-5 border-t pt-5 disabled:opacity-50">
       <legend className="sr-only">Route with Jev</legend>
       <div className="grid gap-1">
         <label className="flex items-center gap-2 text-sm font-medium">
@@ -246,8 +246,7 @@ function JevFieldset({
           Route with Jev
         </label>
         <p className="pl-6 text-xs text-muted-foreground">
-          Jev (TypeSafe) picks the model and effort for tickets that don't set their own, from each ticket's title,
-          description and tags. Starts in dry run: picks are recorded but not used.
+          Jev (TypeSafe) picks the model and effort for tickets that don't set their own.
           {disabled && ' Needs a TypeSafe API key.'}
         </p>
       </div>
@@ -284,68 +283,70 @@ function JevFieldset({
               ))}
             </div>
           </div>
-          <div className="grid gap-1">
-            <div className="flex items-center gap-2 text-sm">
-              <Label htmlFor="board-settings-jev-threshold" className="font-normal">
-                Use its pick from a confidence of
-              </Label>
-              <Input
-                id="board-settings-jev-threshold"
-                type="number"
-                min={0}
-                max={1}
-                step={0.05}
-                value={value.jevThreshold ?? ''}
-                onChange={(event) => {
-                  const threshold = event.target.value === '' ? null : Number(event.target.value)
-                  onChange({ ...value, jevThreshold: threshold === null || Number.isNaN(threshold) ? null : threshold })
-                }}
-                placeholder={String(JEV_DEFAULTS.threshold)}
-                className="h-7 w-20"
-              />
+          <details className="rounded-md border p-3 [&>div]:mt-4">
+            <summary className="cursor-pointer text-sm font-medium">Advanced</summary>
+            <div className="grid gap-1">
+              <div className="flex items-center gap-2 text-sm">
+                <Label htmlFor="board-settings-jev-threshold" className="font-normal">
+                  Use its pick from a confidence of
+                </Label>
+                <Input
+                  id="board-settings-jev-threshold"
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={value.jevThreshold ?? ''}
+                  onChange={(event) => {
+                    const threshold = event.target.value === '' ? null : Number(event.target.value)
+                    onChange({
+                      ...value,
+                      jevThreshold: threshold === null || Number.isNaN(threshold) ? null : threshold,
+                    })
+                  }}
+                  placeholder={String(JEV_DEFAULTS.threshold)}
+                  className="h-7 w-20"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Below it, the similar-tickets suggestion or board setting is used.
+              </p>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Below it, the ticket is worked at the similar-tickets suggestion or the board's setting instead.
-            </p>
-          </div>
-          <div className="grid gap-1">
-            <Label htmlFor="board-settings-jev-combine">When Jev and the similar-tickets suggestion disagree</Label>
-            <Select
-              value={value.jevCombine ?? JEV_DEFAULTS.combine}
-              onValueChange={(combine) =>
-                onChange({ ...value, jevCombine: combine === JEV_DEFAULTS.combine ? null : (combine as JevCombine) })
-              }
-            >
-              <SelectTrigger id="board-settings-jev-combine" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="jev-only">Use Jev only</SelectItem>
-                <SelectItem value="jev-first">Prefer Jev (fall back to similar tickets)</SelectItem>
-                <SelectItem value="higher">Use the higher setting</SelectItem>
-                <SelectItem value="lower">Use the lower setting</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              The similar-tickets suggestion is the setting similar finished tickets worked at. The higher setting plays
-              it safe, the lower one saves the most usage. With Jev only, tickets below its threshold get the board's
-              setting.
-            </p>
-          </div>
-          <div className="grid gap-1">
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={value.jevOnlyLower}
-                onChange={(event) => onChange({ ...value, jevOnlyLower: event.target.checked })}
-                className="size-4 accent-primary"
-              />
-              Only pick cheaper settings
-            </label>
-            <p className="pl-6 text-xs text-muted-foreground">
-              Jev may pick a cheaper model or lower effort than the board's agent setting, never a dearer one.
-            </p>
-          </div>
+            <div className="grid gap-1">
+              <Label htmlFor="board-settings-jev-combine">When Jev and the similar-tickets suggestion disagree</Label>
+              <Select
+                value={value.jevCombine ?? JEV_DEFAULTS.combine}
+                onValueChange={(combine) =>
+                  onChange({ ...value, jevCombine: combine === JEV_DEFAULTS.combine ? null : (combine as JevCombine) })
+                }
+              >
+                <SelectTrigger id="board-settings-jev-combine" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="jev-only">Use Jev only</SelectItem>
+                  <SelectItem value="jev-first">Prefer Jev (fall back to similar tickets)</SelectItem>
+                  <SelectItem value="higher">Use the higher setting</SelectItem>
+                  <SelectItem value="lower">Use the lower setting</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                The similar-tickets suggestion is what similar finished tickets used.
+              </p>
+            </div>
+            <div className="grid gap-1">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={value.jevOnlyLower}
+                  onChange={(event) => onChange({ ...value, jevOnlyLower: event.target.checked })}
+                  className="size-4 accent-primary"
+                />
+                Only pick cheaper settings
+              </label>
+              <p className="pl-6 text-xs text-muted-foreground">Never above the board's agent setting.</p>
+            </div>
+          </details>
         </>
       )}
     </fieldset>
