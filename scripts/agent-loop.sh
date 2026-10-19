@@ -82,6 +82,7 @@
 # and check name (re-running CI on the same commit doesn't start a run), checks that never ran or failed for billing,
 # runner or approval reasons never start a run (the loop notes them on the ticket once per commit), and after
 # MAX_CI_RUNS runs in a row started only by CI, it stops starting CI runs for the ticket until a human comments.
+# MAX_CONFLICT_RUNS does the same for runs started only by merge conflicts.
 #
 # A run that fails because the account is out of Claude usage doesn't count as a failure. The loop says so on the
 # ticket, quoting claude's message, and starts no runs at all until the time the message says the limit resets
@@ -147,6 +148,7 @@
 #                       back before the time claude's limit message gave (default: 60)
 #   MAX_ATTEMPTS        failed runs in a row before waiting for new feedback (default: 3)
 #   MAX_CI_RUNS         runs in a row started only by failing CI, with no human feedback between (default: 2)
+#   MAX_CONFLICT_RUNS   runs in a row started only by merge conflicts, with no human feedback between (default: 2)
 #   CLAIM_LIMIT         most new tickets claimed whose first run hasn't finished yet (it is going, failed or stopped),
 #                       across the loops sharing STATE_DIR: no loop claims another while that many are pending, so
 #                       runs that fail right away don't drag the whole todo column into progress (default: 1;
@@ -216,6 +218,7 @@ RETRY_SECONDS=${RETRY_SECONDS:-600}
 USAGE_CHECK_SECONDS=${USAGE_CHECK_SECONDS:-60}
 MAX_ATTEMPTS=${MAX_ATTEMPTS:-3}
 MAX_CI_RUNS=${MAX_CI_RUNS:-2}
+MAX_CONFLICT_RUNS=${MAX_CONFLICT_RUNS:-2}
 MAX_BUILD_GB=${MAX_BUILD_GB:-20}
 CLAIM_LIMIT=${CLAIM_LIMIT:-1}
 CONFLICTS_ONLY=${CONFLICTS_ONLY:-0}

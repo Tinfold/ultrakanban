@@ -5,7 +5,7 @@
 # of its head commit (ci_status) or null, pull request comments, reviews and inline comments (GitHub REST), and its
 # saved state. Prints the snapshot to save after a successful run, the items to hand over, their fingerprint,
 # whether to run now (backoff after failures), whether there is human feedback among them, whether the pull request
-# has merge conflicts now, and which notes to leave (CI not running, CI run cap reached).
+# has merge conflicts now, and which notes to leave (CI not running, CI run cap or conflict run cap reached).
 #
 # The board wakes the loop up for the same ticket activity this counts as human feedback (comments, moves into the
 # in-progress column and approved plans by anyone but the agent; see wakeForFeedback in server/store/tickets.ts), so
@@ -62,8 +62,13 @@ human($s) as $human
 | (($s.ciRuns // 0) >= $maxci and $human == [] and $ciItems != []) as $capped
 | (if $capped then [] else $ciItems end) as $ciUsed
 | (if $human != [] then 0 elif $ciUsed != [] then ($s.ciRuns // 0) + 1 else ($s.ciRuns // 0) end) as $ciRuns
+| ($conflict != "" and $conflict != ($s.conflict // "")) as $newConflict
+| ($newConflict and ($s.conflictRuns // 0) >= $maxconflict and $human == []) as $conflictCapped
+| (if $human != [] then 0 elif $newConflict and ($conflictCapped | not) then ($s.conflictRuns // 0) + 1
+   else ($s.conflictRuns // 0) end) as $conflictRuns
 | ($ci != null and $ci.infra != [] and $s.infraNoted != $ci.sha) as $infraNote
 | ($capped and ($s.capNoted | not)) as $capNote
+| ($conflictCapped and ($s.conflictCapNoted | not)) as $conflictCapNote
 | {
     snapshot: ({
       activity: ([$activity[].id, $s.activity // 0] | max),
@@ -74,13 +79,15 @@ human($s) as $human
       conflict: $conflict,
       ciRuns: $ciRuns,
       infraNoted: (if $infraNote then $ci.sha else $s.infraNoted end),
-      capNoted: (if $ciRuns != 0 and ($capNote or $s.capNoted == true) then true else null end)
+      capNoted: (if $ciRuns != 0 and ($capNote or $s.capNoted == true) then true else null end),
+      conflictRuns: $conflictRuns,
+      conflictCapNoted: (if $conflictRuns != 0 and ($conflictCapNote or $s.conflictCapNoted == true) then true else null end)
     } | with_entries(select(.value != null))),
     items: ([
       (if $s.claim then {key: "claim", text: ("The previous run on this ticket didn't finish. "
         + "Check what it got done and carry on from there.")} else empty end),
       $human[], $ciUsed[],
-      (if $conflict != "" and $conflict != ($s.conflict // "") then
+      (if $newConflict and ($conflictCapped | not) then
         {key: "conflict \($conflict)", text: "The pull request has merge conflicts with \($p.baseRefName)"}
        else empty end)
     ]),
@@ -89,7 +96,8 @@ human($s) as $human
     conflicted: ($conflict != ""),
     ciRuns: $ciRuns,
     infraNote: (if $infraNote then $ci else null end),
-    capNote: $capNote
+    capNote: $capNote,
+    conflictCapNote: $conflictCapNote
   }
 | .fingerprint = (.items | map(.key) | join(" "))
 | .run = ($resumable and .items != [] and (($s.failedFor // null) != .fingerprint or (($s.failures // 0) < $max

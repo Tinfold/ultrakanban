@@ -156,7 +156,7 @@ handle_feedback() {
     triage=$(printf '%s\n' "$activity" "$pr" "$ci" "$issue" "$reviews" "$inline" "$state" |
       jq -cs --arg agent "$AGENT" --arg loop "$LOOP_ACTOR" --arg marker "$MARKER" --arg working "$IN_PROGRESS_COLUMN" \
         --argjson now "$(date +%s)" --argjson retry "$RETRY_SECONDS" --argjson max "$MAX_ATTEMPTS" \
-        --argjson maxci "$MAX_CI_RUNS" "$TRIAGE") ||
+        --argjson maxci "$MAX_CI_RUNS" --argjson maxconflict "$MAX_CONFLICT_RUNS" "$TRIAGE") ||
       { log "can't triage $id"; continue; }
     activity= pr= ci= issue= reviews= inline=
 
@@ -172,6 +172,12 @@ handle_feedback() {
       note "$id" "The agent made $MAX_CI_RUNS runs in a row for failing CI with no human feedback in between, so the \
 loop stopped starting runs for CI on this ticket. Comment on the ticket to let it try again." notify
       update_state "$id" '.capNoted = true'
+    fi
+    if [[ $(jq -r .conflictCapNote <<<"$triage") == true ]]; then
+      log "ticket #$number ($id): $MAX_CONFLICT_RUNS runs in a row for merge conflicts; not starting more until a human comments"
+      note "$id" "The agent made $MAX_CONFLICT_RUNS runs in a row for merge conflicts with no human feedback in between, \
+so the loop stopped starting runs for conflicts on this ticket. Comment on the ticket to let it try again." notify
+      update_state "$id" '.conflictCapNoted = true'
     fi
     if [[ $CONFLICTS_ONLY == 1 ]] && ! jq -e --arg id "$id" --arg followup "$followup" \
       '.conflicted or ($id == $followup and .human)' <<<"$triage" >/dev/null; then

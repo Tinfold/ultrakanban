@@ -388,7 +388,9 @@ name, so re-running CI doesn't start a run. Checks that never ran or failed arou
 `action_required`, `timed_out`, billing or spending-limit messages, jobs where no step failed) never start a run;
 the loop leaves one ticket note per commit saying CI isn't running. Cancelled, skipped and neutral checks are
 ignored. On top of that, after `MAX_CI_RUNS` (default 2) runs in a row started only by CI, it stops starting CI runs
-for the ticket, with a note, until someone comments. And the agent is told not to push anything when a failure
+for the ticket, with a note, until someone comments. Merge conflicts work the same way: a pull request that stays in
+conflict starts a run each time the base branch moves, so after `MAX_CONFLICT_RUNS` (default 2) runs in a row started
+only by conflicts, the loop stops starting them, with a note, until someone comments. And the agent is told not to push anything when a failure
 isn't from the code.
 
 A failed run saves nothing and is retried with backoff (`RETRY_SECONDS`, doubling, up to `MAX_ATTEMPTS` in a row,
