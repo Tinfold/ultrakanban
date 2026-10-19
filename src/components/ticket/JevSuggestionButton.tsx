@@ -35,7 +35,7 @@ const odds = (probabilities: Record<string, number>, label: (name: string) => st
 
 /**
  * Asks Jev which model and effort the ticket as written needs, on demand, and offers its pick with how likely each
- * choice is. Hidden without a TypeSafe key, since Jev can't be asked then.
+ * choice is. Hidden unless the board routes with Jev and a TypeSafe key is set, since Jev is not asked otherwise.
  */
 export function JevSuggestionButton({
   title,
@@ -47,7 +47,7 @@ export function JevSuggestionButton({
   onApply,
 }: JevSuggestionButtonProps) {
   const { detail } = useBoardContext()
-  const hasKey = !!useSetup().data?.typesafe.source
+  const hasKey = !!useSetup().data?.typesafe.source && detail.board.jevEnabled
   const boardId = detail.board.id
   const [state, setState] = useState<{ asking: boolean; suggestion: JevSuggestion | null; failed: boolean }>({
     asking: false,

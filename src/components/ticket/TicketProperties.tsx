@@ -18,6 +18,7 @@ import {
 } from '@/lib/format'
 import { PRIORITY_LABELS } from '@/lib/priority'
 import { cn } from '@/lib/utils'
+import { useSetup } from '@/hooks/queries'
 import { useBoardContext } from '../board/board-context'
 import { JevSuggestionButton } from './JevSuggestionButton'
 import {
@@ -46,6 +47,7 @@ const triggerClass = 'h-auto min-h-7 w-full justify-start px-2 py-1 font-normal'
 
 export function TicketProperties({ ticket }: { ticket: Ticket }) {
   const { actions, detail, moveTicket, columnsById, tagsById, epicsById } = useBoardContext()
+  const hasTypesafeKey = !!useSetup().data?.typesafe.source
   const column = columnsById.get(ticket.columnId)
   const tags = ticket.tagIds.flatMap((tagId) => tagsById.get(tagId) ?? [])
   const epic = ticket.epicId ? epicsById.get(ticket.epicId) : undefined
@@ -141,7 +143,7 @@ export function TicketProperties({ ticket }: { ticket: Ticket }) {
         </Property>
       )}
 
-      {detail.board.agentEnabled && (
+      {detail.board.agentEnabled && detail.board.jevEnabled && hasTypesafeKey && (
         <Property label="Jev">
           <JevSuggestionButton
             title={ticket.title}
