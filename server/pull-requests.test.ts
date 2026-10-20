@@ -13,6 +13,8 @@ import { subscribeWake } from './events.ts'
 import { FIX_CONFLICTS_COMMENT } from './store/tickets.ts'
 import {
   addTicket,
+  annotationReads,
+  annotations,
   boardId,
   call,
   checkRuns,
@@ -183,6 +185,52 @@ describe('pull request workflow', () => {
     assert.equal(await sync(), null)
     pullRequestStatuses.clear()
     checkRuns.clear()
+  })
+
+  test('reads why every failing check failed while each failed because of billing', async () => {
+    const url = 'https://github.com/acme/app/pull/79'
+    const ticket = await addTicket({ title: 'A', pullRequest: url })
+    const failing = (message: (index: number) => string) =>
+      checkRuns.set(
+        'acme/app@head',
+        [1, 2, 3, 4, 5].map((id) => {
+          annotations.set(id, [{ path: null, line: null, level: 'failure', title: null, message: message(id) }])
+          return {
+            id,
+            name: `job ${id}`,
+            status: 'completed',
+            conclusion: 'failure',
+            detailsUrl: null,
+            output: { title: null, summary: null, annotationsCount: 1 },
+          }
+        }),
+      )
+    const sync = async () =>
+      (await call<Ticket>('POST', `/tickets/${ticket.id}/pull-request/sync`)).body.pullRequest!.failingChecks
+
+    failing((id) => `Test ${id} failed`)
+    assert.deepEqual(
+      (await sync()).map((check) => check.excerpt),
+      ['Test 1 failed', 'Test 2 failed', 'Test 3 failed', null, null],
+    )
+    assert.deepEqual(annotationReads.splice(0), [1, 2, 3])
+
+    // A billing problem fails every job: all of them are read, so auto-merge can tell (ignoreBillingFailures).
+    const billing = 'The job was not started because your account is locked due to a billing issue.'
+    failing(() => billing)
+    pullRequestStatuses.set(url, { state: 'open', title: 'Some PR', headSha: 'other' })
+    checkRuns.set('acme/app@other', checkRuns.get('acme/app@head')!)
+    assert.deepEqual(
+      (await sync()).map((check) => check.excerpt),
+      [billing, billing, billing, billing, billing],
+    )
+    assert.deepEqual(annotationReads.splice(0), [1, 2, 3, 4, 5])
+    // Unchanged, they aren't read again.
+    await sync()
+    assert.deepEqual(annotationReads.splice(0), [])
+    pullRequestStatuses.clear()
+    checkRuns.clear()
+    annotations.clear()
   })
 
   test('asks for the merge conflicts in the review column to be fixed', async () => {

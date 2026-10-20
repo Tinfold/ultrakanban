@@ -398,6 +398,10 @@ const MIGRATIONS = [
   -- default (AGENT_DEFAULTS.conflictConcurrency) when NULL.
   ALTER TABLE boards ADD COLUMN agent_conflict_concurrency INTEGER;
   `,
+  `
+  -- Whether auto-merge goes ahead when the only failing checks failed because of billing (see BoardSummary).
+  ALTER TABLE boards ADD COLUMN ignore_billing_failures INTEGER NOT NULL DEFAULT 0;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

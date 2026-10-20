@@ -4,9 +4,11 @@ import { type ApiErrorBody, type MergePlan, type MergeRun, type Ticket } from '.
 import { type GitHubPullRequest } from './github.ts'
 import {
   addTicket,
+  annotations,
   boardId,
   branches,
   call,
+  checkRuns,
   containing,
   deletedBranches,
   merges,
@@ -60,7 +62,7 @@ describe('merging all reviewed pull requests', () => {
       doneColumn: 'Done',
     })
     useBoard(body.id)
-    for (const map of [pulls, pullRequestStatuses, containing, branches]) map.clear()
+    for (const map of [pulls, pullRequestStatuses, containing, branches, checkRuns, annotations]) map.clear()
     merges.length = 0
     deletedBranches.length = 0
     setAfterMerge(() => {})
@@ -238,6 +240,62 @@ describe('merging all reviewed pull requests', () => {
     // Nothing ready is left, so it starts no run.
     assert.equal(await mergeQueue.autoMerge(boardId), null)
     assert.equal((await call<MergeRun>('GET', `/boards/${boardId}/merge-run`)).body.id, run.id)
+  })
+
+  test('auto-merge can ignore checks that failed only because of billing', async () => {
+    const BILLING =
+      'The job was not started because recent account payments have failed or your spending limit needs to be increased.'
+    let nextId = 1
+    /** Sets the commit's check runs: failures with the annotation given (billing by default), or running ones. */
+    const runs = (sha: string, ...messages: (string | null)[]) =>
+      checkRuns.set(
+        `${REPO}@${sha}`,
+        messages.map((message, index) => {
+          const id = nextId++
+          if (message) annotations.set(id, [{ path: '.github', line: null, level: 'failure', title: null, message }])
+          return {
+            id,
+            name: `job ${index + 1}`,
+            status: message ? 'completed' : 'in_progress',
+            conclusion: message ? 'failure' : null,
+            detailsUrl: null,
+            output: { title: null, summary: null, annotationsCount: message ? 1 : 0 },
+          }
+        }),
+      )
+    const sync = (id: string) => call('POST', `/tickets/${id}/pull-request/sync`)
+    const waitOf = async (id: string) => (await call<Ticket>('GET', `/tickets/${id}`)).body.autoMergeWait?.reason
+
+    // Billing failed every job, more of them than get an excerpt otherwise.
+    const billing = await inReview(1, { mergeableState: 'unstable' })
+    runs('sha-1', BILLING, BILLING, BILLING, BILLING, BILLING)
+    const blocked = await inReview(2, { mergeableState: 'blocked' })
+    runs('sha-2', BILLING)
+    const mixed = await inReview(3, { mergeableState: 'unstable' })
+    runs('sha-3', BILLING, 'Expected 1 to equal 2')
+    const running = await inReview(4, { mergeableState: 'unstable' })
+    runs('sha-4', BILLING, BILLING, BILLING, null)
+    const newCommit = await inReview(5, { mergeableState: 'unstable' })
+    runs('sha-5', BILLING)
+    for (const id of [billing, blocked, mixed, running, newCommit]) await sync(id)
+    // Pushed after the board last read its checks: the new commit's checks are still running.
+    pull(REPO, 5).headSha = 'sha-5b'
+    runs('sha-5b', null)
+
+    await call('PATCH', `/boards/${boardId}`, { autoMerge: true })
+    await mergeQueue.autoMergeAll()
+    assert.deepEqual(merges, [])
+    assert.equal(await waitOf(billing), 'Checks failing: job 1, job 2, job 3 and 2 more')
+
+    const { body: board } = await call<{ ignoreBillingFailures: boolean }>('PATCH', `/boards/${boardId}`, {
+      ignoreBillingFailures: true,
+    })
+    assert.equal(board.ignoreBillingFailures, true)
+    await mergeQueue.autoMergeAll()
+    assert.deepEqual(merges, ['acme/app#1:merge', 'acme/app#2:merge'])
+    assert.equal(await waitOf(mixed), 'Checks failing: job 1, job 2')
+    assert.equal(await waitOf(running), 'Checks failing: job 1, job 2, job 3')
+    assert.equal(await waitOf(newCommit), 'Checks failing: job 1')
   })
 
   describe('deleting branches after merge', () => {

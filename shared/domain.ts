@@ -185,6 +185,17 @@ export const FAILING_CHECK_EXCERPTS = 3
 export const FAILING_CHECK_EXCERPT_MAX = 600
 
 /**
+ * What a check's excerpt says when CI didn't run because of the account's billing (failed payments, a spending limit,
+ * used-up minutes), not because the code failed. The billing part of the agent loop's `INFRA_PATTERN`.
+ */
+const BILLING_FAILURE =
+  /billing|spending limit|payments have failed|account is locked|account has been locked|minutes quota|exceeded .*(minutes|quota)/i
+
+/** Whether a failing check failed because of billing (see `BILLING_FAILURE`); false when it has no excerpt. */
+export const isBillingFailure = (check: Pick<FailingCheck, 'excerpt'>) =>
+  !!check.excerpt && BILLING_FAILURE.test(check.excerpt)
+
+/**
  * A check on the pull request's head commit that didn't pass, counted the way the agent loop counts them
  * (scripts/agent-loop/ci.sh): a check run that completed as `failure`, `timed_out`, `startup_failure` or
  * `action_required`, or a commit status in `failure` or `error`. Cancelled, skipped, neutral and stale ones aren't.
@@ -199,7 +210,8 @@ export interface FailingCheck {
   /**
    * A short excerpt of why it failed, from the check run's failure annotations or its output's title and summary, at
    * most `FAILING_CHECK_EXCERPT_MAX` characters. Only the first `FAILING_CHECK_EXCERPTS` failing check runs have one
-   * (to spare GitHub's rate limit), and commit statuses give their description. Null when there is none.
+   * (to spare GitHub's rate limit), or all of them while each one's says it failed for billing (see
+   * `isBillingFailure`), and commit statuses give their description. Null when there is none.
    */
   excerpt: string | null
 }
@@ -365,6 +377,12 @@ export interface BoardSummary {
    * no conflicts, every check passed and every checklist item of the ticket checked.
    */
   autoMerge: boolean
+  /**
+   * Whether auto-merge (and the ready-to-merge notification) goes ahead when the only failing checks failed because of
+   * billing (see `isBillingFailure`), e.g. GitHub Actions jobs that weren't started for a spending limit. Pending checks
+   * and any other failing check still hold a pull request back.
+   */
+  ignoreBillingFailures: boolean
   /**
    * Whether the server deletes a pull request's branch on GitHub once the pull request is merged, after moving the open
    * pull requests based on it to the merged one's base. Branches in forks, the default branch and branches that got

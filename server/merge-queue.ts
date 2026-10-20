@@ -1,4 +1,5 @@
 import {
+  isBillingFailure,
   MERGE_METHODS,
   type MergeMethod,
   type MergePlan,
@@ -8,6 +9,7 @@ import {
   type Ticket,
 } from '../shared/domain.ts'
 import { parseChecklist } from '../shared/checklist.ts'
+import { failsOnlyForBilling } from './checks.ts'
 import { newId, now } from './db.ts'
 import { badRequest, conflict, HttpError } from './errors.ts'
 import type { GitHubPullRequest } from './github.ts'
@@ -15,7 +17,7 @@ import type { Notifier } from './notifications.ts'
 import type { PullRequestSync } from './pull-request-sync.ts'
 import { type AutoMergeFinding, setAutoMergeWaits } from './store/auto-merge.ts'
 import { getBoard, listBoards } from './store/boards.ts'
-import { getTicket, listTickets } from './store/tickets.ts'
+import { getTicket, listTickets, pullRequestChecks } from './store/tickets.ts'
 
 export interface MergeQueueOptions {
   /** Wait between checks while GitHub works out whether a pull request can be merged, and after each merge. */
@@ -174,6 +176,21 @@ export function createMergeQueue(
       pullRequest = await github.getPullRequest(repo, number)
     }
     return pullRequest
+  }
+
+  /**
+   * Whether the board lets a pull request merge despite its failing checks (see `BoardSummary.ignoreBillingFailures`):
+   * it has no conflicts, GitHub holds it back only as `unstable` or `blocked`, which failing checks make it, and every
+   * check failed for billing, as the board last read them and as they are now. Reading them again makes sure they are
+   * the head commit's and none is still running. Branch protection may still refuse the merge (a required review).
+   */
+  async function onlyBillingFails(ticket: Ticket, pullRequest: GitHubPullRequest | null) {
+    const known = ticket.pullRequest
+    if (!known || !pullRequest || !getBoard(ticket.boardId).ignoreBillingFailures) return false
+    if (pullRequest.state !== 'open' || pullRequest.draft || pullRequest.mergeable !== true) return false
+    if (!['unstable', 'blocked'].includes(pullRequest.mergeableState)) return false
+    if (known.checks !== 'failing' || !known.failingChecks.every((check) => isBillingFailure(check))) return false
+    return failsOnlyForBilling(github, known.repo, pullRequest.headSha, pullRequestChecks(ticket.id)).catch(() => false)
   }
 
   async function describe(ticket: Ticket, index: number): Promise<PlanEntry> {
@@ -359,8 +376,8 @@ export function createMergeQueue(
 
   /**
    * Why auto-merge won't merge an item of the plan this round, given the items found ready before it in merge order;
-   * null when it is ready. In the order the board can tell without GitHub (see `knownWait`), then what GitHub says,
-   * then the pull requests it builds on.
+   * null when it is ready. In the order the board can tell without GitHub (see `knownWait`), then what GitHub says
+   * (which `billingOnly`, see `onlyBillingFails`, overrules), then the pull requests it builds on.
    */
   function waitFor(
     item: MergePlanItem,
@@ -368,6 +385,7 @@ export function createMergeQueue(
     ticket: Ticket,
     byTicket: Map<string, MergePlanItem>,
     ready: Set<string>,
+    billingOnly: boolean,
   ): AutoMergeFinding {
     if (item.skip) {
       // It couldn't be read from GitHub: auto-merge itself failed.
@@ -380,7 +398,7 @@ export function createMergeQueue(
       return { reason: pullRequest.mergeable === false && !pullRequest.draft ? 'Merge conflicts' : own, failed: false }
     }
     if (!checklistDone(ticket)) return knownWait(ticket)
-    if (!pullRequest || !readyToMerge(pullRequest)) {
+    if (!pullRequest || !(readyToMerge(pullRequest) || billingOnly)) {
       return { reason: pullRequest ? notReadyReason(pullRequest, ticket) : 'Not found on GitHub', failed: false }
     }
     const waiting = item.after.find((id) => !ready.has(id))
@@ -390,8 +408,8 @@ export function createMergeQueue(
 
   /**
    * Merges the board's pull requests that are ready: in the review column, open, not a draft, without conflicts,
-   * with every check passed and every checklist item of their ticket checked, and building only on others that are
-   * ready too. Returns the run, or null when none were ready (or another run is going), without starting one.
+   * with every check passed (or failed only for billing, on boards that ignore that) and every checklist item of their
+   * ticket checked, and building only on others that are ready too. Returns the run, or null when none were ready (or another run is going), without starting one.
    *
    * Each round also records why each of the review column's pull requests isn't merged (see `AutoMergeWait`): what
    * keeps it from being ready, or that merging it failed, including when the round itself couldn't run. A ready one
@@ -427,7 +445,9 @@ export function createMergeQueue(
       findings.clear()
       for (const item of items) {
         const ticket = getTicket(item.ticketId)
-        const wait = waitFor(item, pullRequestOf.get(item.ticketId) ?? null, ticket, byTicket, ready)
+        const pullRequest = pullRequestOf.get(item.ticketId) ?? null
+        const billingOnly = !item.skip && checklistDone(ticket) && (await onlyBillingFails(ticket, pullRequest))
+        const wait = waitFor(item, pullRequest, ticket, byTicket, ready, billingOnly)
         if (wait) {
           findings.set(item.ticketId, wait)
           continue
@@ -482,8 +502,11 @@ export function createMergeQueue(
     for (const ticket of mergeCandidates(boardId)) {
       const { repo, number, url } = ticket.pullRequest!
       const pullRequest = await github.getPullRequest(repo, number).catch(() => null)
-      if (!pullRequest || !readyToMerge(pullRequest)) continue
-      const message = `${pullRequest.title}: every check passed and it has no conflicts. ${url}`
+      if (!pullRequest) continue
+      const passed = readyToMerge(pullRequest)
+      if (!passed && !(await onlyBillingFails(ticket, pullRequest))) continue
+      const checks = passed ? 'every check passed' : 'its only failing checks failed because of billing'
+      const message = `${pullRequest.title}: ${checks} and it has no conflicts. ${url}`
       if (notifier?.notify(ticket, 'ready', `ready:${pullRequest.headSha}`, message)) notified.push(ticket)
     }
     return notified
