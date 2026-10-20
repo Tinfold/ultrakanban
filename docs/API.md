@@ -892,6 +892,7 @@ login (from Claude's usage endpoint, what `/usage` in claude shows). `GET /syste
 {
   reportedAt: string | null // when the supervisor last reported; null if it never has
   plan: string | null // the subscription, e.g. "pro" or "max"
+  limitsAt: string | null // when the limits were read; older than reportedAt after a report with only an error
   limits: Array<{ label: string; percent: number; resetsAt: string | null }> // e.g. "Current session", "Week, all models"
   // the money the account can spend on usage besides its limits, amounts in `currency` units, limit and remaining null
   // when unknown: kind "grant" ("Credit grant", dollars granted to the plan) or "usage" ("Usage credits", what claude.ai
@@ -907,7 +908,7 @@ login (from Claude's usage endpoint, what `/usage` in claude shows). `GET /syste
     remaining: number | null
     resetsAt: string | null
   }>
-  error: string | null // why there are no limits, e.g. no claude login on the host
+  error: string | null // why the last report has no usage, e.g. no claude login on the host
   // the usage reserve, 1-100 each (see below), null when off; usageCredits: whether agents go on past a used-up limit
   reserve: { week: number | null; session: number | null; usageCredits: boolean }
   // what agents do once usage runs out: wait, or go on on their API key (see below)
@@ -924,7 +925,8 @@ login (from Claude's usage endpoint, what `/usage` in claude shows). `GET /syste
 ```
 
 The supervisor reports with `POST /system/claude-usage` and `{ plan?, usage?, error? }`: `usage` is the usage
-endpoint's answer as it is (the board picks the limits and credits out of it), `error` says why it couldn't get one.
+endpoint's answer as it is (the board picks the limits and credits out of it), `error` says why it couldn't get one. A report
+without `usage` keeps the last limits, credits and their `limitsAt`, so one failed read doesn't lift the usage reserve.
 
 **The usage reserve** keeps some of the week, of the current session or both for people's own Claude sessions. It is
 one setting for the whole Claude account, not per board: `PUT /system/claude-usage/reserve` with
@@ -934,9 +936,10 @@ stays as it is) answers with the usage above. Once a weekly limit (`Week, all mo
 `404 usage_reserve_reached`, with the limit and its reserve in `details`. Unless `usageCredits` is true, a limit at 100%
 does the same without a reserve (`reservePercent` is then `null`), so agents don't run on the account's usage credits
 once a limit is used up (by default they don't); `reserveReached` says which limit it is (of
-several, the one that resets last, as claiming starts again only once all of them have). It only goes by a fresh
-report, from the last 30 minutes (the supervisor reports every 5), and a limit counts as reset once its `resetsAt` has
-passed: a stale or missing report never holds agents back, so agents don't stop because the supervisor did. Only
+several, the one that resets last, as claiming starts again only once all of them have). It only goes by fresh
+limits, read in the last 30 minutes (`limitsAt`; the supervisor reports every 5), and a limit counts as reset once its
+`resetsAt` has passed: stale or missing limits never hold agents back (they fail open), so agents don't stop because
+the supervisor did, or because it can't read the usage any more. Only
 claiming new tickets stops. Tickets agents already hold still get runs for their feedback, and claiming a given ticket
 (`POST /tickets/:ticketId/claim`) still works, so work under way and pull requests in review aren't left halfway;
 Claude's own limits stop those runs when the session or the week runs out.

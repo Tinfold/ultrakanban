@@ -12,6 +12,7 @@ describe('Claude usage', () => {
   test('shows the limits the supervisor last read', async () => {
     assert.deepEqual(await usage(), {
       reportedAt: null,
+      limitsAt: null,
       plan: null,
       limits: [],
       credits: [],
@@ -49,6 +50,7 @@ describe('Claude usage', () => {
     })
     assert.equal(reported.status, 200)
     assert.ok(reported.body.reportedAt)
+    assert.equal(reported.body.limitsAt, reported.body.reportedAt)
     assert.equal(reported.body.plan, 'max')
     assert.deepEqual(reported.body.limits, [
       { label: 'Current session', percent: 3, resetsAt: '2026-10-05T23:00:00+00:00' },
@@ -69,15 +71,17 @@ describe('Claude usage', () => {
       },
     ])
 
-    // Without usage it keeps what it had; an error replaces it.
+    // Without usage it keeps the limits, credits and when they were read, with an error too: one failed read doesn't clear them.
     const kept = (await report({})).body
     assert.deepEqual([kept.limits.length, kept.credits.length], [3, 1])
     const failed = await report({ error: 'No claude login on the host' })
     assert.deepEqual(
-      [failed.body.limits, failed.body.credits, failed.body.error, failed.body.plan],
-      [[], [], 'No claude login on the host', 'max'],
+      [failed.body.limits, failed.body.credits, failed.body.limitsAt, failed.body.error, failed.body.plan],
+      [reported.body.limits, reported.body.credits, reported.body.limitsAt, 'No claude login on the host', 'max'],
     )
-    assert.equal((await report({ usage: { limits: [] } })).body.error, null)
+    assert.notEqual(failed.body.reportedAt, reported.body.reportedAt)
+    const read = await report({ usage: { limits: [] } })
+    assert.deepEqual([read.body.limits, read.body.limitsAt, read.body.error], [[], read.body.reportedAt, null])
 
     assert.equal((await report({ usage: 'nope' })).status, 400)
   })
@@ -258,6 +262,20 @@ describe('the usage reserve', () => {
     await report([])
   })
 
+  test('keeps holding agents back when the supervisor fails to read the usage', async () => {
+    await addTicket({ title: 'Waiting' })
+    await setReserve({ week: 80 })
+    const read = await report([{ kind: 'weekly_all', percent: 90, resets_at: nextWeek }])
+    const failed = await call<ClaudeUsage>('POST', '/system/claude-usage', { error: 'timed out' }, 'agent-supervisor')
+    assert.deepEqual([failed.body.limitsAt, failed.body.reserveReached], [read.body.limitsAt, read.body.reserveReached])
+    assert.ok(failed.body.reserveReached)
+    assert.equal((await claimNext()).status, 404)
+
+    await setReserve({ week: null })
+    assert.equal((await claimNext()).body.title, 'Waiting')
+    await report([])
+  })
+
   test('stops claim-next once a limit is used up, unless agents may spend usage credits', async () => {
     await addTicket({ title: 'On credits' })
     assert.equal((await setReserve({ usageCredits: 'yes' })).status, 400)
@@ -270,7 +288,7 @@ describe('the usage reserve', () => {
     const reached = await usage()
     assert.deepEqual(reached.reserveReached, { label: 'Current session', percent: 100, resetsAt: sessionReset })
     const refused = await claimNext()
-    assert.equal(refused.status, 404)
+    assert.equal(refused.status, 429)
     assert.equal(refused.body.error.code, 'usage_reserve_reached')
     assert.match(
       refused.body.error.message,
@@ -289,10 +307,11 @@ describe('the usage reserve', () => {
     await report([])
   })
 
-  test("doesn't hold agents back on a stale report, or past a limit's reset", () => {
-    const reportedAt = new Date().toISOString()
+  // Stale limits fail open: a supervisor that stopped, or can't read the usage for that long, doesn't stop the agents.
+  test("doesn't hold agents back on stale limits, or past a limit's reset", () => {
+    const limitsAt = new Date().toISOString()
     const week = { label: 'Week, all models', percent: 90, resetsAt: nextWeek }
-    const reported = { reportedAt, limits: [week], reserve: { week: 80, session: null, usageCredits: false } }
+    const reported = { limitsAt, limits: [week], reserve: { week: 80, session: null, usageCredits: false } }
     assert.deepEqual(reserveReached(reported), week)
     assert.equal(reserveReached({ ...reported, reserve: { week: null, session: 80, usageCredits: false } }), null)
     // Used up, it holds them back without a reserve, unless they may spend usage credits.
@@ -302,7 +321,7 @@ describe('the usage reserve', () => {
       ...week,
       percent: 100,
     })
-    assert.equal(reserveReached({ ...reported, reportedAt: null }), null)
+    assert.equal(reserveReached({ ...reported, limitsAt: null }), null)
     // Fresh for 30 minutes: the supervisor reports every 5, so an older report means it stopped.
     assert.deepEqual(reserveReached(reported, Date.now() + 29 * 60_000), week)
     assert.equal(reserveReached(reported, Date.now() + 31 * 60_000), null)
@@ -321,7 +340,7 @@ describe('the usage reserve', () => {
   test('names the limit that lifts last when both reserves hold agents back', () => {
     const session = { label: 'Current session', percent: 95, resetsAt: inHours(2) }
     const week = { label: 'Week, all models', percent: 85, resetsAt: nextWeek }
-    const reported = { reportedAt: new Date().toISOString(), limits: [session, week] }
+    const reported = { limitsAt: new Date().toISOString(), limits: [session, week] }
     assert.deepEqual(reserveReached({ ...reported, reserve: { week: 80, session: 90, usageCredits: false } }), week)
     assert.deepEqual(reserveReached({ ...reported, reserve: { week: 90, session: 90, usageCredits: false } }), session)
     // Once the session resets nothing does, the week being below its reserve.
@@ -418,7 +437,7 @@ describe("the agents' API key", () => {
     // Without a key in the agents' environment, they wait as before.
     assert.equal((await usage()).reserveReached?.label, 'Current session')
     const refused = await claimNext()
-    assert.equal(refused.status, 404)
+    assert.equal(refused.status, 429)
     assert.match(refused.body.error.message, /or go on on their API key if that is allowed/)
 
     await checkIn(true)

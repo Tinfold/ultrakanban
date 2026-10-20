@@ -484,6 +484,11 @@ export const MIGRATIONS = [
   CREATE INDEX activity_actor ON activity(actor, id);
   `,
   `
+  -- When the Claude usage limits were last read (see ClaudeUsage.limitsAt): a report with only an error keeps them.
+  ALTER TABLE claude_usage ADD COLUMN limits_at TEXT;
+  UPDATE claude_usage SET limits_at = reported_at;
+  `,
+  `
   -- Whether auto-merge goes ahead when the only failing checks failed because of billing (see BoardSummary).
   ALTER TABLE boards ADD COLUMN ignore_billing_failures INTEGER NOT NULL DEFAULT 0;
   `,
