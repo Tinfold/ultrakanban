@@ -14,6 +14,12 @@
 # After a person stopped a run on the ticket (the state's `stopped`, that run's snapshot), it doesn't run again until
 # there is human feedback that run wasn't handed: a comment, a move or an approval on the ticket, or pull request
 # feedback, newer than the snapshot. Then it hands over everything new as usual, that feedback included.
+#
+# The agent posts on GitHub from the same account as the people reviewing it, so a pull request comment, review or
+# inline comment it posted without the marker would look like feedback and start its next run. So pull request feedback
+# created while one of the agent's runs was going on the ticket (the state's `runs`, [start, end] in epoch seconds, kept
+# by run_on_ticket) doesn't count: what a person writes on the pull request meanwhile is skipped too, but the run that
+# was going may well have seen it, and ticket comments, which carry their actor, still count.
 read -r -d '' TRIAGE <<'JQ'
 def bot: (.user.type // "") == "Bot" or ((.user.login // "") | endswith("[bot]"));
 def feedback: (bot | not) and ((.body // "") | contains($marker) | not);
@@ -22,8 +28,12 @@ def ack: (.body // "") | gsub("^[\\s[:punct:]]+|[\\s[:punct:]]+$"; "") | ascii_d
   | (length <= 40) and (test("^([^a-z0-9]*|(thanks?|thank you|thx|ty|lgtm|looks good( to me)?|nice|great|perfect|awesome|cool|ok(ay)?|done|"
     + "good|approved?|\\+1|ship it|merged?|sounds good|great work|good job|nice work)( (you|so much|a lot|everyone|all))?)$"));
 def ours: . == $agent or . == $loop or startswith($agent + "/");
+# Whether a pull request comment or review was created during one of the given runs ([start, end] in epoch seconds).
+def during($runs): ((.submitted_at // .created_at // "") | try (sub("\\.[0-9]+"; "") | fromdateiso8601) catch null) as $at
+  | $at != null and any($runs[]; .[0] <= $at and $at <= .[1]);
 def clip: if length > 2000 then .[:2000] + " [...]" else . end;
 . as [$activity, $pr, $ci, $issue, $reviews, $inline, $s]
+| ($s.runs | if type == "array" then . else [] end) as $runs
 | ($pr // {}) as $p
 | ($s.checks | if type == "object" then . else {} end) as $seen
 | (if $ci != null and $seen.sha == $ci.sha then $seen.names // [] else [] end) as $handedOver
@@ -43,13 +53,13 @@ def clip: if length > 2000 then .[:2000] + " [...]" else . end;
     ($activity[] | select(.type == "approved" and .id > ($w.activity // 0) and (.actor | ours | not))
       | {key: "t\(.id)", text: ("\(.actor) approved your plan:\n"
          + "Go on with the work you planned, and take the ticket through to review.")}),
-    ($issue[] | select(.id > ($w.issue // 0) and feedback and (ack | not))
+    ($issue[] | select(.id > ($w.issue // 0) and feedback and (ack | not) and (during($runs) | not))
       | {key: "i\(.id)", text: "Pull request comment from \(.user.login) (\(.html_url)):\n\(.body // "" | clip)"}),
-    ($reviews[] | select(.id > ($w.review // 0) and feedback and .state != "PENDING")
+    ($reviews[] | select(.id > ($w.review // 0) and feedback and .state != "PENDING" and (during($runs) | not))
       | select((.body // "") != "" and (ack | not))
       | {key: "r\(.id)",
          text: "Pull request review (\(.state)) from \(.user.login) (\(.html_url)):\n\(.body // "" | clip)"}),
-    ($inline[] | select(.id > ($w.inline // 0) and feedback and (ack | not))
+    ($inline[] | select(.id > ($w.inline // 0) and feedback and (ack | not) and (during($runs) | not))
       | {key: "c\(.id)", text: ("Inline review comment from \(.user.login) "
          + "on \(.path):\(.line // .original_line // "?") (\(.html_url)):\n\(.body // "" | clip)")})
   ];
@@ -81,7 +91,8 @@ human($s) as $human
       infraNoted: (if $infraNote then $ci.sha else $s.infraNoted end),
       capNoted: (if $ciRuns != 0 and ($capNote or $s.capNoted == true) then true else null end),
       conflictRuns: $conflictRuns,
-      conflictCapNoted: (if $conflictRuns != 0 and ($conflictCapNote or $s.conflictCapNoted == true) then true else null end)
+      conflictCapNoted: (if $conflictRuns != 0 and ($conflictCapNote or $s.conflictCapNoted == true) then true else null end),
+      runs: (if $runs == [] then null else $runs end)
     } | with_entries(select(.value != null))),
     items: ([
       (if $s.claim then {key: "claim", text: ("The previous run on this ticket didn't finish. "

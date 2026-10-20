@@ -537,10 +537,13 @@ from origin with no local changes."
 The repository is checked out on $branch$(
         [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]] && printf '%s' ", freshly updated from origin with no local changes")."
     fi
-    update_state "$id" '.session = ($v | fromjson) | del(.stopped)' \
+    update_state "$id" '.session = ($v | fromjson) | del(.stopped) | .runStart = (now | floor)' \
       "$(jq -nc --arg id "$session" --arg checkout "$PWD" '{id: $id, checkout: $checkout}')"
     run_claude "$id" "$prompt" "$start" "$session"
     code=$?
+    # When the run started and ended, so that TRIAGE doesn't take the pull request comments it posted (without the
+    # marker) for feedback. The last 20 runs are kept.
+    update_state "$id" '.runs = ((.runs // []) + [[.runStart // (now | floor), (now | ceil)]])[-20:] | del(.runStart)'
     if [[ $code == 0 && ${AGENT_LOOP_CLEAN:-0} == 1 ]]; then rm -f "$(run_file)"; fi
     checkout "" >/dev/null # back to the default branch between runs, keeping the work of a run that didn't finish
   else
@@ -548,7 +551,8 @@ The repository is checked out on $branch$(
     log "can't update the checkout for $id"
   fi
   if [[ $code == 0 ]]; then
-    write_state "$id" "$snapshot"
+    write_state "$id" "$(jq -c --argjson s "$(read_state "$id")" '. + ($s | {runs} | with_entries(select(.value != null)))' \
+      <<<"$snapshot")"
     remove_scratch "$id"
     return 0
   fi
