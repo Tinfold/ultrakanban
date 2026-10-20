@@ -273,7 +273,7 @@ their first run yet (CLAIM_LIMIT $CLAIM_LIMIT)"
     status=${response##*$'\n'}
     ticket=${response%$'\n'*}
   fi
-  if [[ $status == 404 && $ticket == *usage_reserve_reached* ]]; then
+  if [[ $status == 429 && $ticket == *usage_reserve_reached* ]]; then
     # Agents leave the rest of the week's or the current session's Claude usage to people (the usage reserve, set on
     # the overview next to the Claude usage). Tickets the agent holds still get runs; only claiming waits, and the
     # board says why.

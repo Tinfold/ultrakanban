@@ -170,7 +170,7 @@ export async function call<T>(method: string, path: string, body?: unknown, acto
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   const text = await res.text()
-  return { status: res.status, body: (text ? JSON.parse(text) : null) as T }
+  return { status: res.status, headers: res.headers, body: (text ? JSON.parse(text) : null) as T }
 }
 
 export let boardId: string

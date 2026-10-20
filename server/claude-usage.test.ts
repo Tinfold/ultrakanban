@@ -219,14 +219,16 @@ describe('the usage reserve', () => {
     const reached = await usage()
     assert.deepEqual(reached.reserveReached, { label: 'Week, Opus', percent: 90, resetsAt: nextWeek })
     const refused = await claimNext()
-    assert.equal(refused.status, 404)
+    assert.equal(refused.status, 429)
+    const wait = Number(refused.headers.get('retry-after'))
+    assert.ok(wait > 2 * 24 * 3600 && wait <= 3 * 24 * 3600, `Retry-After ${wait}`)
     assert.equal(refused.body.error.code, 'usage_reserve_reached')
     assert.match(refused.body.error.message, /week's Claude usage/)
     assert.match(refused.body.error.message, /Week, Opus is at 90%, and its usage reserve starts at 80%/)
     assert.deepEqual(refused.body.error.details, { limit: reached.reserveReached, reservePercent: 80 })
     // Claiming a specific new ticket is turned down the same way; the one an agent holds can still be claimed by it.
     const fresh = (await call<Ticket[]>('GET', `/boards/${boardId}/tickets?unassigned=true`)).body[0]
-    assert.equal((await call('POST', `/tickets/${fresh.id}/claim`, { agent: 'a' })).status, 404)
+    assert.equal((await call('POST', `/tickets/${fresh.id}/claim`, { agent: 'a' })).status, 429)
     assert.equal((await call('POST', `/tickets/${held.id}/claim`, { agent: 'a' })).status, 200)
     // Nothing was claimed, and the ticket an agent holds is still its own.
     assert.equal((await call<Ticket[]>('GET', `/boards/${boardId}/tickets?unassigned=true`)).body.length, 1)
@@ -251,7 +253,7 @@ describe('the usage reserve', () => {
     const reached = await usage()
     assert.deepEqual(reached.reserveReached, { label: 'Current session', percent: 92, resetsAt: sessionReset })
     const refused = await claimNext()
-    assert.equal(refused.status, 404)
+    assert.equal(refused.status, 429)
     assert.equal(refused.body.error.code, 'usage_reserve_reached')
     assert.match(refused.body.error.message, /current Claude session/)
     assert.match(refused.body.error.message, /Current session is at 92%, and its usage reserve starts at 90%/)
@@ -269,7 +271,7 @@ describe('the usage reserve', () => {
     const failed = await call<ClaudeUsage>('POST', '/system/claude-usage', { error: 'timed out' }, 'agent-supervisor')
     assert.deepEqual([failed.body.limitsAt, failed.body.reserveReached], [read.body.limitsAt, read.body.reserveReached])
     assert.ok(failed.body.reserveReached)
-    assert.equal((await claimNext()).status, 404)
+    assert.equal((await claimNext()).status, 429)
 
     await setReserve({ week: null })
     assert.equal((await claimNext()).body.title, 'Waiting')

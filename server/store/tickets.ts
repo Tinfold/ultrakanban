@@ -638,7 +638,7 @@ export function claimTicket(id: string, input: ClaimTicketInput): Ticket {
 
 /**
  * The checks `claimNextTicket` applies when it picks a ticket, for claiming a specific one: no new claims while the
- * usage reserve holds agents back (404 `usage_reserve_reached`), and none on a ticket that is blocked (409 `blocked`):
+ * usage reserve holds agents back (429 `usage_reserve_reached`), and none on a ticket that is blocked (409 `blocked`):
  * tagged `blocked`, waiting for an unfinished ticket (`blocked by #12`), or with unfinished sub-tickets.
  */
 function assertClaimable(ticket: Ticket) {
@@ -798,10 +798,16 @@ function assertBelowUsageReserve() {
         `(agents may spend them if the usage reserve allows it, or go on on their API key if that is allowed). `
       : `Agents claim no new tickets while the rest of ${kept} is kept for people's own work: ` +
         `${limit.label} is at ${Math.round(limit.percent)}%, and its usage reserve starts at ${reservePercent}%. `
-  throw new HttpError(404, 'usage_reserve_reached', `${why}Tickets agents already hold can still be worked.${resets}`, {
-    limit,
-    reservePercent,
-  })
+  const untilReset = limit.resetsAt ? Math.ceil((Date.parse(limit.resetsAt) - Date.now()) / 1000) : NaN
+  const error = new HttpError(
+    429,
+    'usage_reserve_reached',
+    `${why}Tickets agents already hold can still be worked.${resets}`,
+    { limit, reservePercent },
+  )
+  // Until the limit resets; an unknown or past reset time falls back to five minutes.
+  error.retryAfter = untilReset > 0 ? untilReset : 300
+  throw error
 }
 
 /**

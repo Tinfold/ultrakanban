@@ -91,7 +91,7 @@
 #
 # The usage reserve (on the overview, one setting for the whole Claude account) stops agents before that, keeping the
 # rest of the week, of the current session or both for people: once a weekly limit or the current session reaches its
-# reserve, claim-next hands out no new tickets (404 usage_reserve_reached), and the loop says so in its log once and
+# reserve, claim-next hands out no new tickets (429 usage_reserve_reached), and the loop says so in its log once and
 # claims nothing until it lifts. Tickets the agent holds still get runs for their feedback, so work in progress and in
 # review isn't left halfway.
 #
