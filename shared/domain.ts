@@ -621,8 +621,20 @@ export interface AgentSettingStats {
   successRate: number
   /** Cost per ticket in US dollars, averaged by similarity over those that reported one; null when none did. */
   costUsd: number | null
+  /**
+   * Cost per finished ticket: `costUsd` over `successRate`, as each finished ticket also pays for the ones given up on.
+   * Null when none reported a cost or none was finished. Settings are compared by it.
+   */
+  costPerFinishedUsd: number | null
   /** Tokens per ticket, averaged by similarity. */
   tokens: number
+  /** Tokens per ticket weighted by kind (see `TOKEN_WEIGHTS`), averaged by similarity. */
+  weightedTokens: number
+  /**
+   * Weighted tokens per finished ticket, `weightedTokens` over `successRate`; null when none was finished. Settings are
+   * compared by it when they don't both have a `costPerFinishedUsd`.
+   */
+  weightedTokensPerFinished: number | null
   /** Those tickets, most similar first (at most 5). */
   similar: SimilarTicket[]
 }
@@ -802,6 +814,11 @@ export const ROUTING_MIN_FINISHED = 10
  * board has decided at least this many tickets at it.
  */
 export const ROUTING_MIN_SETTING_TICKETS = 3
+/**
+ * A setting is suggested (`GET /boards/:id/agent-suggestion`) only once at least this many similar decided tickets were
+ * worked at it: one says more about that ticket than about the setting.
+ */
+export const SUGGESTION_MIN_TICKETS = 2
 /** History routes a ticket only when its suggestion is built on at least this many similar tickets. */
 export const HISTORY_MIN_TICKETS = 3
 

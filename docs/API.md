@@ -684,21 +684,29 @@ interface RunRecord {
 
 ### Suggested model and effort
 
-`GET /boards/:boardId/agent-suggestion?title=text&tag=ref&steps=3` suggests a model and effort for a ticket about to be
-created, from how the board's similar tickets went (the new-ticket form shows it). `tag` is repeatable (ids or names;
-ones the board doesn't have are ignored) and `steps` is how many checklist steps its description has (leave it out
-when unknown).
+`GET /boards/:boardId/agent-suggestion?title=text&tag=ref&steps=3&estimate=M` suggests a model and effort for a ticket
+about to be created, from how the board's similar tickets went (the new-ticket form shows it). `tag` is repeatable (ids
+or names; ones the board doesn't have are ignored), `steps` is how many checklist steps its description has and
+`estimate` the size (`S`, `M`, `L`) its agent's plan estimated it at (leave either out when unknown). Routing at claim
+time passes the ticket's own.
 
 - **Past tickets** count once they are decided: finished (in the done column or with a merged pull request), or given
   up on (in the cancelled column, or with their pull request closed unmerged). Each counts at the setting of the
-  `<agent>/<model>/<effort>` name whose runs used the most tokens on it, with the cost of all its runs. Only tickets
+  `<agent>/<model>/<effort>` name whose runs used the most tokens on it (weighted by kind, see below), with the cost
+  of all its runs. Only tickets
   the board's own agent did most of (names starting with its `agentName`, `claude` by default) count: the suggestion
   sets the model and effort it works the ticket at, and another agent's (Codex on GPT, say) aren't any it can run.
-- **Similar** means sharing tags (45%) or title words (45%, stop words left out); a similar number of checklist steps
-  adds up to 10% but isn't enough alone. The 20 most similar count, each weighted by its similarity.
-- **The suggestion** is the cheapest setting (by cost, or by tokens when runs reported no cost) whose weighted success
-  rate is within 0.2 of the best one's, so a cheaper setting that finishes the same kind of work wins and one that
-  keeps failing doesn't. It is `null` when no similar ticket was finished.
+- **Similar** means sharing tags (40%) or title words (40%, stop words left out); a similar number of checklist steps
+  (10%) and a similar plan estimate (10%: the same size counts fully, one size apart half) add to that but aren't
+  enough alone. A size either ticket lacks is left out of the weighting. The 20 most similar count, each weighted by
+  its similarity.
+- **Tokens are weighted by kind** about as Claude prices them, relative to uncached input: output 5, cache writes
+  1.25, cache reads 0.1. Cache reads make up most of a run's raw total.
+- **The suggestion** is the setting that costs least per _finished_ ticket (its average cost over its success rate, so
+  each finished ticket also pays for the ones given up on; by weighted tokens when runs reported no cost) among those
+  whose weighted success rate is within 0.2 of the best one's. Only settings at least 2 similar decided tickets were
+  worked at can be suggested; the others still show in `options`. It is `null` when none of those finished a similar
+  ticket.
 
 ```ts
 interface AgentSuggestion {
@@ -714,7 +722,10 @@ interface AgentSettingStats {
   finished: number // how many of them were finished
   successRate: number // finished share, weighted by similarity (0 to 1)
   costUsd: number | null // average cost per ticket; null when none reported one
+  costPerFinishedUsd: number | null // costUsd / successRate; null without a cost or a finished ticket
   tokens: number // average tokens per ticket
+  weightedTokens: number // average tokens per ticket, weighted by kind
+  weightedTokensPerFinished: number | null // weightedTokens / successRate; null without a finished ticket
   similar: { id; number; title; similarity; finished; costUsd: number | null; tokens }[] // most similar first, at most 5
 }
 ```

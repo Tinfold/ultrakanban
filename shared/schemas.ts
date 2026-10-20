@@ -531,6 +531,8 @@ export const agentSuggestionQuerySchema = z.object({
   tag: z.array(z.string().max(100)).max(50).default([]),
   /** How many checklist steps its description has; leave it out when unknown. */
   steps: z.coerce.number().int().min(0).max(1000).optional(),
+  /** The size its agent estimated it at in its plan; leave it out before it posted one. */
+  estimate: ticketSize.optional(),
 })
 
 /** What Jev is asked to route on demand: a ticket as it is being written, or edited and not saved yet. */
