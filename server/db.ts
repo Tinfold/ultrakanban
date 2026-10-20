@@ -479,6 +479,11 @@ export const MIGRATIONS = [
   DROP TABLE token_usage_models_kept;
   `,
   `
+  -- For the overview's queries over recent activity, by time and by actor (see overview.ts).
+  CREATE INDEX activity_created_at ON activity(created_at);
+  CREATE INDEX activity_actor ON activity(actor, id);
+  `,
+  `
   -- Whether auto-merge goes ahead when the only failing checks failed because of billing (see BoardSummary).
   ALTER TABLE boards ADD COLUMN ignore_billing_failures INTEGER NOT NULL DEFAULT 0;
   `,
