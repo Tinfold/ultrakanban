@@ -72,6 +72,8 @@ export function TicketCard({ ticket, overlay, selecting, selected }: TicketCardP
     ticket.waitingSince ||
     ticket.estimate ||
     ticket.jevPick ||
+    ticket.agentModel ||
+    ticket.agentEffort ||
     ticket.approval === 'pending'
   const canMerge =
     !overlay &&
@@ -125,6 +127,11 @@ export function TicketCard({ ticket, overlay, selecting, selected }: TicketCardP
               title={`Its agent estimated it at size ${ticket.estimate} (S, M or L)`}
             >
               {ticket.estimate}
+            </span>
+          )}
+          {(ticket.agentModel || ticket.agentEffort) && (
+            <span className="font-mono" title="The model and effort its agent works it with">
+              {[ticket.agentModel && formatModel(ticket.agentModel), ticket.agentEffort].filter(Boolean).join(' · ')}
             </span>
           )}
           {ticket.jevPick && (
