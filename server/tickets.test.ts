@@ -496,6 +496,20 @@ describe('boards', () => {
     assert.equal(after.tickets[0].columnId, after.columns[1].id)
   })
 
+  test('deleting a column with tickets needs moveTicketsTo or deleteTickets', async () => {
+    await addTicket({ title: 'A', column: 'Doing' })
+    const { body: board } = await call<BoardDetail>('GET', `/boards/${boardId}`)
+    const id = board.columns[1].id
+
+    const refused = await call('DELETE', `/columns/${id}`)
+    assert.equal(refused.status, 409)
+    const deleted = await call('DELETE', `/columns/${id}?deleteTickets=true`)
+    const { body: after } = await call<BoardDetail>('GET', `/boards/${boardId}`)
+
+    assert.equal(deleted.status, 204)
+    assert.equal(after.tickets.length, 0)
+  })
+
   test('export/import round-trips a board', async () => {
     const ticket = await addTicket({ title: 'A', column: 'Done', tags: ['x'], priority: 'high', agentEffort: 'low' })
     await call('POST', `/tickets/${ticket.id}/comments`, { body: 'hello' })

@@ -161,7 +161,10 @@ export const updateColumnSchema = z.object({
 
 export const moveColumnSchema = z.object({ position })
 
-export const deleteColumnSchema = z.object({ moveTicketsTo: ref.optional() })
+export const deleteColumnSchema = z.object({
+  moveTicketsTo: ref.optional(),
+  deleteTickets: z.enum(['true']).optional(),
+})
 
 export const createTagSchema = z.object({ name, color: color.optional() })
 

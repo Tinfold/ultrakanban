@@ -97,7 +97,10 @@ export const api = {
   moveColumn: (columnId: string, position: number) =>
     request<Column>('POST', `/columns/${columnId}/move`, { position }),
   deleteColumn: (columnId: string, moveTicketsTo?: string) =>
-    request<void>('DELETE', `/columns/${columnId}${query({ moveTicketsTo })}`),
+    request<void>(
+      'DELETE',
+      `/columns/${columnId}${query({ moveTicketsTo, deleteTickets: moveTicketsTo ? undefined : 'true' })}`,
+    ),
   idleTickets: (columnId: string) => request<Ticket[]>('GET', `/columns/${columnId}/idle-tickets`),
   releaseIdleTickets: (columnId: string, moveTo: string) =>
     request<Ticket[]>('POST', `/columns/${columnId}/release-idle`, { moveTo }),

@@ -387,17 +387,17 @@ links to the ticket when the server's `ULTRAKANBAN_URL` is set, otherwise to its
 
 ## Columns and tags
 
-| Method | Path                              | Body / query                                             | Returns                                        |
-| ------ | --------------------------------- | -------------------------------------------------------- | ---------------------------------------------- |
-| POST   | `/boards/:boardId/columns`        | `{ name, color?, wipLimit?: number \| null, position? }` | `Column`                                       |
-| PATCH  | `/columns/:columnId`              | `{ name?, color?, wipLimit? }`                           | `Column`                                       |
-| POST   | `/columns/:columnId/move`         | `{ position }`                                           | `Column`                                       |
-| DELETE | `/columns/:columnId`              | `?moveTicketsTo=ref` (otherwise its tickets are deleted) | `204`                                          |
-| GET    | `/columns/:columnId/idle-tickets` |                                                          | `Ticket[]` idle in the column (see below)      |
-| POST   | `/columns/:columnId/release-idle` | `{ moveTo: ref }`                                        | `Ticket[]` it unassigned and moved to `moveTo` |
-| POST   | `/boards/:boardId/tags`           | `{ name, color? }`                                       | `Tag`                                          |
-| PATCH  | `/tags/:tagId`                    | `{ name?, color? }`                                      | `Tag`                                          |
-| DELETE | `/tags/:tagId`                    |                                                          | `204`                                          |
+| Method | Path                              | Body / query                                                                                         | Returns                                        |
+| ------ | --------------------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| POST   | `/boards/:boardId/columns`        | `{ name, color?, wipLimit?: number \| null, position? }`                                             | `Column`                                       |
+| PATCH  | `/columns/:columnId`              | `{ name?, color?, wipLimit? }`                                                                       | `Column`                                       |
+| POST   | `/columns/:columnId/move`         | `{ position }`                                                                                       | `Column`                                       |
+| DELETE | `/columns/:columnId`              | `?moveTicketsTo=ref` or `?deleteTickets=true` (`409 column_not_empty` if it has tickets and neither) | `204`                                          |
+| GET    | `/columns/:columnId/idle-tickets` |                                                                                                      | `Ticket[]` idle in the column (see below)      |
+| POST   | `/columns/:columnId/release-idle` | `{ moveTo: ref }`                                                                                    | `Ticket[]` it unassigned and moved to `moveTo` |
+| POST   | `/boards/:boardId/tags`           | `{ name, color? }`                                                                                   | `Tag`                                          |
+| PATCH  | `/tags/:tagId`                    | `{ name?, color? }`                                                                                  | `Tag`                                          |
+| DELETE | `/tags/:tagId`                    |                                                                                                      | `204`                                          |
 
 A ticket is idle when no agent has sent a heartbeat for it (`POST /tickets/:ticketId/heartbeat`) and nothing has
 happened on it (no activity) for 10 minutes. `scripts/agent-loop.sh` sends one every `TICKET_CHECK_SECONDS` while a
