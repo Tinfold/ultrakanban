@@ -348,10 +348,14 @@ their first run yet (CLAIM_LIMIT $CLAIM_LIMIT)"
   write_state "$id" "$(jq -c '. + {claim: true}' <<<"$snapshot")"
   claim_unlock
   run_step="Working the ticket"
+  plan_note=
+  if get "/boards/$BOARD" | jq -e '.board.approvalSize == null' >/dev/null 2>&1; then
+    plan_note=" No plans wait for approval on this board, so for a small ticket a one-line plan is enough (or skip it)."
+  fi
   run_on_ticket "$id" "Ticket $id is already claimed for you and in progress. Work only this ticket; do not claim another.
 Take it through to review and exit after submitting it. If it is tagged question, submit it for review with the answer \
 as the comment and no pull request.
-Before you start the work, post your plan with its size estimate (POST $KANBAN/api/tickets/$id/plan, see the skill). If \
+Before you start the work, post your plan with its size estimate (POST $KANBAN/api/tickets/$id/plan, see the skill).$plan_note If \
 the ticket then waits for approval (its \"approval\" is \"pending\"), stop there and exit: the loop starts a new run once \
 someone approves the plan." "$snapshot" "claim"
   unlock_ticket

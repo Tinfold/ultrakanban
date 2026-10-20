@@ -111,6 +111,9 @@ is your go-ahead. A comment on it meanwhile may ask for a different plan: answer
 again. Never approve your own plan. Post one plan when you start a ticket, not with every run on it; post it again only
 when the plan changes a lot.
 
+When the board holds no tickets for approval (the board's `approvalSize` is null in `GET /api/boards/$BOARD`), nobody
+reads the plan before you start: for a small ticket a one-line plan with the estimate is enough, or skip it.
+
 ## 4. Work, and report as you go
 
 If the description has a checklist, check off each step on the board as soon as you finish it (0-based, in the order
