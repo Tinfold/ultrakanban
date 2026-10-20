@@ -6,6 +6,7 @@ import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { useTicketAttachments } from '@/hooks/queries'
+import { copyText } from '@/lib/clipboard'
 import { formatBytes, pickFiles } from '@/lib/files'
 import { formatDateTime, formatRelative } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -43,7 +44,12 @@ export function AttachmentViewer({ ticketId, attachment, onClose }: AttachmentVi
   const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   const copyMarkdown = async (item: Attachment) => {
-    await navigator.clipboard.writeText(`![${item.filename}](${item.url})`)
+    try {
+      await copyText(`![${item.filename}](${item.url})`)
+    } catch {
+      toast.error("Couldn't copy to the clipboard")
+      return
+    }
     toast.success('Markdown copied')
   }
 

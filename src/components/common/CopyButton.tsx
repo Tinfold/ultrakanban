@@ -1,6 +1,8 @@
 import { CheckIcon, CopyIcon } from 'lucide-react'
 import { useState } from 'react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { copyText } from '@/lib/clipboard'
 import { cn } from '@/lib/utils'
 
 /** Copies the text `getText` returns, showing a check mark for a moment after. */
@@ -15,7 +17,12 @@ export function CopyButton({
 }) {
   const [copied, setCopied] = useState(false)
   const copy = async () => {
-    await navigator.clipboard.writeText(getText())
+    try {
+      await copyText(getText())
+    } catch {
+      toast.error("Couldn't copy to the clipboard")
+      return
+    }
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }

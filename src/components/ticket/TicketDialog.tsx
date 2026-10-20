@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useDebouncedCallback } from '@/hooks/use-debounced-callback'
+import { copyText } from '@/lib/clipboard'
 import { formatDateTime, formatRelative, ticketRef } from '@/lib/format'
 import { ticketHref } from '@/lib/overview'
 import { useBoardContext } from '../board/board-context'
@@ -68,12 +69,18 @@ function TicketDetail({ ticket, onClose }: { ticket: Ticket; onClose: () => void
   )
 
   const copy = async (text: string, message: string) => {
-    await navigator.clipboard.writeText(text)
+    try {
+      await copyText(text)
+    } catch {
+      toast.error("Couldn't copy to the clipboard")
+      return false
+    }
     toast.success(message)
+    return true
   }
 
   const copyLink = async () => {
-    await copy(window.location.href, 'Link copied')
+    if (!(await copy(window.location.href, 'Link copied'))) return
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }
