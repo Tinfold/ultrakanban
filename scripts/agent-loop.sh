@@ -365,6 +365,7 @@ while true; do
     log "the agent scripts were updated; stopping to start again with the new ones"
     exit 75
   fi
+  refresh_board
   clear_requested_build_output
   handle_feedback || claim_next || idle "$IDLE_SECONDS"
 done

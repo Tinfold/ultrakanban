@@ -91,9 +91,9 @@ adopt() {
 # that feedback could wait hours for one of them to be free.
 handle_feedback() {
   local board review cancelled idle tickets file id number column holder version ticket_model ticket_effort pr_url repo pr_number \
-    queued approval conflicts pr branch ci issue reviews inline activity state triage items ci_note next fix_runs
+    queued approval conflicts pr branch after ci issue reviews inline activity state triage items ci_note next fix_runs
   claim_lock -s
-  board=$(get "/boards/$BOARD") || { claim_unlock; log "can't read board $BOARD"; return 1; }
+  board=$(board) || { claim_unlock; log "can't read board $BOARD"; return 1; }
   review=$(jq -r '.board.reviewColumnId // ""' <<<"$board")
   cancelled=$(jq -r --arg name "$CANCELLED_COLUMN" \
     '[.columns[] | select((.name | ascii_downcase) == ($name | ascii_downcase)) | .id][0] // ""' <<<"$board")
@@ -167,8 +167,10 @@ handle_feedback() {
       esac
     fi
 
-    activity=$(get "/tickets/$id/activity") || { log "can't read the activity of $id"; continue; }
     state=$(read_state "$id")
+    # Only the activity newer than what the state has already seen (the lower of its snapshot and its stopped run's).
+    after=$(jq -r '[.activity // 0, (.stopped | objects | .activity // 0)] | min' <<<"$state")
+    activity=$(get "/tickets/$id/activity?afterId=$after") || { log "can't read the activity of $id"; continue; }
     triage=$(printf '%s\n' "$activity" "$pr" "$ci" "$issue" "$reviews" "$inline" "$state" |
       jq -cs --arg agent "$AGENT" --arg loop "$LOOP_ACTOR" --arg marker "$MARKER" --arg working "$IN_PROGRESS_COLUMN" \
         --argjson now "$(date +%s)" --argjson retry "$RETRY_SECONDS" --argjson max "$MAX_ATTEMPTS" \
@@ -245,7 +247,7 @@ Finish with a ticket comment summarising what you did, then exit." \
 # in-progress column holds fewer than CLAIM_LIMIT (the board's parallel runs) tickets. Tickets already in progress
 # take up the slots, so the backlog isn't pulled into progress while they're being worked.
 backlog_on() {
-  get "/boards/$BOARD" | jq -e --arg name "$BACKLOG_COLUMN" --arg progress "$IN_PROGRESS_COLUMN" \
+  board | jq -e --arg name "$BACKLOG_COLUMN" --arg progress "$IN_PROGRESS_COLUMN" \
     --argjson limit "$CLAIM_LIMIT" '
     def column($n): first(.columns[] | select((.name | ascii_downcase) == ($n | ascii_downcase)) | .id) // null;
     column($progress) as $p

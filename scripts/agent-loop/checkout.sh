@@ -99,7 +99,7 @@ clear_ignored() { git clean -fdXq -e '!/.claude/skills/ultrakanban/SKILL.md'; }
 clear_requested_build_output() {
   local requested marker
   [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]] || return 0
-  requested=$(get "/boards/$BOARD" | jq -r '.board.agentCleanupRequestedAt // empty') || return 0
+  requested=$(board | jq -r '.board.agentCleanupRequestedAt // empty') || return 0
   marker=$(git rev-parse --absolute-git-dir)/ultrakanban-build-cleared || return 0
   [[ -n $requested && $(cat "$marker" 2>/dev/null) < $requested ]] || return 0
   log "clearing the build output, as asked from the board"

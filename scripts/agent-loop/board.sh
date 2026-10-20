@@ -100,10 +100,19 @@ $(date -d "@$until" '+%F %T') for Claude usage"
 
 get() { curl -sf "$KANBAN/api$1"; }
 
+# The board (compact: its tickets without descriptions and the like), fetched once per round by refresh_board and
+# reused by everything that reads it during the round. Fetches it itself if the round's fetch failed.
+board_json=
+refresh_board() { board_json=$(get "/boards/$BOARD?compact=true") || board_json=; }
+board() {
+  [[ -n $board_json ]] || refresh_board
+  [[ -n $board_json ]] && printf '%s\n' "$board_json"
+}
+
 # The board's IDLE_COLUMNS.
 idle_columns() {
   jq -ce --arg todo "$TODO_COLUMN" --arg working "$IN_PROGRESS_COLUMN" --arg cancelled "$CANCELLED_COLUMN" \
-    "$IDLE_COLUMNS" <<<"${1:-$(get "/boards/$BOARD")}"
+    "$IDLE_COLUMNS" <<<"${1:-$(board)}"
 }
 
 # Whether a name is the agent's: the loop's own or one of its workers'.

@@ -276,7 +276,7 @@ use_skills() {
   skill_args=()
   [[ -f $skill ]] || return 0
   if [[ -n $(find .claude/commands .claude/skills -mindepth 1 -maxdepth 1 ! -path "${skill%/*}" -print -quit \
-    2>/dev/null) ]] || get "/boards/$BOARD" | jq -e .board.agentAllSkills >/dev/null; then
+    2>/dev/null) ]] || board | jq -e .board.agentAllSkills >/dev/null; then
     return 0
   fi
   skill_args=(--disable-slash-commands --append-system-prompt "This run has no Skill tool: the ultrakanban skill it \
@@ -307,7 +307,7 @@ use_docker() {
   local id=$1 setting git_dir home=$HOME path extra
   docker_args=() docker_error=
   setting=$(get "/tickets/$id" | jq -r 'if .agentDocker == null then empty else .agentDocker end')
-  [[ -n $setting ]] || setting=$(get "/boards/$BOARD" | jq -r '.board.agentDocker // false')
+  [[ -n $setting ]] || setting=$(board | jq -r '.board.agentDocker // false')
   [[ $setting == true ]] || return 0
   if ! "$DOCKER" image inspect "$DOCKER_IMAGE" >/dev/null 2>&1; then
     if [[ $DOCKER_IMAGE != ultrakanban-agent ]]; then
@@ -708,7 +708,7 @@ your own replies for feedback:
 $MARKER"
   # The board's description holds conventions for every ticket on it, so each run gets it rather than having to look.
   local description
-  description=$(get "/boards/$BOARD" | jq -r '.board.description // "" | gsub("^\\s+|\\s+$"; "")') || description=
+  description=$(board | jq -r '.board.description // "" | gsub("^\\s+|\\s+$"; "")') || description=
   [[ -z $description ]] || printf '%s' "
 
 The board's description (its conventions for every ticket on it; follow them unless the ticket says otherwise):
