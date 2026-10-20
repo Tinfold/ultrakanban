@@ -27,7 +27,7 @@ mkdir -p "$units" "$home/bin/agent-loop" "$home/skill"
 install -m 755 "$repo/scripts/agent-loop.sh" "$repo/scripts/agent-board.sh" "$repo/scripts/agent-supervisor.sh" \
   "$home/bin/"
 install -m 644 "$repo"/scripts/agent-loop/*.sh "$home/bin/agent-loop/"
-install -m 644 "$repo/.claude/skills/ultrakanban/SKILL.md" "$home/skill/"
+install -m 644 "$repo/.claude/skills/ultrakanban/SKILL.md" "$repo/.claude/skills/ultrakanban/WORKER.md" "$home/skill/"
 # Where the copies came from, for agent-supervisor.sh to update them when the default branch moves.
 branch=$(git -C "$repo" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null) || branch=origin/main
 commit=$(git -C "$repo" rev-parse --verify --quiet "${branch#origin/}^{commit}" 2>/dev/null) || commit=

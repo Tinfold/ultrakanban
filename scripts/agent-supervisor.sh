@@ -55,7 +55,8 @@ systemd=1
 [[ -z ${NO_SYSTEMD:-} ]] && systemctl --user show-environment >/dev/null 2>&1 || systemd=
 # The installed files and where they come from in the checkout.
 INSTALLED=(bin/agent-loop.sh:scripts/agent-loop.sh bin/agent-board.sh:scripts/agent-board.sh
-  bin/agent-supervisor.sh:scripts/agent-supervisor.sh skill/SKILL.md:.claude/skills/ultrakanban/SKILL.md)
+  bin/agent-supervisor.sh:scripts/agent-supervisor.sh skill/SKILL.md:.claude/skills/ultrakanban/SKILL.md
+  skill/WORKER.md:.claude/skills/ultrakanban/WORKER.md)
 for part in triage board ci checkout run tickets; do
   INSTALLED+=("bin/agent-loop/$part.sh:scripts/agent-loop/$part.sh")
 done

@@ -38,6 +38,10 @@ its comments, attach screenshots, submit the pull request, and answer review fee
 `~/.claude/skills/ultrakanban/` to use it from any project. It also sets the rule that keeps context small:
 **one ticket per agent, one agent at a time** — finish a ticket, then start a fresh agent for the next.
 
+The agent loop doesn't put all of `SKILL.md` in its runs' system prompt: it uses `WORKER.md` beside it, a shorter
+version with only plan, checklist, review and feedback (no filing tickets, epics or splitting), which saves about
+3k tokens per turn. `SKILL.md` stays for interactive use and for boards with `agentAllSkills` on.
+
 Also: claim/release specific tickets, move to a column/position, comment, edit with optimistic concurrency
 (`ifVersion`), filter tickets, and subscribe to `GET /api/events`.
 

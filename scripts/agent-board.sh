@@ -108,8 +108,11 @@ installed_skill=$here/../skill/SKILL.md
 if [[ -f $installed_skill ]] && ! git -C "$dir/repo" ls-files --error-unmatch "$skill" >/dev/null 2>&1; then
   for checkout in "${checkouts[@]}"; do
     mkdir -p "$checkout/${skill%/*}" && cp "$installed_skill" "$checkout/$skill"
+    [[ -f ${installed_skill%/*}/WORKER.md ]] && cp "${installed_skill%/*}/WORKER.md" "$checkout/${skill%/*}/WORKER.md"
   done
-  grep -qxF "/$skill" "$dir/repo/.git/info/exclude" 2>/dev/null || echo "/$skill" >>"$dir/repo/.git/info/exclude"
+  for f in "$skill" "${skill%/*}/WORKER.md"; do
+    grep -qxF "/$f" "$dir/repo/.git/info/exclude" 2>/dev/null || echo "/$f" >>"$dir/repo/.git/info/exclude"
+  done
 fi
 
 echo "working board $BOARD on $repo as $agent/$model/$effort, $concurrency ticket(s) at a time and $conflicts more \

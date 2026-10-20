@@ -269,8 +269,8 @@ stop_leftovers() {
   kill -KILL "${left[@]}" 2>/dev/null
 }
 
-# The skills the next run gets, as arguments for claude (skill_args): only the ultrakanban skill, in the system prompt,
-# unless the board's agentAllSkills is on or the repository has skills or commands of its own.
+# The skills the next run gets, as arguments for claude (skill_args): only the ultrakanban skill, in the system prompt
+# (the short WORKER.md next to SKILL.md when there is one, which leaves out filing and splitting tickets), unless the board's agentAllSkills is on or the repository has skills or commands of its own.
 use_skills() {
   local skill=.claude/skills/ultrakanban/SKILL.md
   skill_args=()
@@ -279,6 +279,7 @@ use_skills() {
     2>/dev/null) ]] || board | jq -e .board.agentAllSkills >/dev/null; then
     return 0
   fi
+  [[ -f ${skill%/*}/WORKER.md ]] && skill=${skill%/*}/WORKER.md
   skill_args=(--disable-slash-commands --append-system-prompt "This run has no Skill tool: the ultrakanban skill it \
 uses is already loaded, here.
 
