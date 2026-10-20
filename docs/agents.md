@@ -233,7 +233,10 @@ conflict fixes** (`agentConflictConcurrency`, 0 to 8, 2 by default) more loops, 
 in a worktree of its own too (after the parallel runs' ones). These claim no tickets: they only look at the agent's
 tickets in Review whose pull request has conflicts now (the board's view of it spares them reading GitHub for the
 others), and start a run for one with new feedback, such as the conflicts themselves or the "fix conflicts" button's
-comment. As for any run, they hand it everything new on the ticket. The loops that work tickets still fix conflicts too,
+comment. As for any run, they hand it everything new on the ticket. People often comment while such a run works, so
+the loop that ran it also handles the human feedback that came in meanwhile, and keeps doing so as long as more comes
+in during its runs, rather than leaving it for a loop that works tickets, which could be busy for hours. The loops
+that work tickets still fix conflicts too,
 and the ticket locks keep them all apart, so with the button pressed on a board working one ticket at a time, three
 pull requests' conflicts are fixed at once. Set it to None to fix them one after another as before; each loop's
 worktree has its own build output (see `MAX_BUILD_GB` below). Changing either setting restarts the board's loops, which stops runs in progress (they are resumed, see below). The button left of the
@@ -342,7 +345,9 @@ Nothing is missed, even while a run is going: before each run the loop notes the
 pull request comment, review and inline comment ids, and the head commit's checks and conflict state. It saves
 that as the ticket's watermark (one small JSON file per ticket, removed when the ticket is no longer the agent's)
 only after the run succeeds. Anything newer starts the next run. A missing or unreadable state file means everything
-is handed over again, never skipped.
+is handed over again, never skipped. As a run is only handed what was there when it started, its prompt also tells
+the agent to read the ticket's activity and the pull request's comments again just before it submits the ticket or
+posts its closing comment, so its summary doesn't skip a comment that came in while it worked.
 
 CI failing for reasons other than the code can't make it loop. A failing check counts once per commit and check
 name, so re-running CI doesn't start a run. Checks that never ran or failed around the code (`startup_failure`,

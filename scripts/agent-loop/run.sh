@@ -591,6 +591,9 @@ Your name (agent field and X-Actor header): $worker. Use exactly this name: it s
 running $model at $effort effort.
 This is a non-interactive run started by scripts/agent-loop.sh: do the work, then exit. Don't wait for review; the loop
 starts a new run when feedback arrives. If you need an answer from a human, ask in a ticket comment and exit.
+People often comment while you work, and this prompt only has what was there when the run started. Just before you
+submit the ticket for review or post your closing comment, read its activity again (and the pull request's comments, if
+it has one), and handle anything new first.
 If the ticket's description has a checklist (- [ ] step), check off each step as soon as you finish it with
 POST $KANBAN/api/tickets/<id>/checklist/<index> (0-based) instead of editing the description. Do it right then, not all
 at once before submitting: people follow the ticket's progress by it. Check off only what you did; leave a step you

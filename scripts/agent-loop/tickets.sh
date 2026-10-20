@@ -58,7 +58,9 @@ adopt() {
 }
 
 # Checks the tickets the agent holds and handles the first one that needs work. Returns 1 if none did. A conflict loop
-# (CONFLICTS_ONLY) only handles tickets in the review column whose pull request has merge conflicts.
+# (CONFLICTS_ONLY) only handles tickets in the review column whose pull request has merge conflicts, and the human
+# feedback on the ticket it last ran (its `followup`) that came in during that run: left to the loops that work tickets,
+# that feedback could wait hours for one of them to be free.
 handle_feedback() {
   local board review cancelled idle tickets file id number column holder version ticket_model ticket_effort pr_url repo pr_number \
     queued approval conflicts pr branch ci issue reviews inline activity state triage items ci_note next
@@ -100,7 +102,7 @@ handle_feedback() {
     [[ -n $id ]] || continue
     # The board's view of the pull request (synced from GitHub every minute) spares a conflict loop reading GitHub for
     # tickets without conflicts; whether there are any now is checked with GitHub below.
-    [[ $CONFLICTS_ONLY == 1 && ($column != "$review" || $conflicts != true) ]] && continue
+    [[ $CONFLICTS_ONLY == 1 && $id != "$followup" && ($column != "$review" || $conflicts != true) ]] && continue
     # Another loop is working this one.
     unlock_ticket
     lock_ticket "$id" || continue
@@ -156,8 +158,12 @@ handle_feedback() {
 loop stopped starting runs for CI on this ticket. Comment on the ticket to let it try again." notify
       update_state "$id" '.capNoted = true'
     fi
+    if [[ $CONFLICTS_ONLY == 1 ]] && ! jq -e --arg id "$id" --arg followup "$followup" \
+      '.conflicted or ($id == $followup and .human)' <<<"$triage" >/dev/null; then
+      [[ $id == "$followup" ]] && followup=
+      continue
+    fi
     [[ $(jq -r .run <<<"$triage") == true ]] || continue
-    [[ $CONFLICTS_ONLY == 1 && $(jq -r .conflicted <<<"$triage") != true ]] && continue
 
     use_worker "${ticket_model#-}" "${ticket_effort#-}"
     adopt "$id" "$number" "$holder" "$version" || continue
@@ -172,6 +178,7 @@ post a revised plan (POST $KANBAN/api/tickets/$id/plan) if it asks for changes t
       next="If the ticket isn't in review yet, keep working it and submit it for review, unless the feedback above says
 otherwise."
     fi
+    [[ $CONFLICTS_ONLY == 1 ]] && followup=$id
     run_on_ticket "$id" "$(intro)
 
 Ticket $id is already yours. The loop started this run for this new feedback:
