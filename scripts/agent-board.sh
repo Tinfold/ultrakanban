@@ -153,9 +153,14 @@ draining=
 while ((${#pids[@]})); do
   wait -n -p pid "${pids[@]}"
   code=$?
-  for n in "${!pids[@]}"; do
-    [[ ${pids[n]} == "$pid" ]] && break
+  n=
+  for i in "${!pids[@]}"; do
+    if [[ ${pids[i]} == "$pid" ]]; then
+      n=$i
+      break
+    fi
   done
+  [[ -n $n ]] || continue
   unset 'pids[n]'
   if ((code == 75)); then
     if [[ $(stat -c '%i %Y %s' "$here/agent-board.sh" 2>/dev/null) != "$board_script" ]] || unit_outdated; then
