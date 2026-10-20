@@ -53,6 +53,7 @@ const agentModel = z
   .regex(/^[\w.:[\]-]+(\/[\w.:[\]-]+)*$/, 'Use a model alias or name, e.g. opus, claude-opus-5-5 or qwen3-coder:30b')
   .nullable()
 const agentEffort = z.enum(AGENT_EFFORTS).nullable()
+const agentMaxTurns = z.int().min(1).max(10_000).nullable()
 const agentConcurrency = z.int().min(1).max(AGENT_MAX_CONCURRENCY).nullable()
 const agentConflictConcurrency = z.int().min(0).max(AGENT_MAX_CONCURRENCY).nullable()
 const archiveDoneDays = z.int().min(1).max(3650).nullable()
@@ -84,6 +85,7 @@ export const createBoardSchema = z.object({
   agentModel: agentModel.optional(),
   agentEffort: agentEffort.optional(),
   agentConcurrency: agentConcurrency.optional(),
+  agentMaxTurns: agentMaxTurns.optional(),
   agentConflictConcurrency: agentConflictConcurrency.optional(),
   agentBacklog: z.boolean().optional(),
   agentAllSkills: z.boolean().optional(),
@@ -112,6 +114,7 @@ export const updateBoardSchema = z.object({
   agentModel: agentModel.optional(),
   agentEffort: agentEffort.optional(),
   agentConcurrency: agentConcurrency.optional(),
+  agentMaxTurns: agentMaxTurns.optional(),
   agentConflictConcurrency: agentConflictConcurrency.optional(),
   agentBacklog: z.boolean().optional(),
   agentAllSkills: z.boolean().optional(),

@@ -362,6 +362,8 @@ export interface BoardSummary {
   agentEffort: AgentEffort | null
   /** How many runs the agent works at once, each on its own ticket in its own git worktree; 1 when not set. */
   agentConcurrency: number | null
+  /** The most turns one run of the agent may take (claude's `--max-turns`); no limit when not set. */
+  agentMaxTurns: number | null
   /**
    * How many more runs the agent can make at once that only fix merge conflicts (and answer whatever else is new on
    * those tickets), each in its own git worktree, beside `agentConcurrency`: the conflicts that merging one pull request

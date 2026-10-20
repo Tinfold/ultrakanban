@@ -413,6 +413,9 @@ run_claude() {
 Put scratch files (clones, builds, test output, screenshots) in \$TMPDIR ($scratch), not in /tmp: /tmp may be held \
 in memory and is never cleaned up. \$TMPDIR is on disk, and the loop empties it once the ticket's run finishes."
   fi
+  # The board's agentMaxTurns, when set, caps how many turns the run may take.
+  max_turns=$(get "/boards/$BOARD" | jq -r '.board.agentMaxTurns // empty' 2>/dev/null)
+  [[ $max_turns =~ ^[0-9]+$ ]] || max_turns=
   run=$(new_session_id)
   started=$(date +%s%3N)
   (
@@ -425,7 +428,7 @@ in memory and is never cleaned up. \$TMPDIR is on disk, and the loop empties it 
     if [[ -n $api_key_budget ]]; then export ANTHROPIC_API_KEY=$AGENT_API_KEY; fi
     unset AGENT_API_KEY
     exec timeout --foreground -k "${TICKET_KILL_AFTER:-30}" "$TICKET_TIMEOUT" ${docker_args[@]+"${docker_args[@]}"} claude -p ${claude_args[@]+"${claude_args[@]}"} \
-      ${skill_args[@]+"${skill_args[@]}"} ${budget_args[@]+"${budget_args[@]}"} --model "$model" --effort "$effort" \
+      ${skill_args[@]+"${skill_args[@]}"} ${budget_args[@]+"${budget_args[@]}"} ${max_turns:+--max-turns "$max_turns"} --model "$model" --effort "$effort" \
       --output-format stream-json --verbose "$@"
   ) <<<"$prompt" >"$output" 2>"$errors" &
   running=$!

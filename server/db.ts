@@ -413,6 +413,10 @@ export const MIGRATIONS = [
   ALTER TABLE boards ADD COLUMN jev_mode TEXT;
   `,
   `
+  -- The most turns a run of the board's agent may take (see BoardSummary.agentMaxTurns); NULL for no limit.
+  ALTER TABLE boards ADD COLUMN agent_max_turns INTEGER;
+  `,
+  `
   -- How a ticket was routed when it was last claimed (see RoutingSource and docs/JEV.md, item 8): the setting it is
   -- worked at and where that came from, and what each source picked, so sources can be compared by cost per finished
   -- ticket. Jev's pick is only there on boards that route with Jev, the history pick when the suggestion was built on

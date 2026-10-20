@@ -30,6 +30,7 @@ interface BoardRow {
   agent_model: string | null
   agent_effort: AgentEffort | null
   agent_concurrency: number | null
+  agent_max_turns: number | null
   agent_conflict_concurrency: number | null
   agent_backlog: number
   agent_all_skills: number
@@ -81,6 +82,7 @@ const toBoard = (row: BoardRow): BoardSummary => ({
   agentModel: row.agent_model,
   agentEffort: row.agent_effort,
   agentConcurrency: row.agent_concurrency,
+  agentMaxTurns: row.agent_max_turns,
   agentConflictConcurrency: row.agent_conflict_concurrency,
   agentBacklog: row.agent_backlog === 1,
   agentAllSkills: row.agent_all_skills === 1,
@@ -150,6 +152,7 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     agentModel,
     agentEffort,
     agentConcurrency,
+    agentMaxTurns,
     agentConflictConcurrency,
     agentBacklog,
     agentAllSkills,
@@ -175,6 +178,7 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     agentModel,
     agentEffort,
     agentConcurrency,
+    agentMaxTurns,
     agentConflictConcurrency,
     agentBacklog,
     agentAllSkills,
@@ -208,6 +212,7 @@ export function updateBoard(id: string, input: UpdateBoardInput): BoardSummary {
     agent_model: input.agentModel,
     agent_effort: input.agentEffort,
     agent_concurrency: input.agentConcurrency,
+    agent_max_turns: input.agentMaxTurns,
     agent_conflict_concurrency: input.agentConflictConcurrency,
     agent_backlog: input.agentBacklog === undefined ? undefined : Number(input.agentBacklog),
     agent_all_skills: input.agentAllSkills === undefined ? undefined : Number(input.agentAllSkills),

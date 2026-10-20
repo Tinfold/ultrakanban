@@ -23,6 +23,7 @@ export type BoardPatch = Partial<
     | 'agentModel'
     | 'agentEffort'
     | 'agentConcurrency'
+    | 'agentMaxTurns'
     | 'agentConflictConcurrency'
     | 'agentBacklog'
     | 'agentAllSkills'
