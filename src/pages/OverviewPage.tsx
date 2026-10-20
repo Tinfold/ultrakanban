@@ -221,6 +221,12 @@ export function OverviewPage() {
     document.title = 'Overview · ultrakanban'
   }, [])
 
+  // A failed refetch keeps the loaded overview: tell the user instead of replacing it.
+  useEffect(() => {
+    if (error && overview)
+      toast.error(`Couldn’t refresh the overview: ${errorMessage(error)}`, { id: 'overview-refetch' })
+  }, [error, overview])
+
   const daily = useMemo(() => (overview ? dailyActivity(overview, now) : []), [overview, now])
   const worked = useMemo(
     () =>
@@ -255,9 +261,7 @@ export function OverviewPage() {
   )
 
   let content: ReactNode = null
-  if (error) {
-    content = <p className="text-sm text-muted-foreground">Couldn’t load the overview: {error.message}</p>
-  } else if (overview) {
+  if (overview) {
     const { totals, agents, hiddenAgents } = overview
     // Idle agents that aren't a board's host agent are usually old or misspelled names.
     const stale = agents.filter((agent) => agent.status === 'idle' && !agent.agentOf.length).map((agent) => agent.name)
@@ -508,6 +512,8 @@ export function OverviewPage() {
         </div>
       </div>
     )
+  } else if (error) {
+    content = <p className="text-sm text-muted-foreground">Couldn’t load the overview: {error.message}</p>
   }
 
   return (
