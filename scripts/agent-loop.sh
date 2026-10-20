@@ -153,6 +153,11 @@
 #                       back before the time claude's limit message gave (default: 60)
 #   MAX_ATTEMPTS        failed runs in a row before waiting for new feedback (default: 3)
 #   MAX_CI_RUNS         runs in a row started only by failing CI, with no human feedback between (default: 2)
+#   PR_RECHECK_SECONDS  longest the loop goes on using what it last read of an open pull request (its comments, reviews,
+#                       inline comments and checks) while the pull request looks unchanged: same updatedAt and head
+#                       commit, and no checks still running. Each round lists the open pull requests with one call per
+#                       repository and reads GitHub again only for the ones that changed; this catches what doesn't
+#                       change updatedAt, such as a re-run check (default: 600)
 #   MAX_CONFLICT_RUNS   runs in a row started only by merge conflicts, with no human feedback between (default: 2)
 #   CLAIM_LIMIT         most new tickets claimed whose first run hasn't finished yet (it is going, failed or stopped),
 #                       across the loops sharing STATE_DIR: no loop claims another while that many are pending, so
@@ -223,6 +228,7 @@ RETRY_SECONDS=${RETRY_SECONDS:-600}
 USAGE_CHECK_SECONDS=${USAGE_CHECK_SECONDS:-60}
 MAX_ATTEMPTS=${MAX_ATTEMPTS:-3}
 MAX_CI_RUNS=${MAX_CI_RUNS:-2}
+PR_RECHECK_SECONDS=${PR_RECHECK_SECONDS:-600}
 MAX_CONFLICT_RUNS=${MAX_CONFLICT_RUNS:-2}
 MAX_BUILD_GB=${MAX_BUILD_GB:-20}
 CLAIM_LIMIT=${CLAIM_LIMIT:-1}
@@ -256,7 +262,7 @@ fi
 DOCKER_IMAGE=${DOCKER_IMAGE:-ultrakanban-agent}
 export CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS=${CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS:-10000}
 export BASH_MAX_OUTPUT_LENGTH=${BASH_MAX_OUTPUT_LENGTH:-15000}
-mkdir -p "$STATE_DIR" || exit 1
+mkdir -p "$STATE_DIR/github" || exit 1
 
 # The rest of the loop is split into parts by what they do, so that changing one means reading only that part.
 parts=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/agent-loop

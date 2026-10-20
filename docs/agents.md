@@ -398,6 +398,12 @@ is handed over again, never skipped. As a run is only handed what was there when
 the agent to read the ticket's activity and the pull request's comments again just before it submits the ticket or
 posts its closing comment, so its summary doesn't skip a comment that came in while it worked.
 
+To spare GitHub's API rate limit, each round lists the open pull requests with one `gh pr list` call per repository,
+and reads a pull request's comments, reviews, inline comments and checks again only when it changed since the last
+read: a new `updatedAt` or head commit, or checks that were still running. What it read last is kept next to the
+watermark and used for at most `PR_RECHECK_SECONDS` (default 600), which catches what doesn't change `updatedAt`, such
+as a re-run check.
+
 CI failing for reasons other than the code can't make it loop. A failing check counts once per commit and check
 name, so re-running CI doesn't start a run. Checks that never ran or failed around the code (`startup_failure`,
 `action_required`, `timed_out`, billing or spending-limit messages, jobs where no step failed) never start a run;
