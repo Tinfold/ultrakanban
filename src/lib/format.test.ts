@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import { formatBytes, formatModel, formatRunOutcome, formatRunTotals } from './format.ts'
+import { formatBytes, formatModel, formatMoney, formatRunOutcome, formatRunTotals } from './format.ts'
 
 describe('run records', () => {
   test('say what a run took, leaving out what it did not report', () => {
@@ -56,5 +56,11 @@ describe('formatBytes', () => {
       [3 * 1024 ** 4, '3 TB'],
     ]
     for (const [bytes, text] of sizes) assert.equal(formatBytes(bytes), text, `${bytes} bytes`)
+  })
+})
+
+describe('formatMoney', () => {
+  test('falls back to the amount and the currency for one it does not know', () => {
+    assert.equal(formatMoney(12.5, 'credits'), '12.50 credits')
   })
 })
