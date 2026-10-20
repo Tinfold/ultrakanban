@@ -5,7 +5,7 @@ import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlit
 import { notFound } from './errors.ts'
 import { publish, wake } from './events.ts'
 
-const MIGRATIONS = [
+export const MIGRATIONS = [
   `
   CREATE TABLE boards (
     id TEXT PRIMARY KEY,
@@ -443,6 +443,40 @@ const MIGRATIONS = [
   -- What Jev was told about the ticket when it picked (a hash of its content, see contentKey in server/jev-routing.ts),
   -- so a ticket whose content hasn't changed since isn't sent to Jev again.
   ALTER TABLE ticket_routes ADD COLUMN content_key TEXT;
+  `,
+  `
+  -- Deleting a ticket keeps its runs (their ticket becomes NULL), so its spend stays in the board's totals. Dropping
+  -- the old table cascades to token_usage_models (foreign keys are on), so the model split is set aside and put back.
+  CREATE TEMP TABLE token_usage_models_kept AS SELECT * FROM token_usage_models;
+  CREATE TABLE token_usage_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+    ticket_id TEXT REFERENCES tickets(id) ON DELETE SET NULL,
+    agent TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    cache_read_tokens INTEGER NOT NULL,
+    cache_write_tokens INTEGER NOT NULL,
+    cost_usd REAL,
+    duration_ms INTEGER,
+    created_at TEXT NOT NULL,
+    routing_source TEXT,
+    routing_confidence REAL,
+    jev_model TEXT,
+    jev_effort TEXT,
+    jev_confidence REAL
+  );
+  INSERT INTO token_usage_new
+    SELECT id, board_id, ticket_id, agent, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+      cost_usd, duration_ms, created_at, routing_source, routing_confidence, jev_model, jev_effort, jev_confidence
+    FROM token_usage;
+  DROP TABLE token_usage;
+  ALTER TABLE token_usage_new RENAME TO token_usage;
+  CREATE INDEX token_usage_ticket ON token_usage(ticket_id, id);
+  CREATE INDEX token_usage_board ON token_usage(board_id, id);
+  CREATE INDEX token_usage_created ON token_usage(created_at);
+  INSERT INTO token_usage_models SELECT * FROM token_usage_models_kept;
+  DROP TABLE token_usage_models_kept;
   `,
   `
   -- Whether auto-merge goes ahead when the only failing checks failed because of billing (see BoardSummary).
