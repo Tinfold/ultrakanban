@@ -612,6 +612,12 @@ export interface AgentSettingStats {
 }
 
 /**
+ * How every decided ticket went at one model and effort, the one that did most of its work (`Overview.settings`). The
+ * same figures as `AgentSettingStats`, with every ticket counting fully rather than by similarity.
+ */
+export type SettingReport = Omit<AgentSettingStats, 'similar'>
+
+/**
  * The model and effort to work a new ticket at, from how similar tickets went (`GET /boards/:id/agent-suggestion`):
  * the cheapest setting whose success rate is close to the best one. Null when no similar ticket was ever finished.
  */
@@ -1200,6 +1206,8 @@ export interface Overview {
   tickets: OverviewTicketUsage[]
   /** How routing sources compare on every board, over all time: routing data is slow to build up. */
   routing: RoutingComparison
+  /** How each model and effort did on every board's decided tickets, over all time, the most tickets first. */
+  settings: SettingReport[]
   /** The latest activity entries across all boards, newest first. */
   recent: OverviewActivity[]
 }

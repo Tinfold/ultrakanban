@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { beforeEach, describe, test } from 'node:test'
-import type { AgentSuggestion, BoardDetail } from '../shared/domain.ts'
-import { similarity, titleWords } from './store/suggestions.ts'
+import type { AgentSuggestion, BoardDetail, Overview } from '../shared/domain.ts'
+import { settingReport, similarity, titleWords } from './store/suggestions.ts'
 import { addTicket, boardId, call, pullRequestStatuses, useBoard } from './test-app.ts'
 
 describe('agent suggestions', () => {
@@ -162,5 +162,33 @@ describe('agent suggestions', () => {
     const fewerSteps = similarity(ticket, { ...ticket, steps: 1 })
     const otherTag = similarity(ticket, { ...ticket, tags: new Set(['b']) })
     assert.ok(fewerSteps < 1 && otherTag < fewerSteps)
+  })
+  test('reports every decided ticket by the setting that did most of its work, on the overview too', async () => {
+    await pastTicket('Fix login bug', 'done', [['claude/opus/high', 3]])
+    await pastTicket('Add CSV export', 'cancelled', [['claude/opus/high', 1]])
+    await pastTicket('Write release notes', 'done', [
+      ['claude/sonnet/medium', 0.4, 5000],
+      ['claude/opus/high', 0.6, 1000],
+    ])
+    // Another agent's work counts too, unlike in suggestions; work still in progress doesn't.
+    await pastTicket('Port the parser', 'done', [['codex/gpt-5.1-codex/medium', null, 2000]])
+    await pastTicket('Speed up board loading', 'open', [['claude/haiku/low', 0.01]])
+
+    const report = settingReport([boardId])
+    assert.deepEqual(report, [
+      { model: 'opus', effort: 'high', tickets: 2, finished: 1, successRate: 0.5, costUsd: 2, tokens: 1000 },
+      {
+        model: 'gpt-5.1-codex',
+        effort: 'medium',
+        tickets: 1,
+        finished: 1,
+        successRate: 1,
+        costUsd: null,
+        tokens: 2000,
+      },
+      { model: 'sonnet', effort: 'medium', tickets: 1, finished: 1, successRate: 1, costUsd: 1, tokens: 6000 },
+    ])
+    const { body: overview } = await call<Overview>('GET', '/overview')
+    for (const setting of report) assert.ok(overview.settings.some((entry) => entry.model === setting.model))
   })
 })

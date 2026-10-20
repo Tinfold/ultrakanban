@@ -1,10 +1,12 @@
 import {
   AGENT_DEFAULTS,
+  AGENT_EFFORTS,
   type AgentEffort,
   type AgentSettingStats,
   type AgentSuggestion,
   CANCELLED_COLUMN,
   parseWorkerName,
+  type SettingReport,
   type SimilarTicket,
   workerSetting,
 } from '../../shared/domain.ts'
@@ -108,14 +110,19 @@ interface PastTicket {
   setting: { model: string; effort: AgentEffort }
 }
 
+/** A decided ticket with the setting that did most of its work, and the features similarity is measured on. */
+interface WorkedTicket extends PastTicket {
+  features: Features
+}
+
 /**
  * Tickets of the board that were decided, with the setting that worked them: finished (in the done column or with a
  * merged pull request) or given up on (in the cancelled column, or with its pull request closed unmerged). Tickets
  * still being worked, and ones no run under an `<agent>/<model>/<effort>` name worked, tell nothing and are left out.
- * So are tickets another agent did most of the work on (Codex on GPT, say): a suggestion sets the model and effort the
- * board's agent (`agent`) works a ticket at, and it can't run theirs.
+ * With `agent`, so are tickets another agent did most of the work on (Codex on GPT, say). Their similarity is 1 until
+ * `pastTickets` scores it.
  */
-function pastTickets(boardId: string, agent: string, features: Features): PastTicket[] {
+function workedTickets(boardId: string, agent?: string): WorkedTicket[] {
   const rows = decidedTickets(boardId)
   const runs = new Map<string, RunTotalsRow[]>()
   for (const row of sql.all<RunTotalsRow>(
@@ -133,14 +140,9 @@ function pastTickets(boardId: string, agent: string, features: Features): PastTi
     const main = ticketRuns
       .filter((run) => parseWorkerName(run.agent)?.effort)
       .sort((a, b) => b.tokens - a.tokens || a.agent.localeCompare(b.agent))[0]
-    const setting = main && parseWorkerName(main.agent)?.agent === agent ? workerSetting(main.agent) : null
+    const setting =
+      main && (agent === undefined || parseWorkerName(main.agent)?.agent === agent) ? workerSetting(main.agent) : null
     if (!setting) return []
-    const score = similarity(features, {
-      tags: new Set(row.tag_ids?.split(',') ?? []),
-      words: titleWords(row.title),
-      steps: parseChecklist(row.description).length,
-    })
-    if (!score) return []
     const costs = ticketRuns.flatMap((run) => (run.cost_usd === null ? [] : [run.cost_usd]))
     const costUsd = costs.length
       ? round(
@@ -152,12 +154,29 @@ function pastTickets(boardId: string, agent: string, features: Features): PastTi
       id: row.id,
       number: row.number,
       title: row.title,
-      similarity: round(score, 3),
+      similarity: 1,
       finished: !!row.finished,
       costUsd,
       tokens: ticketRuns.reduce((sum, run) => sum + run.tokens, 0),
     }
-    return { ticket, setting }
+    const features = {
+      tags: new Set(row.tag_ids?.split(',') ?? []),
+      words: titleWords(row.title),
+      steps: parseChecklist(row.description).length,
+    }
+    return { ticket, setting, features }
+  })
+}
+
+/**
+ * The board's decided tickets that are like `features`, with the setting that worked them. Only tickets the board's
+ * agent (`agent`) did most of the work on count: a suggestion sets the model and effort it works a ticket at, and it
+ * can't run another agent's.
+ */
+function pastTickets(boardId: string, agent: string, features: Features): PastTicket[] {
+  return workedTickets(boardId, agent).flatMap(({ ticket, setting, features: theirs }) => {
+    const score = similarity(features, theirs)
+    return score ? { ticket: { ...ticket, similarity: round(score, 3) }, setting } : []
   })
 }
 
@@ -226,4 +245,29 @@ export function suggestAgent(boardId: string, query: AgentSuggestionQuery): Omit
     (a, b) => Number(b === suggestion) - Number(a === suggestion) || b.successRate - a.successRate || cheaper(a, b),
   )
   return { suggestion, options }
+}
+
+/**
+ * How the boards' decided tickets went at each model and effort that did most of their work, every ticket counting
+ * fully: the most tickets first.
+ */
+export function settingReport(boardIds: string[]): SettingReport[] {
+  const bySetting = new Map<string, PastTicket[]>()
+  for (const boardId of boardIds) {
+    for (const past of workedTickets(boardId)) {
+      const key = `${past.setting.model}/${past.setting.effort}`
+      bySetting.set(key, [...(bySetting.get(key) ?? []), past])
+    }
+  }
+  return [...bySetting.values()]
+    .map((tickets): SettingReport => {
+      const { similar: _, ...stats } = statsFor(tickets)
+      return stats
+    })
+    .sort(
+      (a, b) =>
+        b.tickets - a.tickets ||
+        a.model.localeCompare(b.model) ||
+        AGENT_EFFORTS.indexOf(a.effort) - AGENT_EFFORTS.indexOf(b.effort),
+    )
 }

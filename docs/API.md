@@ -828,6 +828,9 @@ interface Overview {
   tickets: { id; boardId; boardName; number; title; column: string; tags: Tag[]; usage }[]
   recent: (Activity & { ticket: { number; title; boardId; boardName } })[] // latest 30, newest first
   routing: RoutingComparison // routing sources compared on every board, over all time (see Routing)
+  // Every board's decided tickets by the model and effort that did most of their work (any agent), over all time,
+  // most tickets first: the suggestion's figures with every ticket counting fully
+  settings: { model; effort; tickets; finished; successRate: number; costUsd: number | null; tokens: number }[]
 }
 
 // Token usage added up over runs; costUsd sums the runs that reported a cost (null when none did).
