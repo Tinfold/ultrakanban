@@ -448,6 +448,9 @@ sends the run's latest tool call as its step (e.g. `Bash: npm test`) when it cha
 `RUN_STEP_SECONDS`. The run ends with `DELETE /tickets/:ticketId/heartbeat`, or after 10 minutes without a heartbeat.
 Cards show a run as stalled after 3 minutes without one.
 
+A heartbeat answers `200 {"stopRequested": {"at", "by"} | null}`: whether someone asked the run to stop (see below), so
+loops needn't read the ticket for it.
+
 ### Stopping a run
 
 `POST /tickets/:ticketId/stop` (no body; the Stop button on a running ticket's card and in the ticket) asks the run
@@ -455,9 +458,9 @@ working the ticket to stop, e.g. to give its agent new instructions. It sets the
 (`X-Actor`), logs a `stopped` activity entry (`data: { step }`, what the run was doing), sends a `wake` event (see
 [Live updates](#live-updates)) and returns the `Ticket`; `409 no_run` when no run is going. Asking again before the
 run stops changes nothing. The request lasts until the run ends (`DELETE /tickets/:ticketId/heartbeat`), and a new run
-starts without one. `scripts/agent-loop.sh` sees it at its next check of the ticket (every `TICKET_CHECK_SECONDS`),
+starts without one. `scripts/agent-loop.sh` sees it in the answer to its next heartbeat (every `TICKET_CHECK_SECONDS`),
 stops the run without losing its session or work, and resumes it once there is new feedback, such as a comment.
-Agents of your own that send heartbeats should do the same: stop when their ticket's `run.stopRequested` is set,
+Agents of your own that send heartbeats should do the same: stop when their heartbeat answers a `stopRequested`,
 and end the run.
 
 ## Tickets

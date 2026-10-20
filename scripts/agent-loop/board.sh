@@ -126,10 +126,12 @@ post() {
 }
 
 # Tells the board the agent is working on a ticket right now, and what the run is doing (run_step), so the ticket's
-# card shows the run.
+# card shows the run. Sets stop_requested_by to who asked for the run to stop (empty when no one did): the board
+# answers with it, so the loop needn't read the ticket for it.
 heartbeat() {
-  curl -s -o /dev/null -X POST "$KANBAN/api/tickets/$1/heartbeat" -H 'Content-Type: application/json' \
-    -H "X-Actor: $worker" -d "$(jq -nc --arg step "${run_step:-}" 'if $step == "" then {} else {step: $step} end')"
+  stop_requested_by=$(curl -s -X POST "$KANBAN/api/tickets/$1/heartbeat" -H 'Content-Type: application/json' \
+    -H "X-Actor: $worker" -d "$(jq -nc --arg step "${run_step:-}" 'if $step == "" then {} else {step: $step} end')" |
+    jq -r '.stopRequested.by // empty' 2>/dev/null) || stop_requested_by=
 }
 
 # Tells the board the run on a ticket has ended.

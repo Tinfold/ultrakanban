@@ -734,6 +734,7 @@ export function recordHeartbeat(id: string, input: HeartbeatInput) {
     id,
   )
   if (!run || step !== run.step) publish({ boardId: row.board_id })
+  return { stopRequested: run?.stopRequested ?? null }
 }
 
 /** Ends the run working the ticket, if any: the agent says it has stopped. Its stop request, if any, goes with it. */

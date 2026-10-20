@@ -150,8 +150,7 @@ limit_reset() {
 # IDLE_COLUMNS. That is a kind and a text, separated by a tab:
 #   taken      why the agent no longer has the ticket: someone else moved it to one of those columns, unassigned it or
 #              gave it to someone else, or deleted it
-#   requested  who asked for the run to stop (POST /tickets/:id/stop, the Stop button), e.g. to give it new
-#              instructions; the ticket is still the agent's
+# (A request to stop the run, POST /tickets/:id/stop, comes back with the heartbeat: see watch_run.)
 # Fails while the run may go on, including when the agent moved or released the ticket itself (e.g. to the cancelled
 # column, as the skill says to when its pull request was closed).
 stop_reason() {
@@ -179,9 +178,7 @@ stop_reason() {
       return 0
     fi
   fi
-  by=$(jq -r '.run.stopRequested.by // empty' <<<"$ticket") || return 1
-  [[ -n $by ]] || return 1
-  printf 'requested\t%s\n' "$by"
+  return 1
 }
 
 # Checks a run's ticket every TICKET_CHECK_SECONDS while the run (process pid) goes on, and stops the run if someone
@@ -205,16 +202,18 @@ watch_run() {
       continue
     fi
     heartbeat "$id"
+    if [[ -n $stop_requested_by ]]; then
+      printf 'requested\t%s\n' "$stop_requested_by" >"$file"
+      log "ticket $id: $stop_requested_by asked for its run to stop; stopping it"
+      kill -TERM "$pid"
+      return
+    fi
     ((due)) || continue
     checked=$SECONDS
     [[ -n $idle ]] || idle=$(idle_columns) || { idle=; continue; }
     reason=$(stop_reason "$id" "$idle") || continue
     printf '%s\n' "$reason" >"$file"
-    if [[ $reason == requested$'\t'* ]]; then
-      log "ticket $id: ${reason#*$'\t'} asked for its run to stop; stopping it"
-    else
-      log "ticket $id: ${reason#*$'\t'}; stopping its run"
-    fi
+    log "ticket $id: ${reason#*$'\t'}; stopping its run"
     kill -TERM "$pid"
     return
   done

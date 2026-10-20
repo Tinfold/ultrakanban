@@ -189,8 +189,7 @@ export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles, notifi
     .post('/:ticketId/heartbeat', async (c) => {
       // The body is optional: a heartbeat without one keeps the run's step.
       const input = (await c.req.text()) ? await readJson(c, heartbeatSchema) : {}
-      recordHeartbeat(c.req.param('ticketId'), input)
-      return c.body(null, 204)
+      return c.json(recordHeartbeat(c.req.param('ticketId'), input))
     })
     .delete('/:ticketId/heartbeat', (c) => {
       endRun(c.req.param('ticketId'))
