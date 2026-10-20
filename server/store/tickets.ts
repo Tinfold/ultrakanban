@@ -326,8 +326,10 @@ export function listTickets(boardId: string, query: ListTicketsQuery = {}): Tick
     params.push(...query.priority.map(priorityRank))
   }
   if (query.q) {
-    where.push("(t.title LIKE ? OR t.description LIKE ? OR ('#' || t.number) = ?)")
-    params.push(`%${query.q}%`, `%${query.q}%`, query.q.startsWith('#') ? query.q : `#${query.q}`)
+    // Escape LIKE's wildcards (and the escape character itself) so the search text matches literally
+    const pattern = `%${query.q.replace(/[\\%_]/g, (char) => `\\${char}`)}%`
+    where.push("(t.title LIKE ? ESCAPE '\\' OR t.description LIKE ? ESCAPE '\\' OR ('#' || t.number) = ?)")
+    params.push(pattern, pattern, query.q.startsWith('#') ? query.q : `#${query.q}`)
   }
 
   return sql.all<TicketRow>(`${SELECT_TICKETS} WHERE ${where.join(' AND ')} ${BOARD_ORDER}`, ...params).map(toTicket)

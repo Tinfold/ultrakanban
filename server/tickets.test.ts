@@ -580,6 +580,24 @@ describe('boards', () => {
   })
 })
 
+describe('ticket search', () => {
+  test('matches the search text literally, not as LIKE wildcards', async () => {
+    await addTicket({ title: 'Half of it is done 50% now' })
+    await addTicket({ title: 'Five hundred' })
+    await addTicket({ title: 'Snake_case name' })
+    await addTicket({ title: 'Snakexcase name' })
+    await addTicket({ title: 'Back\\slash' })
+    await addTicket({ title: 'Backxslash' })
+
+    const titles = async (q: string) =>
+      (await call<Ticket[]>('GET', `/boards/${boardId}/tickets?q=${encodeURIComponent(q)}`)).body.map((t) => t.title)
+
+    assert.deepEqual(await titles('50%'), ['Half of it is done 50% now'])
+    assert.deepEqual(await titles('snake_case'), ['Snake_case name'])
+    assert.deepEqual(await titles('Back\\slash'), ['Back\\slash'])
+  })
+})
+
 describe('archiving done tickets', () => {
   const DAY_MS = 24 * 60 * 60 * 1000
 
