@@ -220,6 +220,10 @@ describe('the usage reserve', () => {
     assert.match(refused.body.error.message, /week's Claude usage/)
     assert.match(refused.body.error.message, /Week, Opus is at 90%, and its usage reserve starts at 80%/)
     assert.deepEqual(refused.body.error.details, { limit: reached.reserveReached, reservePercent: 80 })
+    // Claiming a specific new ticket is turned down the same way; the one an agent holds can still be claimed by it.
+    const fresh = (await call<Ticket[]>('GET', `/boards/${boardId}/tickets?unassigned=true`)).body[0]
+    assert.equal((await call('POST', `/tickets/${fresh.id}/claim`, { agent: 'a' })).status, 404)
+    assert.equal((await call('POST', `/tickets/${held.id}/claim`, { agent: 'a' })).status, 200)
     // Nothing was claimed, and the ticket an agent holds is still its own.
     assert.equal((await call<Ticket[]>('GET', `/boards/${boardId}/tickets?unassigned=true`)).body.length, 1)
     assert.equal((await call<Ticket>('GET', `/tickets/${held.id}`)).body.assignee, 'a')

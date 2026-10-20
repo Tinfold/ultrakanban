@@ -213,6 +213,30 @@ describe('agent claiming', () => {
     assert.equal((await claim()).body.title, 'waiting')
   })
 
+  test('claiming a specific ticket refuses blocked ones', async () => {
+    const blocker = await addTicket({ title: 'blocker', column: 'Doing' })
+    const tagged = await addTicket({ title: 'tagged', tags: ['blocked'] })
+    const waiting = await addTicket({ title: 'waiting', description: `Blocked by #${blocker.number}` })
+    const parent = await addTicket({ title: 'parent' })
+    await call('POST', `/tickets/${parent.id}/children`, { title: 'child', column: 'Todo' })
+
+    const claim = (id: string, agent = 'a') => call<Ticket & ApiErrorBody>('POST', `/tickets/${id}/claim`, { agent })
+    for (const ticket of [tagged, waiting, parent]) {
+      const refused = await claim(ticket.id)
+      assert.equal(refused.status, 409)
+      assert.equal(refused.body.error.code, 'blocked')
+      assert.equal((await call<Ticket>('GET', `/tickets/${ticket.id}`)).body.assignee, null)
+    }
+
+    await call('POST', `/tickets/${blocker.id}/move`, { column: 'Done' })
+    assert.equal((await claim(waiting.id)).status, 200)
+
+    // A ticket an agent already holds stays claimable by it, even once it is blocked.
+    await call('PATCH', `/tickets/${waiting.id}`, { tags: ['blocked'] })
+    assert.equal((await claim(waiting.id)).status, 200)
+    assert.equal((await claim(waiting.id, 'b')).body.error.code, 'already_claimed')
+  })
+
   test('records activity', async () => {
     const ticket = await addTicket({ title: 'A' })
     await call('POST', `/tickets/${ticket.id}/claim`, { agent: 'alpha', moveTo: 'Done' })

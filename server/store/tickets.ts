@@ -622,11 +622,39 @@ export function claimTicket(id: string, input: ClaimTicketInput): Ticket {
   if (ticket.assignee && ticket.assignee !== input.agent) {
     throw conflict('already_claimed', `Ticket is already claimed by "${ticket.assignee}"`, { ticket })
   }
+  // A ticket the agent already holds stays its own, whatever has come up since.
+  if (ticket.assignee !== input.agent) assertClaimable(ticket)
   touchBoard(ticket.boardId)
   assign(ticket, input.agent, input.agent)
   if (input.moveTo) relocate(ticket, input.moveTo, undefined, input.agent)
   bumpVersion(id)
   return getTicket(id)
+}
+
+/**
+ * The checks `claimNextTicket` applies when it picks a ticket, for claiming a specific one: no new claims while the
+ * usage reserve holds agents back (404 `usage_reserve_reached`), and none on a ticket that is blocked (409 `blocked`):
+ * tagged `blocked`, waiting for an unfinished ticket (`blocked by #12`), or with unfinished sub-tickets.
+ */
+function assertClaimable(ticket: Ticket) {
+  assertBelowUsageReserve()
+  const tagged = sql.get(
+    `SELECT 1 FROM ticket_tags tt JOIN tags g ON g.id = tt.tag_id WHERE tt.ticket_id = ? AND lower(g.name) = ?`,
+    ticket.id,
+    BLOCKED_TAG,
+  )
+  const unfinishedSubtickets = sql.get(
+    `SELECT 1 FROM tickets t WHERE t.id = ? AND EXISTS (SELECT 1 ${SUBTICKETS} AND NOT ${SUBTICKET_DONE})`,
+    ticket.id,
+  )
+  const reason = tagged
+    ? `tagged "${BLOCKED_TAG}"; a person has to remove the tag`
+    : waitsForOpenTicket(ticket.boardId, ticket)
+      ? 'it waits for a ticket it says it is blocked by, which is not finished yet'
+      : unfinishedSubtickets
+        ? 'its sub-tickets are not all finished yet'
+        : null
+  if (reason) throw conflict('blocked', `Ticket is blocked: ${reason}`, { ticket })
 }
 
 export function releaseTicket(id: string, input: ReleaseTicketInput): Ticket {

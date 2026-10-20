@@ -210,6 +210,7 @@ stop there. A human has to fix CI.
 | Response                      | Meaning                                                                    |
 | ----------------------------- | -------------------------------------------------------------------------- |
 | `409 already_claimed`         | Another agent got there first. Claim a different ticket.                   |
+| `409 blocked`                 | A direct claim of a ticket `claim-next` would skip. Claim another ticket.  |
 | `409 claimed_by_other`        | The ticket isn't yours; don't touch it.                                    |
 | `409 version_conflict`        | Someone edited it meanwhile. Re-read the ticket and redo your edit.        |
 | `409 pull_request_not_merged` | You tried to move a ticket into the done column. Don't; the merge does it. |
