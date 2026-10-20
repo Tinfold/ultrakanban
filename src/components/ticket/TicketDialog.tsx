@@ -1,4 +1,12 @@
-import { CheckIcon, ChevronRightIcon, LinkIcon, MoreHorizontalIcon, Trash2Icon, XIcon } from 'lucide-react'
+import {
+  CheckIcon,
+  ChevronRightIcon,
+  LinkIcon,
+  MoreHorizontalIcon,
+  Trash2Icon,
+  TriangleAlertIcon,
+  XIcon,
+} from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Link } from 'wouter'
@@ -15,7 +23,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { useDebouncedCallback } from '@/hooks/use-debounced-callback'
 import { copyText } from '@/lib/clipboard'
 import { formatDateTime, formatRelative, ticketRef } from '@/lib/format'
 import { ticketHref } from '@/lib/overview'
@@ -29,6 +36,7 @@ import { SubticketsSection } from './SubticketsSection'
 import { TicketProperties } from './TicketProperties'
 import { TitleInput } from './TitleInput'
 import { useAttachmentUploads } from './use-attachment-uploads'
+import { useDescriptionSaver } from './use-description-saver'
 
 interface TicketDialogProps {
   ticketId: string | null
@@ -63,10 +71,7 @@ function TicketDetail({ ticket, onClose }: { ticket: Ticket; onClose: () => void
   const [copied, setCopied] = useState(false)
   const column = columnsById.get(ticket.columnId)
   const uploads = useAttachmentUploads(ticket.id)
-  const saveDescription = useDebouncedCallback(
-    (description: string) => actions.updateTicket(ticket.id, { description }),
-    800,
-  )
+  const description = useDescriptionSaver(ticket, actions)
 
   const copy = async (text: string, message: string) => {
     try {
@@ -167,12 +172,44 @@ function TicketDetail({ ticket, onClose }: { ticket: Ticket; onClose: () => void
 
           <div className="grid min-w-0 content-start gap-8 md:col-start-1">
             <PlanApproval ticket={ticket} />
-            <DescriptionEditor
-              value={ticket.description}
-              onChange={saveDescription.schedule}
-              onBlur={saveDescription.flush}
-              className="-mx-3"
-            />
+            <div className="grid gap-2">
+              {description.conflict !== null && (
+                <div
+                  role="alert"
+                  className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-900 dark:text-amber-200"
+                >
+                  <p className="flex items-start gap-2">
+                    <TriangleAlertIcon className="mt-0.5 size-4 shrink-0" />
+                    Someone changed this description while you were editing it, so your edit isn’t saved. Your text is
+                    kept below.
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-1.5 pl-6">
+                    <Button size="sm" variant="outline" onClick={description.copyConflict}>
+                      Copy my text
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={description.loadLatest}
+                      title="Copies your text, then shows the description as it is now"
+                    >
+                      Load the latest
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={description.saveMine}>
+                      Save mine anyway
+                    </Button>
+                  </div>
+                </div>
+              )}
+              <DescriptionEditor
+                key={description.editorKey}
+                value={ticket.description}
+                onChange={description.onChange}
+                onBlur={description.onBlur}
+                onSync={description.onSync}
+                className="-mx-3"
+              />
+            </div>
             <SubticketsSection ticket={ticket} />
             <AttachmentsSection ticketId={ticket.id} uploads={uploads} />
             <ActivityFeed ticketId={ticket.id} pullRequest={ticket.pullRequest} run={ticket.run} />
