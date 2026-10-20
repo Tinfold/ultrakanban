@@ -111,6 +111,10 @@ human($s) as $human
     conflictCapNote: $conflictCapNote
   }
 | .fingerprint = (.items | map(.key) | join(" "))
+# What the run is for when it is only to fix things: "conflict" for merge conflicts alone, "ci" for failing checks
+# (and maybe conflicts too), so the loop can run it with the board's cheaper setting for those; null otherwise.
+| .trigger = (.items | map(.key | split(" ")[0]) | unique
+    | if . == ["conflict"] then "conflict" elif . - ["conflict"] == ["checks"] then "ci" else null end)
 | .run = ($resumable and .items != [] and (($s.failedFor // null) != .fingerprint or (($s.failures // 0) < $max
     and $now >= ($s.failedAt // 0) + $retry * pow(2; ($s.failures // 1) - 1))))
 JQ

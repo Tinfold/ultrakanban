@@ -32,6 +32,10 @@ interface BoardRow {
   agent_concurrency: number | null
   agent_max_turns: number | null
   agent_conflict_concurrency: number | null
+  agent_conflict_model: string | null
+  agent_conflict_effort: AgentEffort | null
+  agent_ci_model: string | null
+  agent_ci_effort: AgentEffort | null
   agent_backlog: number
   agent_all_skills: number
   agent_docker: number
@@ -84,6 +88,10 @@ const toBoard = (row: BoardRow): BoardSummary => ({
   agentConcurrency: row.agent_concurrency,
   agentMaxTurns: row.agent_max_turns,
   agentConflictConcurrency: row.agent_conflict_concurrency,
+  agentConflictModel: row.agent_conflict_model,
+  agentConflictEffort: row.agent_conflict_effort,
+  agentCiModel: row.agent_ci_model,
+  agentCiEffort: row.agent_ci_effort,
   agentBacklog: row.agent_backlog === 1,
   agentAllSkills: row.agent_all_skills === 1,
   agentDocker: row.agent_docker === 1,
@@ -154,6 +162,10 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     agentConcurrency,
     agentMaxTurns,
     agentConflictConcurrency,
+    agentConflictModel,
+    agentConflictEffort,
+    agentCiModel,
+    agentCiEffort,
     agentBacklog,
     agentAllSkills,
     agentDocker,
@@ -180,6 +192,10 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     agentConcurrency,
     agentMaxTurns,
     agentConflictConcurrency,
+    agentConflictModel,
+    agentConflictEffort,
+    agentCiModel,
+    agentCiEffort,
     agentBacklog,
     agentAllSkills,
     agentDocker,
@@ -214,6 +230,10 @@ export function updateBoard(id: string, input: UpdateBoardInput): BoardSummary {
     agent_concurrency: input.agentConcurrency,
     agent_max_turns: input.agentMaxTurns,
     agent_conflict_concurrency: input.agentConflictConcurrency,
+    agent_conflict_model: input.agentConflictModel,
+    agent_conflict_effort: input.agentConflictEffort,
+    agent_ci_model: input.agentCiModel,
+    agent_ci_effort: input.agentCiEffort,
     agent_backlog: input.agentBacklog === undefined ? undefined : Number(input.agentBacklog),
     agent_all_skills: input.agentAllSkills === undefined ? undefined : Number(input.agentAllSkills),
     agent_docker: input.agentDocker === undefined ? undefined : Number(input.agentDocker),

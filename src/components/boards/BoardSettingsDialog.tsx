@@ -316,6 +316,61 @@ function JevFieldset({ value, onChange }: { value: JevSettings; onChange: (value
   )
 }
 
+type FixRuns = Pick<BoardSummary, 'agentConflictModel' | 'agentConflictEffort' | 'agentCiModel' | 'agentCiEffort'>
+
+/** Model and effort fields for one kind of fix run (merge conflicts or failing CI); empty is the default. */
+function FixRunFields({
+  id,
+  label,
+  model,
+  effort,
+  defaults,
+  onChange,
+}: {
+  id: string
+  label: string
+  model: string | null
+  effort: AgentEffort | null
+  defaults: { model: string; effort: AgentEffort }
+  onChange: (model: string | null, effort: AgentEffort | null) => void
+}) {
+  return (
+    <>
+      <div className="grid gap-2">
+        <Label htmlFor={`board-settings-${id}-model`}>{label} model</Label>
+        <Input
+          id={`board-settings-${id}-model`}
+          value={model ?? ''}
+          placeholder={defaults.model}
+          pattern="[\w.:\[\]\-]+(/[\w.:\[\]\-]+)*"
+          maxLength={100}
+          title="A model alias or name, e.g. sonnet, claude-sonnet-5-5 or qwen3-coder:30b"
+          onChange={(event) => onChange(event.target.value.trim() || null, effort)}
+        />
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor={`board-settings-${id}-effort`}>{label} effort</Label>
+        <Select
+          value={effort ?? DEFAULT_EFFORT}
+          onValueChange={(value) => onChange(model, value === DEFAULT_EFFORT ? null : (value as AgentEffort))}
+        >
+          <SelectTrigger id={`board-settings-${id}-effort`} className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={DEFAULT_EFFORT}>Default ({defaults.effort})</SelectItem>
+            {AGENT_EFFORTS.map((level) => (
+              <SelectItem key={level} value={level}>
+                {level}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </>
+  )
+}
+
 /** Mounted with the dialog's content, so it starts from the saved settings each time the dialog opens. */
 function BoardSettingsForm({ onClose }: { onClose: () => void }) {
   const { detail, actions } = useBoardContext()
@@ -327,6 +382,10 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
   const [agentEnabled, setAgentEnabled] = useState(detail.board.agentEnabled)
   const [agentConcurrency, setAgentConcurrency] = useState(detail.board.agentConcurrency)
   const [agentConflictConcurrency, setAgentConflictConcurrency] = useState(detail.board.agentConflictConcurrency)
+  const [fixRuns, setFixRuns] = useState<FixRuns>(() => {
+    const { agentConflictModel, agentConflictEffort, agentCiModel, agentCiEffort } = detail.board
+    return { agentConflictModel, agentConflictEffort, agentCiModel, agentCiEffort }
+  })
   const [githubRepo, setGithubRepo] = useState(detail.board.githubRepo ?? '')
   const [notifyUrl, setNotifyUrl] = useState(detail.board.notifyUrl ?? '')
   const [creatingRepo, setCreatingRepo] = useState(false)
@@ -416,6 +475,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
       agentConcurrency,
       agentMaxTurns: maxTurns >= 1 ? Math.round(maxTurns) : null,
       agentConflictConcurrency,
+      ...fixRuns,
       agentEnabled: data.get('agentEnabled') === 'on',
       agentBacklog: data.get('agentBacklog') === 'on',
       agentAllSkills: data.get('agentAllSkills') === 'on',
@@ -727,6 +787,30 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
                   </Hint>
                 </div>
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <FixRunFields
+                  id="conflict"
+                  label="Conflict fix"
+                  model={fixRuns.agentConflictModel}
+                  effort={fixRuns.agentConflictEffort}
+                  defaults={{ model: AGENT_DEFAULTS.conflictModel, effort: AGENT_DEFAULTS.conflictEffort }}
+                  onChange={(model, effort) =>
+                    setFixRuns({ ...fixRuns, agentConflictModel: model, agentConflictEffort: effort })
+                  }
+                />
+                <FixRunFields
+                  id="ci"
+                  label="CI fix"
+                  model={fixRuns.agentCiModel}
+                  effort={fixRuns.agentCiEffort}
+                  defaults={{ model: AGENT_DEFAULTS.ciModel, effort: AGENT_DEFAULTS.ciEffort }}
+                  onChange={(model, effort) => setFixRuns({ ...fixRuns, agentCiModel: model, agentCiEffort: effort })}
+                />
+              </div>
+              <Hint>
+                Runs started only to fix merge conflicts, or only to fix failing CI, use these instead of the ticket's
+                model and effort, as they rarely need it. A run that also answers someone's feedback keeps the ticket's.
+              </Hint>
             </Group>
 
             <Group title="Picking tickets">
@@ -781,6 +865,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
                 listed in each request a run makes, which costs tokens.
               </CheckboxField>
             </Group>
+
             {hasTypesafeKey && <JevFieldset value={jev} onChange={setJev} />}
           </Section>
 

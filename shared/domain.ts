@@ -31,6 +31,12 @@ export const AGENT_DEFAULTS = {
   effort: 'medium',
   concurrency: 1,
   conflictConcurrency: 2,
+  /** Model and effort for runs that only fix merge conflicts (`agentConflictModel`/`agentConflictEffort`). */
+  conflictModel: 'sonnet',
+  conflictEffort: 'medium',
+  /** Model and effort for runs that only fix failing CI (`agentCiModel`/`agentCiEffort`). */
+  ciModel: 'sonnet',
+  ciEffort: 'medium',
 } as const
 /** Most runs a board's agent can work at once; each one needs its own git worktree and counts against Claude usage. */
 export const AGENT_MAX_CONCURRENCY = 8
@@ -370,6 +376,16 @@ export interface BoardSummary {
    * causes in the others are fixed side by side. 0 for none; 2 when not set.
    */
   agentConflictConcurrency: number | null
+  /**
+   * Model and effort level for runs started only to fix merge conflicts, whatever the ticket's own setting: such runs
+   * merge the base branch and rarely need the ticket's model. Runs that also hand over human feedback keep the ticket's.
+   * `sonnet` and `medium` when not set.
+   */
+  agentConflictModel: string | null
+  agentConflictEffort: AgentEffort | null
+  /** Model and effort level for runs started only to fix failing CI (and any merge conflicts); as for conflicts. */
+  agentCiModel: string | null
+  agentCiEffort: AgentEffort | null
   /** Whether the agent also takes tickets from the Backlog column once the Todo column has none left. */
   agentBacklog: boolean
   /**

@@ -317,7 +317,12 @@ model versions apart. A ticket can ask for its own model and effort (**Agent mod
 ticket's properties, shown while the board's agent is on), e.g. `sonnet` for copy changes or `high` for a hard bug;
 tickets that don't use the board's, or on a board that routes with Jev in `on` mode, the setting the claim routes them
 to (`routed`, see [docs/API.md](API.md#routing)), which their runs on feedback keep. Agents that file tickets pick a model and effort for each one from how hard it
-looks (the skill's "Creating tickets" section has the guide). When you change the model or effort, the loop
+looks (the skill's "Creating tickets" section has the guide). Runs the loop starts only to fix merge conflicts, or only
+to fix failing CI (and any conflicts with it), use the board's **Conflict fix model**/**effort**
+(`agentConflictModel`/`agentConflictEffort`) or **CI fix model**/**effort** (`agentCiModel`/`agentCiEffort`) instead,
+`sonnet` at `medium` by default, whatever the ticket's: merging the base branch or fixing a check rarely needs the
+model the ticket was worked with. A run that also hands over someone's comment, review or move, or carries on a run
+that didn't finish, keeps the ticket's setting. When you change the model or effort, the loop
 reassigns each ticket it holds to the new name before its next run on it. Agents you run yourself should follow the same pattern (see the skill).
 
 Running the services on the host, not in the containers, is deliberate: the agents use your `claude` login, your

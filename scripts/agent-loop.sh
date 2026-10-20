@@ -7,6 +7,8 @@
 # claude/opus/high. The loop passes that model and effort to claude, so the name always says what did the work.
 # A ticket can ask for its own model and effort level (its agentModel and agentEffort); tickets that don't are worked
 # at the setting the board routes them to, when it routes with Jev (the claim's routed), else with MODEL at EFFORT.
+# Runs started only to fix merge conflicts, or only to fix failing CI, use the board's setting for those instead
+# (agentConflictModel/agentConflictEffort and agentCiModel/agentCiEffort, sonnet at medium when not set).
 # Tickets held under another of the agent's names (another model or effort, or the bare agent name) are its own too:
 # before a run on one, the loop reassigns it to the current worker.
 #

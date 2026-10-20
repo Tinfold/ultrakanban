@@ -58,6 +58,19 @@ use_ticket_worker() {
   use_worker "$model" "$effort"
 }
 
+# Sets the worker for a run only to fix merge conflicts (trigger conflict) or failing CI (trigger ci): the board's
+# setting for those, from the conflict model, conflict effort, CI model and CI effort, tab-separated. Returns 1 for
+# any other run.
+use_fix_worker() {
+  local conflict_model conflict_effort ci_model ci_effort
+  IFS=$'\t' read -r conflict_model conflict_effort ci_model ci_effort <<<"$2"
+  case $1 in
+    conflict) use_worker "$conflict_model" "$conflict_effort" ;;
+    ci) use_worker "$ci_model" "$ci_effort" ;;
+    *) return 1 ;;
+  esac
+}
+
 # Reassigns a ticket held under another of the agent's names (another model or effort, or the bare agent name) to
 # the worker set by use_worker, in one versioned update.
 adopt() {
@@ -78,13 +91,16 @@ adopt() {
 # that feedback could wait hours for one of them to be free.
 handle_feedback() {
   local board review cancelled idle tickets file id number column holder version ticket_model ticket_effort pr_url repo pr_number \
-    queued approval conflicts pr branch ci issue reviews inline activity state triage items ci_note next
+    queued approval conflicts pr branch ci issue reviews inline activity state triage items ci_note next fix_runs
   claim_lock -s
   board=$(get "/boards/$BOARD") || { claim_unlock; log "can't read board $BOARD"; return 1; }
   review=$(jq -r '.board.reviewColumnId // ""' <<<"$board")
   cancelled=$(jq -r --arg name "$CANCELLED_COLUMN" \
     '[.columns[] | select((.name | ascii_downcase) == ($name | ascii_downcase)) | .id][0] // ""' <<<"$board")
   idle=$(idle_columns "$board") || { claim_unlock; log "can't read the columns of board $BOARD"; return 1; }
+  # The model and effort for runs only to fix merge conflicts, then for those only to fix failing CI.
+  fix_runs=$(jq -r '.board | [.agentConflictModel // "sonnet", .agentConflictEffort // "medium",
+    .agentCiModel // "sonnet", .agentCiEffort // "medium"] | @tsv' <<<"$board")
   tickets=$(jq -r --arg agent "$AGENT" --arg cancelled "$cancelled" --argjson idle "$idle" \
     '(.board.doneColumnId // "") as $done
     | .tickets[] | select(.assignee | . != null and (. == $agent or startswith($agent + "/")))
@@ -186,7 +202,8 @@ so the loop stopped starting runs for conflicts on this ticket. Comment on the t
     fi
     [[ $(jq -r .run <<<"$triage") == true ]] || continue
 
-    use_ticket_worker "$id" "$ticket_model" "$ticket_effort"
+    use_fix_worker "$(jq -r '.trigger // ""' <<<"$triage")" "$fix_runs" ||
+      use_ticket_worker "$id" "$ticket_model" "$ticket_effort"
     adopt "$id" "$number" "$holder" "$version" || continue
     items=$(jq -r '.items | map(.text) | join("\n\n---\n\n")' <<<"$triage")
     run_step=$(jq -r '.items | map(.text | split("\n")[0] | rtrimstr(":")) | join("; ")' <<<"$triage")

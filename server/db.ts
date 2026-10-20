@@ -449,6 +449,14 @@ export const MIGRATIONS = [
   ALTER TABLE ticket_routes ADD COLUMN content_key TEXT;
   `,
   `
+  -- Model and effort for the board agent's runs that only fix merge conflicts, and those that only fix failing CI (see
+  -- BoardSummary). AGENT_DEFAULTS' conflictModel, conflictEffort, ciModel and ciEffort when NULL.
+  ALTER TABLE boards ADD COLUMN agent_conflict_model TEXT;
+  ALTER TABLE boards ADD COLUMN agent_conflict_effort TEXT;
+  ALTER TABLE boards ADD COLUMN agent_ci_model TEXT;
+  ALTER TABLE boards ADD COLUMN agent_ci_effort TEXT;
+  `,
+  `
   -- Deleting a ticket keeps its runs (their ticket becomes NULL), so its spend stays in the board's totals. Dropping
   -- the old table cascades to token_usage_models (foreign keys are on), so the model split is set aside and put back.
   CREATE TEMP TABLE token_usage_models_kept AS SELECT * FROM token_usage_models;
