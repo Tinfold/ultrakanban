@@ -94,7 +94,7 @@ again.
 
 - [Features](docs/features.md) and keyboard shortcuts
 - [Running the board](docs/running.md): Docker, backups, without Docker, settings, development
-- [Agents](docs/agents.md): the agent API, other agents and models, the agent loop and its settings, the agents
+- [Agents](docs/agents.md): the agent API, other agents and models (aliases `fable`, `opus`, `sonnet`, `haiku`), the agent loop and its settings, the agents
   container, logins
 - [API reference](docs/API.md), also served at `GET /api`
 - [`.claude/skills/ultrakanban/SKILL.md`](.claude/skills/ultrakanban/SKILL.md): the Claude Code skill agents follow

@@ -234,6 +234,7 @@ setting that can do the work well saves tokens. Omit both (the board's defaults)
 board that routes with Jev (`jevEnabled`, `jevMode` `on`), leave them out: the claim picks the model and effort from
 the ticket, and a setting you name overrides that.
 
+- Model aliases: `fable`, `opus`, `sonnet`, `haiku`.
 - `haiku` at `low`: mechanical edits where the change is fully spelled out (a rename, bumping a version, a typo).
 - `sonnet` at `medium`: routine, well-scoped work: copy and docs, small UI changes, a clear bug with a known cause.
 - `opus` at `medium`: changes across several files or areas that need judgment.

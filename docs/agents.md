@@ -307,7 +307,7 @@ answers and posts a revised one, and waits again. Move the ticket back to Backlo
 
 **Names.** The board's **Agent name** (default `claude`) names the loop, which controls the work; its notes on
 tickets come from `<agent>-loop`. The runs it starts claim tickets as `<agent>/<model>/<effort>`, from the board's
-**Model** (default `opus`) and **Effort** (default `medium`) settings, which the loop passes to `claude`. So the board
+**Model** (default `opus`; aliases `fable`, `opus`, `sonnet`, `haiku`) and **Effort** (default `medium`) settings, which the loop passes to `claude`. So the board
 always shows which model and effort did the work, e.g. `claude/claude-opus-5-5/high`; a full model name keeps
 model versions apart. A ticket can ask for its own model and effort (**Agent model** and **Agent effort** in the
 ticket's properties, shown while the board's agent is on), e.g. `sonnet` for copy changes or `high` for a hard bug;
