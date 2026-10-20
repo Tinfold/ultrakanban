@@ -109,7 +109,10 @@ interface TicketRow {
  * column, and its pull request wasn't closed). Null when it isn't waiting. Needs the ticket as `t`.
  */
 export const WAITING_SINCE = `
-  (SELECT CASE WHEN a.actor = t.assignee AND (a.type = 'comment' OR t.approval = 'pending') THEN a.created_at END
+  (SELECT CASE WHEN (a.actor = t.assignee OR a.actor = substr(t.assignee, 1, instr(t.assignee || '/', '/') - 1)
+                         OR a.actor = substr(t.assignee, 1, instr(t.assignee || '/', '/') - 1) || '-loop'
+                         OR a.actor LIKE substr(t.assignee, 1, instr(t.assignee || '/', '/') - 1) || '/%')
+                        AND (a.type = 'comment' OR t.approval = 'pending') THEN a.created_at END
    FROM activity a JOIN boards b ON b.id = t.board_id
    WHERE a.ticket_id = t.id AND a.type IN ('comment', 'plan')
      AND t.column_id IS NOT b.review_column_id AND t.column_id IS NOT b.done_column_id AND t.pr_state != 'closed'
@@ -911,7 +914,7 @@ export function approvePlan(id: string, input: ApprovePlanInput, actor: string):
   if (ticket.approval !== 'pending') {
     throw conflict('not_awaiting_approval', "The ticket's plan doesn't wait for approval", { ticket })
   }
-  if (ticket.assignee && actor === ticket.assignee) {
+  if (ticket.assignee && isAgentOf(ticket.assignee, actor)) {
     throw conflict('own_plan', "The ticket's agent can't approve its own plan; a person has to", { ticket })
   }
   touchBoard(ticket.boardId)

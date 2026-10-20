@@ -81,6 +81,9 @@ describe('plans and approval', () => {
     const own = await approve(ticket, AGENT)
     assert.equal(own.status, 409)
     assert.equal(errorCode(own), 'own_plan')
+    const sibling = await approve(ticket, `${AGENT.split('/')[0]}/other-model/high`)
+    assert.equal(sibling.status, 409)
+    assert.equal(errorCode(sibling), 'own_plan')
 
     const approved = await approve(ticket)
     assert.equal(approved.status, 200)
