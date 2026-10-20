@@ -254,6 +254,9 @@ export const bulkTicketsSchema = z
     addTags: z.array(ref).max(50).optional(),
     removeTags: z.array(ref).max(50).optional(),
     epic: ref.nullable().optional(),
+    /** The model and effort the board's agent works them with; `null` follows the board's setting. */
+    agentModel: agentModel.optional(),
+    agentEffort: agentEffort.optional(),
     delete: z.literal(true).optional(),
   })
   .refine(
@@ -263,13 +266,23 @@ export const bulkTicketsSchema = z
       input.addTags?.length ||
       input.removeTags?.length ||
       input.epic !== undefined ||
+      input.agentModel !== undefined ||
+      input.agentEffort !== undefined ||
       input.delete,
-    { message: 'Say what to do: moveTo, priority, addTags, removeTags, epic or delete' },
+    { message: 'Say what to do: moveTo, priority, addTags, removeTags, epic, agentModel, agentEffort or delete' },
   )
   .refine(
     (input) =>
       !input.delete ||
-      !(input.moveTo || input.priority || input.addTags || input.removeTags || input.epic !== undefined),
+      !(
+        input.moveTo ||
+        input.priority ||
+        input.addTags ||
+        input.removeTags ||
+        input.epic !== undefined ||
+        input.agentModel !== undefined ||
+        input.agentEffort !== undefined
+      ),
     { message: 'delete cannot be combined with other changes' },
   )
 

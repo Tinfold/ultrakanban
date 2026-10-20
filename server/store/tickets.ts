@@ -614,7 +614,11 @@ export function bulkUpdateTickets(boardId: string, input: BulkTicketsInput, acto
   const epic = input.epic === undefined ? undefined : resolveEpic(boardId, input.epic, { create: true })
   return tickets.map((ticket) => {
     const tagIds = [...new Set([...ticket.tagIds, ...added])].filter((tagId) => !removed.includes(tagId))
-    updateTicket(ticket.id, { priority: input.priority, tags: tagIds, epic }, actor)
+    updateTicket(
+      ticket.id,
+      { priority: input.priority, tags: tagIds, epic, agentModel: input.agentModel, agentEffort: input.agentEffort },
+      actor,
+    )
     if (target && target.id !== ticket.columnId) {
       moveTicket(ticket.id, { column: target.id, force: input.force }, actor)
     }

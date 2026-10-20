@@ -102,3 +102,27 @@ describe('bulk ticket changes', () => {
     assert.equal((await call<Ticket>('GET', `/tickets/${a.id}`)).body.priority, 'none')
   })
 })
+
+describe('bulk agent settings', () => {
+  test('sets the model and effort of several tickets, and null resets them', async () => {
+    const a = await addTicket({ title: 'A' })
+    const b = await addTicket({ title: 'B', agentModel: 'haiku' })
+
+    const res = await bulk({ tickets: [a.id, b.id], agentModel: 'opus', agentEffort: 'high' })
+    assert.equal(res.status, 200)
+    for (const ticket of res.body.tickets) {
+      assert.equal(ticket.agentModel, 'opus')
+      assert.equal(ticket.agentEffort, 'high')
+    }
+
+    const reset = await bulk({ tickets: [a.id, b.id], agentModel: null })
+    assert.deepEqual(
+      reset.body.tickets.map((t) => [t.agentModel, t.agentEffort]),
+      [
+        [null, 'high'],
+        [null, 'high'],
+      ],
+    )
+    assert.equal((await bulk({ tickets: [a.id], agentEffort: 'bogus' })).status, 400)
+  })
+})
