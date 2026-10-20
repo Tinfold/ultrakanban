@@ -758,18 +758,25 @@ export function listIdleTickets(columnId: string): Ticket[] {
     .map(toTicket)
 }
 
-/** Unassigns a column's idle tickets (see `listIdleTickets`) and moves them to another column. Returns them. */
+/** Unassigns a column's idle tickets (see `listIdleTickets`) and moves them to another column. Returns them. Tickets that can't enter the target (e.g. no merged pull request for the done column) stay as they are. */
 export function releaseIdleTickets(columnId: string, input: ReleaseIdleInput, actor: string): Ticket[] {
   const column = getColumn(columnId)
   const target = resolveColumn(column.boardId, input.moveTo)
   if (target.id === column.id) throw badRequest('Idle tickets must move to another column')
-  return listIdleTickets(columnId).map((ticket) => {
+  const released: Ticket[] = []
+  for (const ticket of listIdleTickets(columnId)) {
+    try {
+      assertCanEnter(ticket, target)
+    } catch {
+      continue
+    }
     touchBoard(ticket.boardId)
     assign(ticket, null, actor)
     relocate(ticket, target.id, undefined, actor)
     bumpVersion(ticket.id)
-    return getTicket(ticket.id)
-  })
+    released.push(getTicket(ticket.id))
+  }
+  return released
 }
 
 /**

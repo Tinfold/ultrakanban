@@ -304,6 +304,30 @@ describe('idle tickets', () => {
     )
   })
 
+  test('releasing into the done column skips tickets that cannot enter it instead of failing the batch', async () => {
+    await call('PATCH', `/boards/${boardId}`, { doneColumn: 'Done' })
+    const stuck = await addTicket({ title: 'Stuck' })
+    const asked = await addTicket({ title: 'Asked', tags: ['question'] })
+    for (const ticket of [stuck, asked]) {
+      await call('POST', `/tickets/${ticket.id}/claim`, { agent: 'alpha', moveTo: 'Doing' })
+    }
+    const column = await doingColumn()
+
+    const released = await later(AGENT_IDLE_MINUTES + 1, () =>
+      call<Ticket[]>('POST', `/columns/${column.id}/release-idle`, { moveTo: 'Done' }),
+    )
+
+    assert.equal(released.status, 200)
+    assert.deepEqual(
+      released.body.map((ticket) => ticket.title),
+      ['Asked'],
+    )
+    assert.deepEqual(
+      (await ticketsIn('Doing')).map((ticket) => [ticket.title, ticket.assignee]),
+      [['Stuck', 'alpha']],
+    )
+  })
+
   test('a heartbeat is not a change to the ticket', async () => {
     const ticket = await addTicket({ title: 'A' })
     await call('POST', `/tickets/${ticket.id}/heartbeat`)
