@@ -26,4 +26,10 @@ describe('TICKET_TEMPLATES', () => {
     const question = TICKET_TEMPLATES.find((t) => t.id === 'question')!
     assert.deepEqual(question.tags, [QUESTION_TAG])
   })
+
+  test('the small change template uses a cheap model at low effort', () => {
+    const small = TICKET_TEMPLATES.find((t) => t.id === 'small')!
+    assert.equal(small.agentEffort, 'low')
+    assert.ok(['haiku', 'sonnet'].includes(small.agentModel!))
+  })
 })

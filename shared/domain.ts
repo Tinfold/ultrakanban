@@ -20,6 +20,14 @@ export type AgentEffort = (typeof AGENT_EFFORTS)[number]
 export const AGENT_MODELS = ['fable', 'opus', 'sonnet', 'haiku'] as const
 export type AgentModelAlias = (typeof AGENT_MODELS)[number]
 
+/** One-line hint on what each model suits and costs, shown in the model picker. */
+export const AGENT_MODEL_HINTS: Record<AgentModelAlias, string> = {
+  fable: 'Most capable, highest cost',
+  opus: 'Hard or multi-file work, high cost',
+  sonnet: 'Routine, well-scoped work, medium cost',
+  haiku: 'Mechanical edits, lowest cost',
+}
+
 /** Whether a model is one of Claude's: an alias (`AGENT_MODELS`) or a full name such as claude-opus-5-5. */
 export const isClaudeModel = (model: string) =>
   (AGENT_MODELS as readonly string[]).includes(model) || /^claude-/i.test(model)
@@ -81,7 +89,7 @@ export const TICKET_TEMPLATES: readonly TicketTemplate[] = [
     description:
       '## Steps to reproduce\n\n## Expected\n\n## Actual\n\n- [ ] Find the cause\n- [ ] Fix it\n- [ ] Add a test that would have caught it',
     tags: ['bug'],
-    agentEffort: 'medium',
+    agentEffort: 'high',
     agentModel: 'opus',
   },
   {
@@ -91,6 +99,14 @@ export const TICKET_TEMPLATES: readonly TicketTemplate[] = [
     tags: ['feature'],
     agentEffort: 'medium',
     agentModel: 'opus',
+  },
+  {
+    id: 'small',
+    name: 'Small change',
+    description: '## What to change\n\n- [ ] Make the change\n- [ ] Check it',
+    tags: ['chore'],
+    agentEffort: 'low',
+    agentModel: 'sonnet',
   },
   {
     id: 'question',

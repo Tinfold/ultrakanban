@@ -11,6 +11,7 @@ import { type ReactNode, useState } from 'react'
 import {
   AGENT_DEFAULTS,
   AGENT_EFFORTS,
+  AGENT_MODEL_HINTS,
   AGENT_MODELS,
   type AgentEffort,
   type Priority,
@@ -118,7 +119,7 @@ export function ModelPicker({ value, onChange, children }: PickerProps<string | 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-48">
+      <DropdownMenuContent align="start" className="w-80">
         <DropdownMenuRadioGroup
           value={value ?? BOARD_MODEL}
           onValueChange={(next) => onChange(next === BOARD_MODEL ? null : next)}
@@ -129,6 +130,11 @@ export function ModelPicker({ value, onChange, children }: PickerProps<string | 
           {models.map((model) => (
             <DropdownMenuRadioItem key={model} value={model}>
               {model}
+              {model in AGENT_MODEL_HINTS && (
+                <span className="ml-2 text-xs text-muted-foreground">
+                  {AGENT_MODEL_HINTS[model as keyof typeof AGENT_MODEL_HINTS]}
+                </span>
+              )}
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
