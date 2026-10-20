@@ -12,7 +12,7 @@ agents can work the same board safely.
 
 - `KANBAN` — the board's base URL, e.g. `http://localhost:8080`. Ask the user if you don't have it.
 - `BOARD` — the board id. List boards with `curl -s $KANBAN/api/boards`; ask the user which one if several.
-- Read the board's description once (`curl -s $KANBAN/api/boards/$BOARD | jq -r .board.description`): it is where
+- Read the board's description once (`curl -s "$KANBAN/api/boards/$BOARD?compact=1" | jq -r .board.description`): it is where
   people put what the board is for and the conventions every ticket on it should follow. Follow them unless a ticket
   says otherwise. The board's agent loop puts it in your prompt, so there you needn't fetch it.
 - Send `-H "X-Actor: <your name>"` on every write so the activity log shows who did what. Use the same name
@@ -59,9 +59,10 @@ agents can work the same board safely.
   it (`POST /api/tickets/$TICKET/release` with `{"agent":"<you>","moveTo":"<the column it came from>"}`).
 - **Keep your context small.** Everything a command prints stays in the conversation and is sent again with every
   later step, so most of a run's tokens are re-reads of old output. Search first (`grep -n`) and read the lines you
-  need (`sed -n 120,180p`) instead of printing whole large files; trim board JSON with `jq` (a board lists every
-  ticket); print only the failures and summary of long test or build output; and look at each screenshot once,
-  cropped to what changed, rather than reading full-page captures again.
+  need (`sed -n 120,180p`) instead of printing whole large files; ask the board for lean JSON (`?compact=1` lists
+  tickets without their descriptions, `?column=` and `?assignee=` filter `/boards/$BOARD/tickets`, `?afterId=` and
+  `?type=comment` trim a ticket's activity) and trim the rest with `jq`; print only the failures and summary of long
+  test or build output; and look at each screenshot once, cropped to what changed, rather than reading full-page captures again.
 
 ## 1. Claim a ticket
 
@@ -82,8 +83,11 @@ To work a specific ticket instead, use `POST /api/tickets/$TICKET/claim` with th
 
 ```sh
 curl -s $KANBAN/api/tickets/$TICKET            # title, description (markdown), tags, due date, pull request
-curl -s $KANBAN/api/tickets/$TICKET/activity   # comments and history, oldest first
+curl -s "$KANBAN/api/tickets/$TICKET/activity?type=comment"   # its comments, oldest first
 ```
+
+Leave out `?type=comment` for its whole history (moves, claims, plans, pull request events). Note the `id` of the
+newest entry you read: `?afterId=<id>` later lists only what came after it.
 
 Follow any checklist (`- [ ] step`) in the description, and check its steps off on the board as you go (see below). Comments often contain corrections that are newer than the
 description — treat the newest instruction as the one that counts. If they conflict with the description or
@@ -164,7 +168,7 @@ sub-tickets did what it asked, then submit it with a summary as the comment and 
 After submitting, check both places for feedback until the pull request is merged or you are told to stop.
 
 ```sh
-curl -s $KANBAN/api/tickets/$TICKET/activity   # new ticket comments
+curl -s "$KANBAN/api/tickets/$TICKET/activity?afterId=$LAST_ID&type=comment"   # new ticket comments
 gh pr view $PR_URL --comments                  # pull request conversation
 gh api repos/$OWNER/$REPO/pulls/$NUMBER/comments   # inline review comments on the diff
 gh pr checks $PR_URL                           # failing CI is feedback too

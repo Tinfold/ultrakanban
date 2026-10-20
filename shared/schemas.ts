@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import {
+  ACTIVITY_TYPES,
   AGENT_EFFORTS,
   AGENT_MODELS,
   AGENT_LOGIN_KINDS,
@@ -530,6 +531,8 @@ export const listTicketsQuerySchema = z.object({
   /** An epic's id or title, or `none` for tickets in no epic. */
   epic: ref.optional(),
   q: z.string().trim().min(1).optional(),
+  /** List `CompactTicket`s. */
+  compact: z.stringbool().optional(),
 })
 
 /** What is known of a ticket about to be created, to suggest a model and effort for it. */
@@ -552,6 +555,14 @@ export const jevSuggestionSchema = z.object({
 
 export const boardDetailQuerySchema = z.object({
   archived: z.stringbool().default(false),
+  /** List the tickets as `CompactTicket`s. */
+  compact: z.stringbool().default(false),
+})
+
+export const listActivityQuerySchema = z.object({
+  /** Only entries newer than this one (activity ids only grow). */
+  afterId: z.coerce.number().int().min(0).optional(),
+  type: z.array(z.enum(ACTIVITY_TYPES)).optional(),
 })
 
 export const overviewQuerySchema = z.object({
@@ -642,6 +653,7 @@ export type ClaimNextInput = z.input<typeof claimNextSchema>
 export type MergeRunInput = z.input<typeof mergeRunSchema>
 export type MergeTicketInput = z.input<typeof mergeTicketSchema>
 export type ListTicketsQuery = z.output<typeof listTicketsQuerySchema>
+export type ListActivityQuery = z.output<typeof listActivityQuerySchema>
 export type AgentSuggestionQuery = z.output<typeof agentSuggestionQuerySchema>
 export type JevSuggestionInput = z.input<typeof jevSuggestionSchema>
 export type RecordUsage = z.output<typeof recordUsageSchema>

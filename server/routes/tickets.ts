@@ -9,6 +9,7 @@ import {
   commentSchema,
   createSubticketSchema,
   heartbeatSchema,
+  listActivityQuerySchema,
   listRunsQuerySchema,
   mergeTicketSchema,
   moveTicketSchema,
@@ -199,7 +200,8 @@ export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles, notifi
     .post('/:ticketId/stop', (c) => c.json(transaction(() => requestStop(c.req.param('ticketId'), actorOf(c)))))
     .get('/:ticketId/activity', (c) => {
       const ticket = getTicket(c.req.param('ticketId'))
-      return c.json(listActivity(ticket.id))
+      const query = listActivityQuerySchema.parse({ afterId: c.req.query('afterId'), type: c.req.queries('type') })
+      return c.json(listActivity(ticket.id, query))
     })
     .get('/:ticketId/usage', (c) => c.json(listUsage(c.req.param('ticketId'))))
     .post('/:ticketId/usage', async (c) => {

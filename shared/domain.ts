@@ -568,6 +568,30 @@ export interface Ticket {
 }
 
 /**
+ * A ticket as `?compact=true` lists it: what an agent needs to pick a ticket and see where it stands, without its
+ * description, usage or run. Fetch the ticket itself for the rest.
+ */
+export type CompactTicket = Pick<
+  Ticket,
+  | 'id'
+  | 'number'
+  | 'columnId'
+  | 'title'
+  | 'priority'
+  | 'assignee'
+  | 'tagIds'
+  | 'epicId'
+  | 'parentId'
+  | 'version'
+  | 'estimate'
+  | 'approval'
+  | 'waitingSince'
+  | 'archived'
+  | 'subtickets'
+  | 'commentCount'
+> & { pullRequest: Pick<PullRequest, 'url' | 'state' | 'checks' | 'conflicts'> | null }
+
+/**
  * Why the board's auto-merge (`BoardSummary.autoMerge`) isn't merging a ticket's pull request yet, as its latest round
  * found: what keeps it from being ready, or that merging it failed. Auto-merge looks again every minute.
  */
@@ -664,6 +688,7 @@ export interface BoardDetail {
   tags: Tag[]
   /** Oldest first. */
   epics: Epic[]
+  /** `CompactTicket`s instead with `?compact=true`. */
   tickets: Ticket[]
   /** Archived tickets left out of `tickets`; 0 when they were asked for. */
   archivedCount: number
@@ -686,6 +711,21 @@ export type Activity =
   | ActivityBase<'pull_request', { url: string; event: 'linked' | 'unlinked' | Exclude<PullRequestState, 'unknown'> }>
 
 export type ActivityType = Activity['type']
+
+export const ACTIVITY_TYPES = [
+  'created',
+  'updated',
+  'checked',
+  'moved',
+  'claimed',
+  'released',
+  'comment',
+  'plan',
+  'approved',
+  'stopped',
+  'attachment',
+  'pull_request',
+] as const satisfies readonly ActivityType[]
 
 /** Tokens an agent used, split the way Claude reports them. */
 export interface TokenCounts {

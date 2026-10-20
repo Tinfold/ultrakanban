@@ -18,6 +18,7 @@ import {
   needsApproval,
   QUESTION_TAG,
   reserveFor,
+  type CompactTicket,
   type Ticket,
   type TicketSize,
 } from '../../shared/domain.ts'
@@ -334,6 +335,32 @@ export function listTickets(boardId: string, query: ListTicketsQuery = {}): Tick
 
   return sql.all<TicketRow>(`${SELECT_TICKETS} WHERE ${where.join(' AND ')} ${BOARD_ORDER}`, ...params).map(toTicket)
 }
+
+/** The ticket as `?compact=true` lists it (see `CompactTicket`). */
+export const compactTicket = (ticket: Ticket): CompactTicket => ({
+  id: ticket.id,
+  number: ticket.number,
+  columnId: ticket.columnId,
+  title: ticket.title,
+  priority: ticket.priority,
+  assignee: ticket.assignee,
+  tagIds: ticket.tagIds,
+  epicId: ticket.epicId,
+  parentId: ticket.parentId,
+  version: ticket.version,
+  estimate: ticket.estimate,
+  approval: ticket.approval,
+  waitingSince: ticket.waitingSince,
+  archived: ticket.archived,
+  subtickets: ticket.subtickets,
+  commentCount: ticket.commentCount,
+  pullRequest: ticket.pullRequest && {
+    url: ticket.pullRequest.url,
+    state: ticket.pullRequest.state,
+    checks: ticket.pullRequest.checks,
+    conflicts: ticket.pullRequest.conflicts,
+  },
+})
 
 function assertVersion(ticket: Ticket, ifVersion: number | undefined) {
   if (ifVersion !== undefined && ticket.version !== ifVersion) {
