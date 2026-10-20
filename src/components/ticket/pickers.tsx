@@ -21,6 +21,7 @@ import { ColorDot } from '@/components/common/TagChip'
 import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Calendar } from '@/components/ui/calendar'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import {
@@ -115,7 +116,15 @@ const BOARD_MODEL = '__board'
 /** The model the board's agent works a ticket with; `null` follows the board's setting. */
 export function ModelPicker({ value, onChange, children }: PickerProps<string | null>) {
   const { detail } = useBoardContext()
-  const models = [...new Set([...AGENT_MODELS, ...(value ? [value] : [])])]
+  const [typed, setTyped] = useState('')
+  const isClaude = (detail.board.agentName ?? AGENT_DEFAULTS.name) === 'claude'
+  const models = [...new Set([...(isClaude ? AGENT_MODELS : []), ...(value ? [value] : [])])]
+  const submit = () => {
+    const name = typed.trim()
+    if (!name) return
+    onChange(name)
+    setTyped('')
+  }
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
@@ -138,6 +147,23 @@ export function ModelPicker({ value, onChange, children }: PickerProps<string | 
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
+        <div className="border-t p-1.5">
+          <Input
+            value={typed}
+            onChange={(event) => setTyped(event.target.value)}
+            onKeyDown={(event) => {
+              // Keep the menu's typeahead and arrow keys from stealing the typing.
+              event.stopPropagation()
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                submit()
+              }
+            }}
+            placeholder="Type a model name, then Enter"
+            aria-label="Model name"
+            className="h-8"
+          />
+        </div>
       </DropdownMenuContent>
     </DropdownMenu>
   )
