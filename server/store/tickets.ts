@@ -1009,8 +1009,9 @@ export function addComment(id: string, body: string, actor: string, pullRequestC
 }
 
 export const FIX_CONFLICTS_COMMENT =
-  'The pull request has merge conflicts with its base branch. Please fix them: merge the base branch into the ' +
-  "pull request's branch, resolve the conflicts and push."
+  'The pull request has merge conflicts with its base branch. Please fix them: rebase the pull request’s branch ' +
+  'onto the base branch instead of merging it in, resolve each conflict keeping both sides’ changes, and push with ' +
+  '--force-with-lease.'
 
 /**
  * Asks for the merge conflicts of the review column's open pull requests to be fixed, with a comment on each of their

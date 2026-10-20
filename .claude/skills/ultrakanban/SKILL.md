@@ -171,8 +171,11 @@ gh pr checks $PR_URL                           # failing CI is feedback too
 ```
 
 Address every point: push fixes, re-attach screenshots if the UI changed, reply on the pull request, and
-comment on the ticket summarising what you changed. Resolve merge conflicts by merging the base branch into the
-pull request's branch. Then wait for the merge — the ticket moves to the done column on its own. If the pull
+comment on the ticket summarising what you changed. Resolve merge conflicts by rebasing the pull request's branch onto
+the base branch (`git fetch origin && git rebase origin/<base>`), not by merging it in: merge commits tangle the
+history and make it easy to lose a feature in a bad resolution. Resolve each conflict by keeping both sides' changes,
+never by dropping what the base branch added; afterwards `git diff origin/<base>...HEAD` should show only the pull
+request's own changes. Then push with `git push --force-with-lease` (never a plain `--force`). Then wait for the merge — the ticket moves to the done column on its own. If the pull
 request is closed without merging, comment on the ticket saying why and release it into the board's Cancelled
 column: `POST /api/tickets/$TICKET/release` with `{"agent":"<you>","moveTo":"Cancelled"}` (if the board has no
 such column, ask in a comment instead).
