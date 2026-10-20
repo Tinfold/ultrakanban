@@ -141,6 +141,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
       agentAllSkills: data.get('agentAllSkills') === 'on',
       agentDocker: data.get('agentDocker') === 'on',
       autoMerge: data.get('autoMerge') === 'on',
+      ignoreBillingFailures: data.get('ignoreBillingFailures') === 'on',
       deleteMergedBranches: data.get('deleteMergedBranches') === 'on',
       archiveDoneDays: archiveDays >= 1 ? Math.round(archiveDays) : null,
       approvalSize: approvalSize === NONE ? null : (approvalSize as TicketSize),
@@ -222,6 +223,22 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
             Merges pull requests in the review column once they have no conflicts, every check has passed and every
             checklist item of their ticket is checked, the way Merge all would. Checks when pull requests are synced
             with GitHub.
+          </p>
+        </div>
+        <div className="grid gap-1">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              name="ignoreBillingFailures"
+              defaultChecked={detail.board.ignoreBillingFailures}
+              className="size-4 accent-primary"
+            />
+            Ignore checks that failed because of billing
+          </label>
+          <p className="pl-6 text-xs text-muted-foreground">
+            Counts a pull request as ready to merge when its only failing checks didn't run because of the account's
+            billing, such as GitHub Actions jobs not started for a spending limit or failed payment. Any other failing
+            or running check still holds it back, and branch protection may still refuse the merge.
           </p>
         </div>
         <div className="grid gap-1">

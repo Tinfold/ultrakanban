@@ -31,6 +31,7 @@ interface BoardRow {
   agent_all_skills: number
   agent_docker: number
   auto_merge: number
+  ignore_billing_failures: number
   delete_merged_branches: number
   archive_done_days: number | null
   approval_size: TicketSize | null
@@ -76,6 +77,7 @@ const toBoard = (row: BoardRow): BoardSummary => ({
   agentAllSkills: row.agent_all_skills === 1,
   agentDocker: row.agent_docker === 1,
   autoMerge: row.auto_merge === 1,
+  ignoreBillingFailures: row.ignore_billing_failures === 1,
   deleteMergedBranches: row.delete_merged_branches === 1,
   archiveDoneDays: row.archive_done_days,
   approvalSize: row.approval_size,
@@ -139,6 +141,7 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     agentAllSkills,
     agentDocker,
     autoMerge,
+    ignoreBillingFailures,
     deleteMergedBranches,
     archiveDoneDays,
     approvalSize,
@@ -158,6 +161,7 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     agentAllSkills,
     agentDocker,
     autoMerge,
+    ignoreBillingFailures,
     deleteMergedBranches,
     archiveDoneDays,
     approvalSize,
@@ -184,6 +188,8 @@ export function updateBoard(id: string, input: UpdateBoardInput): BoardSummary {
     agent_all_skills: input.agentAllSkills === undefined ? undefined : Number(input.agentAllSkills),
     agent_docker: input.agentDocker === undefined ? undefined : Number(input.agentDocker),
     auto_merge: input.autoMerge === undefined ? undefined : Number(input.autoMerge),
+    ignore_billing_failures:
+      input.ignoreBillingFailures === undefined ? undefined : Number(input.ignoreBillingFailures),
     delete_merged_branches: input.deleteMergedBranches === undefined ? undefined : Number(input.deleteMergedBranches),
     archive_done_days: input.archiveDoneDays,
     approval_size: input.approvalSize,

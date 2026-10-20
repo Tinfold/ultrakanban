@@ -3,6 +3,7 @@ import {
   FAILING_CHECK_EXCERPT_MAX,
   FAILING_CHECK_EXCERPTS,
   type FailingCheck,
+  isBillingFailure,
   MAX_FAILING_CHECKS,
 } from '../shared/domain.ts'
 import type { GitHubAnnotation, GitHubCheckRun, GitHubClient, GitHubCommitStatus } from './github.ts'
@@ -26,6 +27,12 @@ export interface CommitChecks {
   failingChecks: FailingCheck[]
 }
 
+/** What the board last stored of a pull request's checks, whose excerpts `fetchCommitChecks` reuses. */
+interface PreviousChecks {
+  headSha: string | null
+  failingChecks: FailingCheck[]
+}
+
 /** A failing check, and the check run it is (null for a commit status), whose details give its excerpt. */
 interface Failing {
   check: FailingCheck
@@ -44,7 +51,8 @@ const clip = (text: string | null) => {
  * any is still running, otherwise `passing` once any passed. Null when none counts (it has none, or only cancelled
  * ones). Of each check run name only the latest run counts, as a re-run replaces the earlier one. Also lists the
  * failing ones by name, at most `MAX_FAILING_CHECKS`: commit statuses with their description as the excerpt, check
- * runs without one yet (see `fetchCommitChecks`).
+ * runs without one yet (see `fetchCommitChecks`). `failingCount` counts them all, and `pending` says whether any is
+ * still running, even when one already failed.
  */
 export function combineChecks(runs: GitHubCheckRun[], statuses: GitHubCommitStatus[]) {
   const latest = new Map<string, GitHubCheckRun>()
@@ -71,7 +79,7 @@ export function combineChecks(runs: GitHubCheckRun[], statuses: GitHubCommitStat
   }
   failing.sort((a, b) => a.check.name.localeCompare(b.check.name))
   const checks: CheckStatus | null = failing.length ? 'failing' : pending ? 'pending' : passing ? 'passing' : null
-  return { checks, failing: failing.slice(0, MAX_FAILING_CHECKS) }
+  return { checks, failing: failing.slice(0, MAX_FAILING_CHECKS), failingCount: failing.length, pending }
 }
 
 /** One annotation on a line of its own: where it is (unless it is on the workflow as a whole), and what it says. */
@@ -101,19 +109,41 @@ const checkKey = (check: FailingCheck) => `${check.name}\n${check.conclusion}`
 
 /**
  * Reads a commit's checks from GitHub (see `combineChecks`), with an excerpt of why each of the first
- * `FAILING_CHECK_EXCERPTS` failing check runs failed. Excerpts cost a request each, and pull requests are checked every
- * minute, so they are only fetched again when the commit or its set of failing checks changed since `previous` (what the
- * board last stored for the pull request); otherwise the stored excerpts are kept. An excerpt that can't be read is
- * left out rather than failing the read.
+ * `FAILING_CHECK_EXCERPTS` failing check runs failed, or of every one while each excerpt so far says it failed for
+ * billing (see `isBillingFailure`): a billing problem fails every job, and the board's `ignoreBillingFailures` needs to
+ * know that all of them failed for it. Excerpts cost a request each, and pull requests are checked every minute, so
+ * they are only fetched again when the commit or its set of failing checks changed since `previous` (what the board
+ * last stored for the pull request); otherwise the stored excerpts are kept. An excerpt that can't be read is left out
+ * rather than failing the read.
  */
 export async function fetchCommitChecks(
   github: GitHubClient,
   repo: string,
   sha: string,
-  previous: { headSha: string | null; failingChecks: FailingCheck[] },
+  previous: PreviousChecks,
 ): Promise<CommitChecks> {
+  const { checks, failingChecks } = await readCommitChecks(github, repo, sha, previous)
+  return { checks, failingChecks }
+}
+
+/**
+ * Whether a commit's checks have all finished and some failed, but only because of billing (see `isBillingFailure`),
+ * reading them from GitHub as `fetchCommitChecks` does. False when more failed than the board keeps, as the rest
+ * can't be told apart.
+ */
+export async function failsOnlyForBilling(github: GitHubClient, repo: string, sha: string, previous: PreviousChecks) {
+  const { checks, failingChecks, failingCount, pending } = await readCommitChecks(github, repo, sha, previous)
+  return (
+    checks === 'failing' &&
+    !pending &&
+    failingCount === failingChecks.length &&
+    failingChecks.every((check) => isBillingFailure(check))
+  )
+}
+
+async function readCommitChecks(github: GitHubClient, repo: string, sha: string, previous: PreviousChecks) {
   const [runs, statuses] = await Promise.all([github.listCheckRuns(repo, sha), github.listCommitStatuses(repo, sha)])
-  const { checks, failing } = combineChecks(runs, statuses)
+  const { checks, failing, failingCount, pending } = combineChecks(runs, statuses)
   const known = new Map(previous.failingChecks.map((check) => [checkKey(check), check.excerpt]))
   const unchanged =
     previous.headSha === sha &&
@@ -122,13 +152,16 @@ export async function fetchCommitChecks(
 
   const failingChecks: FailingCheck[] = []
   let fetched = 0
+  let billing = true
   for (const { check, run } of failing) {
     if (!run) failingChecks.push(check)
     else if (unchanged) failingChecks.push({ ...check, excerpt: known.get(checkKey(check)) ?? null })
-    else if (fetched < FAILING_CHECK_EXCERPTS) {
+    else if (fetched < FAILING_CHECK_EXCERPTS || billing) {
       fetched += 1
-      failingChecks.push({ ...check, excerpt: await excerptOf(github, repo, run).catch(() => null) })
+      const excerpt = await excerptOf(github, repo, run).catch(() => null)
+      billing &&= isBillingFailure({ excerpt })
+      failingChecks.push({ ...check, excerpt })
     } else failingChecks.push(check)
   }
-  return { checks, failingChecks }
+  return { checks, failingChecks, failingCount, pending }
 }
