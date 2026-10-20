@@ -327,7 +327,7 @@ to fix failing CI (and any conflicts with it), use the board's **Conflict fix mo
 `sonnet` at `medium` by default, whatever the ticket's: merging the base branch or fixing a check rarely needs the
 model the ticket was worked with. A run that also hands over someone's comment, review or move, or carries on a run
 that didn't finish, keeps the ticket's setting. When you change the model or effort, the loop
-reassigns each ticket it holds to the new name before its next run on it. Agents you run yourself should follow the same pattern (see the skill).
+lets the runs in progress finish, starts again with the new setting and reassigns each ticket it holds to the new name before its next run on it. Agents you run yourself should follow the same pattern (see the skill).
 
 Running the services on the host, not in the containers, is deliberate: the agents use your `claude` login, your
 `gh` auth and git.

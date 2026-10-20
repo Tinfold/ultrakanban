@@ -9,7 +9,8 @@
 # fix merge conflicts (CONFLICTS_ONLY, see agent-loop.sh), so the conflicts that merging one pull request causes in the
 # others are fixed side by side even when the board works one ticket at a time. When the installed scripts or
 # skill change, each loop stops before its next run and is started again with the new ones on its own. Only a change
-# to this script or its systemd unit waits for them all to stop, and then starts it (or the unit) again.
+# to this script, its systemd unit or the board's agent settings (model, effort, repository, parallel runs) waits for
+# them all to stop, and then starts it (or the unit) again, so a change doesn't stop runs in progress.
 #
 #   agent-board.sh <board id>
 #
@@ -125,8 +126,12 @@ export KANBAN BOARD AGENT=$agent MODEL=$model EFFORT=$effort STATE_DIR=$dir/stat
   WATCH_FILES="$here/agent-loop.sh:$(printf '%s:' "$here"/agent-loop/*.sh)$here/agent-board.sh:$installed_skill"
 # The unit file too, so the loops stop for the unit to be restarted.
 [[ -z $unit_file ]] || WATCH_FILES+=":$unit_file"
-# agent-board.sh as it is now, to tell when it is updated.
+# And the board's agent settings as agent-supervisor.sh writes them when they change (model, effort, repository, parallel
+# runs), so the loops stop for this script to start again with them, which reads them above.
+WATCH_FILES+=":$dir/settings"
+# agent-board.sh and the settings as they are now, to tell when they change.
 board_script=$(stat -c '%i %Y %s' "$here/agent-board.sh" 2>/dev/null)
+board_settings=$(cat "$dir/settings" 2>/dev/null)
 pids=()
 trap 'kill "${pids[@]}" 2>/dev/null; wait; exit 0' INT TERM
 # Starts loop n in its checkout, after the given number of seconds.
@@ -168,6 +173,9 @@ while ((${#pids[@]})); do
   if ((code == 75)); then
     if [[ $(stat -c '%i %Y %s' "$here/agent-board.sh" 2>/dev/null) != "$board_script" ]] || unit_outdated; then
       [[ -n $draining ]] || echo "agent-board.sh or its unit was updated; restarting once every loop finishes its run"
+      draining=1
+    elif [[ $(cat "$dir/settings" 2>/dev/null) != "$board_settings" ]]; then
+      [[ -n $draining ]] || echo "the board's agent settings changed; restarting with them once every loop finishes its run"
       draining=1
     else
       echo "loop $((n + 1)): the agent scripts were updated; starting it again with the new ones"

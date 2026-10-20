@@ -569,8 +569,18 @@ reconcile() {
     # The conflict loops only when set, so that boards which leave them at the default keep the settings they had.
     settings="$repo $agent/$model/$effort x$concurrency${conflicts:++$conflicts}"
     if [[ $(cat "$AGENT_HOME/boards/$id/settings" 2>/dev/null) != "$settings" ]]; then
+      # Replaced rather than written over, so the loops see it change even when it keeps its size and modification time.
+      mkdir -p "$AGENT_HOME/boards/$id" && printf '%s\n' "$settings" >"$AGENT_HOME/boards/$id/settings.new" &&
+        mv -f "$AGENT_HOME/boards/$id/settings.new" "$AGENT_HOME/boards/$id/settings"
+      loop_state "$id"
+      # A running loop watches the settings file and starts again with the new settings once its runs finish (see
+      # agent-board.sh), as it does for updated scripts, rather than having them stopped here.
+      if [[ $state == @(active|reloading) && -z $restart ]]; then
+        echo "board $id: settings changed ($repo as $agent/$model/$effort, $concurrency at a time); its agent loop \
+starts again with them once its runs finish"
+        continue
+      fi
       echo "board $id: starting its agent loop ($repo as $agent/$model/$effort, $concurrency at a time)"
-      mkdir -p "$AGENT_HOME/boards/$id" && printf '%s\n' "$settings" >"$AGENT_HOME/boards/$id/settings"
       loop_restart "$id"
       continue
     fi
