@@ -269,28 +269,41 @@ pause() {
   sleeper=
 }
 
-# Waits the given number of seconds, or less when someone wakes the board's agent up (a `wake` event on the board's
-# event stream, sent for a person's feedback on a ticket the agent holds, and by buttons such as the review column's
-# "fix conflicts"). Waits them out anyway if the stream can't be read.
-idle() {
-  local line end=$((SECONDS + $1)) events
-  exec {events}< <(exec curl -sfN --max-time "$1" "$KANBAN/api/events?board=$BOARD" 2>/dev/null)
-  listener=$!
-  while IFS= read -r line <&"$events"; do
-    [[ $line == 'event: wake' ]] && break
+# Where wake-ups are recorded: a file that exists when the board woke the loop up since idle last looked. A listener
+# runs for the whole life of the loop, so a wake-up that arrives during triage or a run is kept, not lost.
+WAKE_FILE=$STATE_DIR/wake.$$
+
+# Reads the board's event stream and sets the wake flag on each `wake` event (sent for a person's feedback on a ticket
+# the agent holds, and by buttons such as the review column's "fix conflicts"). Reconnects when the stream ends.
+listen_for_wakes() {
+  local line
+  while true; do
+    while IFS= read -r line; do
+      [[ $line == 'event: wake' ]] && : >"$WAKE_FILE"
+    done < <(exec curl -sfN "$KANBAN/api/events?board=$BOARD" 2>/dev/null)
+    sleep 5
   done
-  exec {events}<&-
-  kill "$listener" 2>/dev/null
-  listener=
-  if [[ $line == 'event: wake' ]]; then
-    log "woken up from the board"
-  elif ((end > SECONDS)); then
-    pause "$((end - SECONDS))"
-  fi
+}
+
+# Waits the given number of seconds, or less when the wake flag is set (or gets set meanwhile); clears the flag, and
+# doesn't wait at all when it was already set. Waits them out anyway if the stream can't be read.
+idle() {
+  local end=$((SECONDS + $1))
+  while ((SECONDS < end)); do
+    if [[ -e $WAKE_FILE ]]; then
+      rm -f "$WAKE_FILE"
+      log "woken up from the board"
+      return
+    fi
+    pause 1
+  done
 }
 
 sleeper=
 listener=
+rm -f "$WAKE_FILE"
+listen_for_wakes &
+listener=$!
 # Set when Claude usage runs out: no run starts before this time (seconds since the epoch). Kept in PAUSE_FILE, so
 # the other loops working the board wait too.
 paused_until=0
@@ -308,7 +321,7 @@ watcher=
 # Set by the trap: a run in progress is stopped, then run_claude ends and records it (end_run, stop_leftovers,
 # record_run) before the loop exits.
 stopping=
-trap 'log "stopped"; kill $sleeper $listener $watcher 2>/dev/null
+trap 'log "stopped"; kill $sleeper $listener $watcher 2>/dev/null; pkill -P "$listener" 2>/dev/null; rm -f "$WAKE_FILE"
   if [[ -n $running ]]; then stopping=1; kill $running 2>/dev/null; else exit 0; fi' INT TERM
 
 # `agent-loop.sh save-work` only keeps the work of an unfinished run in the current checkout (see save_work):
