@@ -40,6 +40,9 @@ agents can work the same board safely.
   starts a new short-lived `claude -p` for each ticket it claims and each time one of its tickets gets feedback.
   Don't use `/loop` or a long-lived orchestrator session for this.
 - **Read before you write.** Ticket comments and pull request review comments are how humans steer you.
+- **Read again before you finish.** People often comment while you work. Just before you submit a ticket for review
+  or post your closing comment, read its activity again (and, if it has one, the pull request's comments) and handle
+  whatever came in since you last looked, so your summary doesn't skip it.
 - **Never move a ticket to the done column.** It moves there by itself when the pull request is merged.
 - **People move tickets too, and their moves count.** If someone moves your ticket back to Todo or a column before
   it (such as Backlog), to Cancelled, or unassigns or reassigns it, it is no longer yours to work: stop, don't
@@ -136,7 +139,8 @@ curl -s -X POST $KANBAN/api/tickets/$TICKET/attachments -H "X-Actor: $ME" -F fil
 
 ## 6. Open a pull request and submit for review
 
-Push a branch, open the pull request, then submit the ticket with it. Look at its checklist first
+Push a branch, open the pull request, then submit the ticket with it. First read the ticket's activity again for
+comments that came in while you worked, and handle them. Look at its checklist too
 (`GET /api/tickets/$TICKET/checklist`): every step you did should be checked already, and the comment should say why
 any step is still unchecked.
 
@@ -183,8 +187,8 @@ It is invisible on GitHub. You usually post from the same GitHub account as the 
 marker is how `scripts/agent-loop.sh` tells your replies apart from their feedback.
 
 In a non-interactive run (`claude -p`, e.g. started by `scripts/agent-loop.sh`), don't wait for review: handle
-the feedback the prompt lists (and anything else new), finish with a ticket comment summarising what you did,
-then exit. The loop starts a new run when more feedback arrives. In the agent's own clone, the loop starts each run
+the feedback the prompt lists (and anything else new, including what comes in while you work), finish with a ticket
+comment summarising what you did, then exit. The loop starts a new run when more feedback arrives. In the agent's own clone, the loop starts each run
 on a freshly fetched checkout with no local changes: the default branch for a new ticket (create your branch from
 it), or the pull request's branch for feedback on a pull request (commit on top of it and push). The exception is a
 ticket whose previous run stopped before it finished (Claude usage ran out, the loop was restarted, the run failed,

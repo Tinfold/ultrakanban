@@ -111,7 +111,9 @@
 # now and it has new feedback (the conflicts, or e.g. the "fix conflicts" button's comment), handing over everything
 # new on it as usual. Merging one pull request often leaves several others with conflicts: run a few of these beside
 # the loops that work the tickets (agent-board.sh runs the board's agentConflictConcurrency of them), and they are fixed
-# side by side rather than one after another, while the other loops go on with their tickets.
+# side by side rather than one after another, while the other loops go on with their tickets. People often comment
+# while such a run works: a conflict loop also hands the ticket it last ran the human feedback that came in meanwhile,
+# and keeps doing so for as long as more comes in during its runs, rather than leaving it for the other loops.
 #
 # Run it from the repository the tickets are about, with the ultrakanban skill installed and gh authenticated:
 #
@@ -283,6 +285,8 @@ paused_until=0
 claim_held=
 # Set while the usage reserve holds back claim_next, so the log says it once rather than every round.
 reserve_held=
+# In a conflict loop, the ticket it last ran: its new human feedback is this loop's to handle (see handle_feedback).
+followup=
 # The run in progress and the process watching its ticket (see run_claude), if any.
 running=
 watcher=
