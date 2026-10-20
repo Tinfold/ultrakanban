@@ -217,9 +217,7 @@ post a revised plan (POST $KANBAN/api/tickets/$id/plan) if it asks for changes t
 otherwise."
     fi
     [[ $CONFLICTS_ONLY == 1 ]] && followup=$id
-    run_on_ticket "$id" "$(intro)
-
-Ticket $id is already yours. The loop started this run for this new feedback:
+    run_on_ticket "$id" "Ticket $id is already yours. The loop started this run for this new feedback:
 
 $items
 
@@ -233,8 +231,9 @@ $next$(
 Failing CI started this run. First find out from the failing job's log whether the failure comes from the code. If it
 doesn't (billing or spending limits, runners or infrastructure, a flaky test unrelated to the change, missing
 secrets), don't push anything: explain what you found in the ticket comment and exit.")
-Finish with a ticket comment summarising what you did, then exit.$([[ $approval == pending ]] || unchecked_steps "$id")" \
-      "$(jq -c .snapshot <<<"$triage")" "$(jq -r .fingerprint <<<"$triage")" "$(jq -r .ciRuns <<<"$triage")" "$branch"
+Finish with a ticket comment summarising what you did, then exit." \
+      "$(jq -c .snapshot <<<"$triage")" "$(jq -r .fingerprint <<<"$triage")" "$(jq -r .ciRuns <<<"$triage")" "$branch" \
+      "$([[ $approval == pending ]] && echo 0 || echo 1)"
     unlock_ticket
     return 0
   done 3<<<"$tickets"
@@ -347,14 +346,12 @@ their first run yet (CLAIM_LIMIT $CLAIM_LIMIT)"
   write_state "$id" "$(jq -c '. + {claim: true}' <<<"$snapshot")"
   claim_unlock
   run_step="Working the ticket"
-  run_on_ticket "$id" "$(intro)
-
-Ticket $id is already claimed for you and in progress. Work only this ticket; do not claim another.
+  run_on_ticket "$id" "Ticket $id is already claimed for you and in progress. Work only this ticket; do not claim another.
 Take it through to review and exit after submitting it. If it is tagged question, submit it for review with the answer \
 as the comment and no pull request.
 Before you start the work, post your plan with its size estimate (POST $KANBAN/api/tickets/$id/plan, see the skill). If \
 the ticket then waits for approval (its \"approval\" is \"pending\"), stop there and exit: the loop starts a new run once \
-someone approves the plan.$(unchecked_steps "$id")" "$snapshot" "claim"
+someone approves the plan." "$snapshot" "claim"
   unlock_ticket
   return 0
 }

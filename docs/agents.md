@@ -413,12 +413,28 @@ the board's report every `USAGE_CHECK_SECONDS` (default 60), and the supervisor 
 `CLAUDE_USAGE_SECONDS` (default 300), so it picks back up within a few minutes. With an API key for the agents and the
 board allowing it (see **API key for when usage runs out** above), runs go on the key until then instead.
 
-Runs that don't finish pick up where they left off. Each run is a `claude` session whose id the loop keeps with the
-ticket until the run ends. When a run is cut short by the usage limit, or by the loop stopping (restarting the service,
-changing the board's agent settings, a reboot or a crash), the ticket's next run resumes that session with
-`claude --resume`, so it still knows what it read, decided and did, even when another of the board's loops picks it
-up. (A run that failed or timed out gets a new session instead, since resuming it would likely fail the same way.) The
-work such a run left in the checkout is kept too: before the loop cleans a checkout it saves an unfinished run's
+A ticket's runs carry on one conversation. Each run is a `claude` session whose id the loop keeps with the ticket,
+and the ticket's next run resumes it with `claude --resume`, so it still knows what it read, decided and did, even
+when another of the board's loops picks it up:
+
+- **After a run that finished**, such as the one that posted a plan for approval or submitted the ticket for review,
+  the run for the approval and each run for review feedback continue its conversation instead of reading the ticket
+  and exploring the code again.
+- **Runs that don't finish** pick up where they left off: a run cut short by the usage limit, or by the loop stopping
+  (restarting the service, changing the board's agent settings, a reboot or a crash), is resumed and told why it
+  stopped.
+- **A run that failed or timed out** drops its session, so the retry starts a new one, since resuming it would likely
+  fail the same way. So does a run whose ticket was taken away.
+
+Only a new session gets the whole prompt: the loop's instructions, the board's description, the task and the ticket's
+unchecked checklist steps. A resumed run already has those earlier in its conversation, so it gets only what is new:
+a line saying what it continues, then the feedback the loop started it for (or, for a run that didn't finish, its task
+again). If another model or effort runs it this time (e.g. the board's cheaper setting for merge conflicts or failing
+CI), it is told its name for this run; if it runs in another checkout than before, it is told to work only there. When
+the session can't be resumed (claude answers "No conversation found", e.g. because its history was cleared or it ran
+in a checkout claude doesn't look in), the loop starts the run again at once as a new session with the whole prompt.
+
+The work such a run left in the checkout is kept too: before the loop cleans a checkout it saves an unfinished run's
 branch, local commits and uncommitted changes, untracked files included, under `refs/ultrakanban/work/<ticket>` in
 the board's clone, and puts them back before the ticket's next run, telling the agent. Worktrees removed when
 **Parallel runs** goes down have theirs saved first. Other settings are listed at the top of the script. It needs `curl`, `jq`,
