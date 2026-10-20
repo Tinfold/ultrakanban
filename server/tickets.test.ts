@@ -361,11 +361,18 @@ describe('idle tickets', () => {
 
     await call('POST', `/tickets/${ticket.id}/heartbeat`, { step: 'Fixing CI' })
     assert.equal((await run())?.step, 'Fixing CI')
+    assert.equal((await run())?.tokens, null)
     assert.equal(events.length, 2)
+
+    // The tokens a run has used so far change what boards show, and a heartbeat without them keeps them.
+    await call('POST', `/tickets/${ticket.id}/heartbeat`, { tokens: 120_000 })
+    await call('POST', `/tickets/${ticket.id}/heartbeat`, { step: 'Fixing CI' })
+    assert.deepEqual(await run().then((current) => [current?.step, current?.tokens]), ['Fixing CI', 120_000])
+    assert.equal(events.length, 3)
 
     assert.equal((await call('DELETE', `/tickets/${ticket.id}/heartbeat`)).status, 204)
     assert.equal(await run(), null)
-    assert.equal(events.length, 3)
+    assert.equal(events.length, 4)
     unsubscribe()
     assert.equal((await call('DELETE', '/tickets/missing/heartbeat')).status, 404)
     assert.equal((await call('POST', `/tickets/${ticket.id}/heartbeat`, { step: 'x'.repeat(201) })).status, 400)
@@ -677,6 +684,7 @@ describe('run records', () => {
     exitCode: 0,
     durationMs: 1_380_000,
     turns: 41,
+    tokens: 1_234_567,
     costUsd: 1.2,
     message: 'Opened the pull request.',
     steps: [
@@ -702,6 +710,7 @@ describe('run records', () => {
       { tool: 'Edit', summary: 'src/app.ts', error: true },
     ])
     assert.equal(first.body.omittedSteps, null)
+    assert.equal(first.body.tokens, 1_234_567)
     // A run that ended without a result has little more to say.
     assert.deepEqual(
       { ...second.body, id: 0, createdAt: '' },
@@ -713,6 +722,7 @@ describe('run records', () => {
         exitCode: 124,
         durationMs: null,
         turns: null,
+        tokens: null,
         costUsd: null,
         apiKey: false,
         message: '',

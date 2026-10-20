@@ -669,6 +669,11 @@ export interface AgentRun {
   /** What the run is doing, as its agent last said, e.g. "Answering review feedback". */
   step: string | null
   /**
+   * Tokens the run has used so far (input, output and cache, subagents included), as its agent last said; null until
+   * it does.
+   */
+  tokens: number | null
+  /**
    * When someone asked for the run to stop (`POST /tickets/:id/stop`) and who, until it ends: the agent loop stops it
    * at its next check of the ticket, keeping its session and work, and resumes it once there is new feedback. Null
    * while nobody has.
@@ -921,6 +926,8 @@ export interface RunRecord {
   durationMs: number | null
   /** How many turns (responses of the model) the run took. */
   turns: number | null
+  /** Tokens the run used (input, output and cache, see `totalTokens`), when the agent reports them. */
+  tokens: number | null
   /** Estimated cost in US dollars, when the agent reports one: billed, not estimated, for a run on the API key. */
   costUsd: number | null
   /** Whether the run went on the agents' API key (see `AgentApiKey`) rather than the Claude plan. */
@@ -1396,7 +1403,7 @@ export interface ClaudeUsage {
   limits: ClaudeUsageLimit[]
   /** The credits the account can spend on usage besides its limits; empty when it has none. */
   credits: ClaudeUsageCredit[]
-  /** Why the last report has no usage, e.g. no claude login on the host; the last limits stay until they go stale. */
+  /** Why the last report has no limits, e.g. no claude login on the host; the last limits stay until they go stale. */
   error: string | null
   /** How far agents may use the week and the current session (see `ClaudeUsageReserve`). */
   reserve: ClaudeUsageReserve

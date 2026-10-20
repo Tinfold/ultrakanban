@@ -493,6 +493,11 @@ export const MIGRATIONS = [
   UPDATE claude_usage SET limits_at = reported_at;
   `,
   `
+  -- Tokens the run working the ticket has used so far, as its heartbeats say, and those a run record's run used.
+  ALTER TABLE tickets ADD COLUMN run_tokens INTEGER;
+  ALTER TABLE run_records ADD COLUMN tokens INTEGER;
+  `,
+  `
   -- Whether auto-merge goes ahead when the only failing checks failed because of billing (see BoardSummary).
   ALTER TABLE boards ADD COLUMN ignore_billing_failures INTEGER NOT NULL DEFAULT 0;
   `,

@@ -116,11 +116,12 @@ post() {
     -H 'Content-Type: application/json' -H "X-Actor: ${3:-$worker}" -d "$2"
 }
 
-# Tells the board the agent is working on a ticket right now, and what the run is doing (run_step), so the ticket's
-# card shows the run.
+# Tells the board the agent is working on a ticket right now, what the run is doing (run_step) and how many tokens it
+# has used so far (run_tokens), so the ticket's card shows the run.
 heartbeat() {
   curl -s -o /dev/null -X POST "$KANBAN/api/tickets/$1/heartbeat" -H 'Content-Type: application/json' \
-    -H "X-Actor: $worker" -d "$(jq -nc --arg step "${run_step:-}" 'if $step == "" then {} else {step: $step} end')"
+    -H "X-Actor: $worker" -d "$(jq -nc --arg step "${run_step:-}" --arg tokens "${run_tokens:-}" \
+      '(if $step == "" then {} else {step: $step} end) + (if $tokens == "" then {} else {tokens: ($tokens | tonumber)} end)')"
 }
 
 # Tells the board the run on a ticket has ended.

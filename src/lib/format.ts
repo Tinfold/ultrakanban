@@ -118,10 +118,13 @@ export function formatRunOutcome(run: Pick<RunRecord, 'outcome' | 'exitCode'>) {
  * What a run took, e.g. `23m · 41 turns · $1.20`, leaving out what it didn't report. A run on the agents' API key says
  * so, its cost being billed: `$1.20 billed to the API key`.
  */
-export function formatRunTotals(run: Pick<RunRecord, 'durationMs' | 'turns' | 'costUsd'> & { apiKey?: boolean }) {
+export function formatRunTotals(
+  run: Pick<RunRecord, 'durationMs' | 'turns' | 'tokens' | 'costUsd'> & { apiKey?: boolean },
+) {
   return [
     run.durationMs !== null && formatDuration(run.durationMs),
     run.turns !== null && `${run.turns} ${run.turns === 1 ? 'turn' : 'turns'}`,
+    run.tokens !== null && `${formatTokens(run.tokens)} tokens`,
     run.costUsd !== null && (run.apiKey ? `${formatCost(run.costUsd)} billed to the API key` : formatCost(run.costUsd)),
     run.costUsd === null && run.apiKey && 'on the API key',
   ]

@@ -265,6 +265,7 @@ interface AgentRun {
   startedAt: string // its first heartbeat
   seenAt: string // its latest heartbeat
   step: string | null // what it is doing, as its agent last said
+  tokens: number | null // tokens it has used so far (input, output and cache), as its agent last said
   stopRequested: { at: string; by: string } | null // when someone asked it to stop (POST /tickets/:id/stop) and who, until it ends
 }
 
@@ -411,9 +412,10 @@ run is working the ticket; the board offers to move a working column's idle tick
 tickets whose agent stopped or crashed.
 
 Heartbeats also make up the ticket's `run`, which its card shows: a heartbeat starts a run unless one is going on,
-and can say what the run is doing (`step`; a heartbeat without one keeps the run's step). `scripts/agent-loop.sh`
-sends the run's latest tool call as its step (e.g. `Bash: npm test`) when it changes, checked every
-`RUN_STEP_SECONDS`. The run ends with `DELETE /tickets/:ticketId/heartbeat`, or after 10 minutes without a heartbeat.
+and can say what the run is doing (`step`) and how many tokens it has used so far (`tokens`); a heartbeat without them
+keeps the run's. `scripts/agent-loop.sh` sends the run's latest tool call as its step (e.g. `Bash: npm test`) when it
+changes, checked every `RUN_STEP_SECONDS`, and its tokens so far with every heartbeat, so a runaway run shows while
+it goes on. The run ends with `DELETE /tickets/:ticketId/heartbeat`, or after 10 minutes without a heartbeat.
 Cards show a run as stalled after 3 minutes without one.
 
 ### Stopping a run
@@ -442,7 +444,7 @@ and end the run.
 | POST   | `/tickets/:ticketId/move`              | `{ column: ref, position?, ifVersion?, force? }`                                                                                                                                                                                                                                                             | `Ticket` (appended when `position` is omitted)                                                                                                                                                                                                                                                                       |
 | POST   | `/tickets/:ticketId/claim`             | `{ agent, moveTo?: ref, ifVersion? }`                                                                                                                                                                                                                                                                        | `Ticket`, with `routed` on a board whose Jev mode is `on` (see [Routing](#routing)); `409` if claimed by someone else (idempotent for the same agent), `409 blocked` if `claim-next` would skip it, `429 usage_reserve_reached` as for `claim-next`                                                                  |
 | POST   | `/tickets/:ticketId/release`           | `{ agent, moveTo?: ref, force? }`                                                                                                                                                                                                                                                                            | `Ticket`; `409` if claimed by someone else unless `force`                                                                                                                                                                                                                                                            |
-| POST   | `/tickets/:ticketId/heartbeat`         | `{ step? }` (optional)                                                                                                                                                                                                                                                                                       | `204`; says an agent is working on the ticket right now (not a change: nothing is logged)                                                                                                                                                                                                                            |
+| POST   | `/tickets/:ticketId/heartbeat`         | `{ step?, tokens? }` (optional)                                                                                                                                                                                                                                                                              | `204`; says an agent is working on the ticket right now (not a change: nothing is logged)                                                                                                                                                                                                                            |
 | DELETE | `/tickets/:ticketId/heartbeat`         |                                                                                                                                                                                                                                                                                                              | `204`; says the agent's run on the ticket has ended                                                                                                                                                                                                                                                                  |
 | POST   | `/tickets/:ticketId/stop`              |                                                                                                                                                                                                                                                                                                              | `Ticket` with `run.stopRequested` set: asks the run working it to stop (see Stopping a run); `409 no_run` without one                                                                                                                                                                                                |
 | POST   | `/boards/:boardId/tickets/bulk`        | `{ tickets: ref[], moveTo?: ref, force?, priority?, addTags?: ref[], removeTags?: ref[], epic?: ref \| null }` or `{ tickets: ref[], delete: true }`                                                                                                                                                         | `{ tickets: Ticket[] }`: the same change to several tickets, all or nothing (e.g. `409` if one can't enter the done column, unless `force`); moved tickets are appended in the order given; `tickets: []` when deleted                                                                                               |
@@ -671,6 +673,7 @@ interface RunRecord {
   exitCode: number | null
   durationMs: number | null
   turns: number | null // responses of the model
+  tokens: number | null // input, output and cache tokens it used
   costUsd: number | null
   apiKey: boolean // whether it went on the agents' API key (its cost billed, not estimated)
   message: string // the final message (markdown), or what the run last said or printed; '' when there was nothing
