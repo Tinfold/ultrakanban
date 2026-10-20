@@ -790,6 +790,16 @@ login (from Claude's usage endpoint, what `/usage` in claude shows). `GET /syste
   reportedAt: string | null // when the supervisor last reported; null if it never has
   plan: string | null // the subscription, e.g. "pro" or "max"
   limits: Array<{ label: string; percent: number; resetsAt: string | null }> // e.g. "Current session", "Week, all models"
+  // the money the account can spend on usage besides its limits: "Credits" (a grant) or "Extra usage" (usage credits
+  // that cover it once a limit is reached, when on); amounts in `currency` units, limit and remaining null when unknown
+  credits: Array<{
+    label: string
+    currency: string
+    used: number
+    limit: number | null
+    remaining: number | null
+    resetsAt: string | null
+  }>
   error: string | null // why there are no limits, e.g. no claude login on the host
   reserve: { week: number | null; session: number | null } // the usage reserve, 1-100 each (see below); null when off
   reserveReached: { label: string; percent: number; resetsAt: string | null } | null // the limit holding agents back now
@@ -797,7 +807,7 @@ login (from Claude's usage endpoint, what `/usage` in claude shows). `GET /syste
 ```
 
 The supervisor reports with `POST /system/claude-usage` and `{ plan?, usage?, error? }`: `usage` is the usage
-endpoint's answer as it is (the board picks the limits out of it), `error` says why it couldn't get one.
+endpoint's answer as it is (the board picks the limits and credits out of it), `error` says why it couldn't get one.
 
 **The usage reserve** keeps some of the week, of the current session or both for people's own Claude sessions. It is
 one setting for the whole Claude account, not per board: `PUT /system/claude-usage/reserve` with

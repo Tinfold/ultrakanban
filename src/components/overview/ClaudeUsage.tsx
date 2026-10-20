@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import {
   CLAUDE_USAGE_FRESH_MINUTES,
   type ClaudeUsage as ClaudeUsageData,
+  type ClaudeUsageCredit,
   type ClaudeUsageLimit,
   isSessionLimit,
   reserveFor,
@@ -13,7 +14,7 @@ import type { SetUsageReserveInput } from '@shared/schemas'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { queryKeys } from '@/hooks/queries'
 import { api, errorMessage } from '@/lib/api'
-import { formatDateTime, formatDuration, formatRelative } from '@/lib/format'
+import { formatDateTime, formatDuration, formatMoney, formatRelative } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 /** Reports older than this are likely from a supervisor that stopped; it reports every five minutes. */
@@ -74,6 +75,54 @@ function LimitBar({ limit, now, reserve }: { limit: ClaudeUsageLimit; now: numbe
         {resetsAt !== null && (
           <span title={formatDateTime(limit.resetsAt!)}>
             {reset ? 'Reset' : `Resets in ${formatDuration(resetsAt - now)}`}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** Money the account can spend on usage besides its limits: how much is left, and a bar of what's used when it has a limit. */
+function CreditBar({ credit, now }: { credit: ClaudeUsageCredit; now: number }) {
+  const { label, currency, used, limit, remaining, resetsAt } = credit
+  const money = (amount: number) => formatMoney(amount, currency)
+  const percent = limit ? Math.min(100, Math.round((used / limit) * 100)) : null
+  const resetsIn = resetsAt === null ? null : Date.parse(resetsAt) - now
+  return (
+    <div className="grid gap-1.5">
+      <div className="flex items-baseline justify-between gap-2 text-xs">
+        <span className="font-medium">{label}</span>
+        {remaining !== null && (
+          <span className="text-muted-foreground tabular-nums">
+            <span className="font-medium text-foreground">{money(remaining)}</span> left
+          </span>
+        )}
+      </div>
+      {percent !== null && (
+        <div
+          role="meter"
+          aria-label={`${label} used`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={percent}
+          className="h-2 overflow-hidden rounded-full bg-muted"
+        >
+          <div
+            className={cn(
+              'h-full rounded-full transition-[width]',
+              percent >= 90 ? 'bg-destructive' : percent >= 70 ? 'bg-amber-500' : 'bg-primary',
+            )}
+            style={{ width: `${percent}%` }}
+          />
+        </div>
+      )}
+      <div className="flex justify-between gap-2 text-xs text-muted-foreground tabular-nums">
+        <span>
+          {money(used)} used{limit !== null && ` of ${money(limit)}`}
+        </span>
+        {resetsIn !== null && (
+          <span title={formatDateTime(resetsAt!)}>
+            {resetsIn <= 0 ? 'Reset' : `Resets in ${formatDuration(resetsIn)}`}
           </span>
         )}
       </div>
@@ -189,7 +238,7 @@ function UsageReserve({ usage, now }: { usage: ClaudeUsageData; now: number }) {
 
 /** How much of the Claude plan's usage limits is used and left, as the agent supervisor last read it. */
 export function ClaudeUsage({ usage, now }: { usage: ClaudeUsageData; now: number }) {
-  const { reportedAt, plan, limits, error } = usage
+  const { reportedAt, plan, limits, credits, error } = usage
   let note: string | null = null
   if (!reportedAt) {
     note =
@@ -221,10 +270,13 @@ export function ClaudeUsage({ usage, now }: { usage: ClaudeUsageData; now: numbe
           </p>
         )}
       </div>
-      {limits.length > 0 && (
+      {limits.length + credits.length > 0 && (
         <div className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
           {limits.map((limit) => (
             <LimitBar key={limit.label} limit={limit} now={now} reserve={reserveFor(limit, usage.reserve)} />
+          ))}
+          {credits.map((credit, index) => (
+            <CreditBar key={`${credit.label}-${index}`} credit={credit} now={now} />
           ))}
         </div>
       )}

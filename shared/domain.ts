@@ -1086,6 +1086,24 @@ export interface ClaudeUsageLimit {
 }
 
 /**
+ * Money the Claude account can spend on usage besides the plan's limits: a credit grant, or extra usage (usage credits
+ * that cover it once a plan limit is reached), in `currency` units, e.g. dollars.
+ */
+export interface ClaudeUsageCredit {
+  /** "Credits" for a grant, "Extra usage" for extra usage. */
+  label: string
+  /** e.g. "USD". */
+  currency: string
+  used: number
+  /** How much there is in all (the grant, or extra usage's spending limit); null when it has none. */
+  limit: number | null
+  /** How much of it is left; null when unknown (extra usage without a spending limit or balance). */
+  remaining: number | null
+  /** When it resets or runs out; null when it doesn't say. */
+  resetsAt: string | null
+}
+
+/**
  * Whether a usage limit counts the week, for all models or for one (as opposed to the current session): the labels
  * the board gives them start with "Week" ("Week, all models", "Week, Opus"), or with "weekly" for kinds of limit it
  * doesn't know.
@@ -1130,6 +1148,8 @@ export interface ClaudeUsage {
   /** The subscription, e.g. "pro" or "max". */
   plan: string | null
   limits: ClaudeUsageLimit[]
+  /** The credits the account can spend on usage besides its limits; empty when it has none. */
+  credits: ClaudeUsageCredit[]
   /** Why the last report has no limits, e.g. no claude login on the host. */
   error: string | null
   /** How far agents may use the week and the current session (see `ClaudeUsageReserve`). */

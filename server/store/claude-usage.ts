@@ -1,4 +1,10 @@
-import { CLAUDE_USAGE_FRESH_MINUTES, type ClaudeUsage, type ClaudeUsageLimit, reserveFor } from '../../shared/domain.ts'
+import {
+  CLAUDE_USAGE_FRESH_MINUTES,
+  type ClaudeUsage,
+  type ClaudeUsageCredit,
+  type ClaudeUsageLimit,
+  reserveFor,
+} from '../../shared/domain.ts'
 import type { ReportClaudeUsageInput, SetUsageReserveInput } from '../../shared/schemas.ts'
 import { now, sql } from '../db.ts'
 
@@ -6,6 +12,7 @@ interface ClaudeUsageRow {
   reported_at: string | null
   plan: string | null
   limits: string
+  credits: string
   error: string | null
   week_reserve_percent: number | null
   session_reserve_percent: number | null
@@ -45,6 +52,7 @@ function toClaudeUsage(row: ClaudeUsageRow): ClaudeUsage {
     reportedAt: row.reported_at,
     plan: row.plan,
     limits: JSON.parse(row.limits) as ClaudeUsageLimit[],
+    credits: JSON.parse(row.credits) as ClaudeUsageCredit[],
     error: row.error,
     reserve: { week: row.week_reserve_percent, session: row.session_reserve_percent },
   }
@@ -67,13 +75,16 @@ export function setUsageReserve({ week, session }: SetUsageReserveInput): Claude
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
+/** A time the usage endpoint gave, or null for anything that isn't one. */
+const timeOf = (value: unknown) => (typeof value === 'string' && !Number.isNaN(Date.parse(value)) ? value : null)
+
 function toLimit(label: string, percent: unknown, resetsAt: unknown): ClaudeUsageLimit[] {
   if (typeof percent !== 'number' || !Number.isFinite(percent)) return []
   return [
     {
       label,
       percent: Math.min(100, Math.max(0, percent)),
-      resetsAt: typeof resetsAt === 'string' && !Number.isNaN(Date.parse(resetsAt)) ? resetsAt : null,
+      resetsAt: timeOf(resetsAt),
     },
   ]
 }
@@ -110,15 +121,87 @@ export function parseClaudeUsage(usage: Record<string, unknown>): ClaudeUsageLim
   })
 }
 
+const isAmount = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0
+
+/** An amount of money in the usage endpoint's `{ amount_minor, currency, exponent }`, e.g. 1250 cents for $12.50. */
+function money(value: unknown): { amount: number; currency: string } | null {
+  if (!isObject(value) || !isAmount(value.amount_minor)) return null
+  const exponent = Number.isInteger(value.exponent) ? (value.exponent as number) : 2
+  return {
+    amount: value.amount_minor / 10 ** exponent,
+    currency: typeof value.currency === 'string' ? value.currency : 'USD',
+  }
+}
+
+/** Extra usage when it's on: from `spend`, or the older `extra_usage` (in cents, or `decimal_places`) without it. */
+function extraUsage(usage: Record<string, unknown>): ClaudeUsageCredit | null {
+  const { spend, extra_usage: extra } = usage
+  if (isObject(spend)) {
+    const used = money(spend.used)
+    if (spend.enabled !== true || !used) return null
+    const limit = money(spend.limit)
+    const balance = money(spend.balance)
+    return {
+      label: 'Extra usage',
+      currency: used.currency,
+      used: used.amount,
+      limit: limit?.amount ?? null,
+      remaining: balance?.amount ?? (limit ? Math.max(0, limit.amount - used.amount) : null),
+      resetsAt: null,
+    }
+  }
+  if (!isObject(extra) || extra.is_enabled !== true) return null
+  const scale = 10 ** (Number.isInteger(extra.decimal_places) ? (extra.decimal_places as number) : 2)
+  const used = isAmount(extra.used_credits) ? extra.used_credits / scale : 0
+  const limit = isAmount(extra.monthly_limit) ? extra.monthly_limit / scale : null
+  return {
+    label: 'Extra usage',
+    currency: typeof extra.currency === 'string' ? extra.currency : 'USD',
+    used,
+    limit,
+    remaining: limit === null ? null : Math.max(0, limit - used),
+    resetsAt: null,
+  }
+}
+
+/**
+ * The credits in an answer of the usage endpoint (see `parseClaudeUsage`): every grant of dollars (an entry with
+ * `limit_dollars`, under a name that changes), then extra usage when it's on. Like the limits, anything that doesn't
+ * look as expected is left out.
+ */
+export function parseClaudeCredits(usage: Record<string, unknown>): ClaudeUsageCredit[] {
+  const grants = Object.values(usage)
+    .filter(isObject)
+    .flatMap((grant): ClaudeUsageCredit[] => {
+      const { limit_dollars: limit, used_dollars: used, remaining_dollars: remaining } = grant
+      if (!isAmount(limit)) return []
+      const spent = isAmount(used) ? used : isAmount(remaining) ? Math.max(0, limit - remaining) : 0
+      return [
+        {
+          label: 'Credits',
+          currency: 'USD',
+          used: spent,
+          limit,
+          remaining: isAmount(remaining) ? remaining : Math.max(0, limit - spent),
+          resetsAt: timeOf(grant.resets_at),
+        },
+      ]
+    })
+  const extra = extraUsage(usage)
+  return extra ? [...grants, extra] : grants
+}
+
 /** Records what the supervisor read; a report with neither usage nor an error only updates the plan and the time. */
 export function reportClaudeUsage(input: ReportClaudeUsageInput): ClaudeUsage {
   const current = getClaudeUsage()
   const limits = input.usage ? parseClaudeUsage(input.usage) : input.error ? [] : current.limits
+  const credits = input.usage ? parseClaudeCredits(input.usage) : input.error ? [] : current.credits
   sql.run(
-    'UPDATE claude_usage SET reported_at = ?, plan = ?, limits = ?, error = ? WHERE id = 1',
+    'UPDATE claude_usage SET reported_at = ?, plan = ?, limits = ?, credits = ?, error = ? WHERE id = 1',
     now(),
     input.plan === undefined ? current.plan : input.plan,
     JSON.stringify(limits),
+    JSON.stringify(credits),
     input.usage ? null : (input.error ?? current.error),
   )
   return getClaudeUsage()

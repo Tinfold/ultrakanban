@@ -67,6 +67,15 @@ const dollars = new Intl.NumberFormat(undefined, { style: 'currency', currency: 
  */
 export const formatCost = (usd: number) => (usd > 0 && usd < 0.01 ? '<$0.01' : dollars.format(usd))
 
+/** An amount of money in a currency, e.g. `$12.50` or `€12.50`; a currency code it doesn't know reads `12.50 XYZ`. */
+export function formatMoney(amount: number, currency: string) {
+  try {
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(amount)
+  } catch {
+    return `${amount.toFixed(2)} ${currency}`
+  }
+}
+
 /**
  * What every cost the board shows is, for its tooltips: claude's `total_cost_usd`, what the runs would cost at API
  * prices, which on a subscription plan is an equivalent rather than what is billed.

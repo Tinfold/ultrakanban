@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import type { ApiErrorBody, ClaudeUsage, Ticket } from '../shared/domain.ts'
-import { parseClaudeUsage, reserveReached } from './store/claude-usage.ts'
+import { parseClaudeCredits, parseClaudeUsage, reserveReached } from './store/claude-usage.ts'
 import { addTicket, boardId, call } from './test-app.ts'
 
 describe('Claude usage', () => {
@@ -14,6 +14,7 @@ describe('Claude usage', () => {
       reportedAt: null,
       plan: null,
       limits: [],
+      credits: [],
       error: null,
       reserve: { week: null, session: null },
       reserveReached: null,
@@ -22,7 +23,14 @@ describe('Claude usage', () => {
     const reported = await report({
       plan: 'max',
       usage: {
-        five_hour: { utilization: 3, resets_at: '2026-10-05T23:00:00+00:00' },
+        five_hour: { utilization: 3, resets_at: '2026-10-05T23:00:00+00:00', limit_dollars: null },
+        monthly_grant: {
+          utilization: 10,
+          resets_at: '2026-11-05T07:59:00+00:00',
+          limit_dollars: 250,
+          used_dollars: 25,
+          remaining_dollars: 225,
+        },
         limits: [
           { kind: 'session', percent: 3, resets_at: '2026-10-05T23:00:00+00:00' },
           { kind: 'weekly_all', percent: 46, resets_at: '2026-10-08T01:00:00+00:00' },
@@ -40,12 +48,24 @@ describe('Claude usage', () => {
       { label: 'Week, Opus', percent: 0, resetsAt: null },
     ])
 
+    assert.deepEqual(reported.body.credits, [
+      {
+        label: 'Credits',
+        currency: 'USD',
+        used: 25,
+        limit: 250,
+        remaining: 225,
+        resetsAt: '2026-11-05T07:59:00+00:00',
+      },
+    ])
+
     // Without usage it keeps what it had; an error replaces it.
-    assert.equal((await report({})).body.limits.length, 3)
+    const kept = (await report({})).body
+    assert.deepEqual([kept.limits.length, kept.credits.length], [3, 1])
     const failed = await report({ error: 'No claude login on the host' })
     assert.deepEqual(
-      [failed.body.limits, failed.body.error, failed.body.plan],
-      [[], 'No claude login on the host', 'max'],
+      [failed.body.limits, failed.body.credits, failed.body.error, failed.body.plan],
+      [[], [], 'No claude login on the host', 'max'],
     )
     assert.equal((await report({ usage: { limits: [] } })).body.error, null)
 
@@ -63,6 +83,44 @@ describe('Claude usage', () => {
         { label: 'Current session', percent: 100, resetsAt: null },
         { label: 'Week, all models', percent: 46.5, resetsAt: '2026-10-08T01:00:00Z' },
       ],
+    )
+  })
+})
+
+describe('Claude usage credits', () => {
+  const spend = (fields: Record<string, unknown>) => ({
+    spend: { enabled: true, used: { amount_minor: 1250, currency: 'USD', exponent: 2 }, limit: null, ...fields },
+  })
+
+  test('picks out credit grants and leaves out what is not one', () => {
+    assert.deepEqual(
+      parseClaudeCredits({
+        five_hour: { utilization: 74, limit_dollars: null, used_dollars: null, remaining_dollars: null },
+        grant: { resets_at: 'soon', limit_dollars: 100, remaining_dollars: 40 },
+        broken: { limit_dollars: -5 },
+        limits: [{ kind: 'session', percent: 3 }],
+        extra_usage: { is_enabled: false, monthly_limit: null },
+        spend: { enabled: false, used: { amount_minor: 0, currency: 'USD', exponent: 2 } },
+      }),
+      [{ label: 'Credits', currency: 'USD', used: 60, limit: 100, remaining: 40, resetsAt: null }],
+    )
+  })
+
+  test('shows extra usage when it is on', () => {
+    const extra = { label: 'Extra usage', currency: 'USD', used: 12.5, resetsAt: null }
+    assert.deepEqual(parseClaudeCredits(spend({})), [{ ...extra, limit: null, remaining: null }])
+    assert.deepEqual(parseClaudeCredits(spend({ limit: { amount_minor: 5000, currency: 'USD', exponent: 2 } })), [
+      { ...extra, limit: 50, remaining: 37.5 },
+    ])
+    assert.deepEqual(parseClaudeCredits(spend({ balance: { amount_minor: 800, currency: 'USD', exponent: 2 } })), [
+      { ...extra, limit: null, remaining: 8 },
+    ])
+    // The older fields, in cents, only without `spend`.
+    assert.deepEqual(
+      parseClaudeCredits({
+        extra_usage: { is_enabled: true, monthly_limit: 5000, used_credits: 1250, currency: 'EUR' },
+      }),
+      [{ ...extra, currency: 'EUR', limit: 50, remaining: 37.5 }],
     )
   })
 })

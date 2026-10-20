@@ -162,7 +162,9 @@ are logged out, also run `loginctl enable-linger`.
 **Claude usage.** The supervisor also reads how much of your Claude plan's usage limits is used (the current session,
 the week, and any per-model weekly limit, as `/usage` in claude shows them) every 5 minutes (`CLAUDE_USAGE_SECONDS`),
 with the claude login in `~/.claude/.credentials.json` (or `$CLAUDE_CONFIG_DIR`), and the overview shows it as bars of
-the usage left and when each resets. The board itself can't read it: it runs in a container, without your login.
+the usage left and when each resets. Next to them it shows the credits the account can spend on usage besides its
+limits, in dollars: a credit grant, and extra usage (the usage credits that cover you once a limit is reached) when it
+is on. The board itself can't read it: it runs in a container, without your login.
 
 **Usage reserve.** Agents share your Claude plan with you, and left alone they can use up the whole week, or the
 current session just when you want to work. Set the **Usage reserve** under the Claude usage on the overview (one
