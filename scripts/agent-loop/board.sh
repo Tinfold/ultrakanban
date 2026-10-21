@@ -43,6 +43,27 @@ paused() {
   ((paused_until > $(date +%s)))
 }
 
+# Where loops sharing STATE_DIR note when they last lifted the pause early (see usage_back).
+USAGE_BACK_FILE=$STATE_DIR/usage-back
+
+# Whether Claude usage is back before the time its limit message gave, as when it is reset on claude.ai or more is
+# bought: the supervisor's report on the board (GET /system/claude-usage), read after the pause began, has limits and
+# none of them used up. If so, lifts the pause for every loop sharing STATE_DIR. Not when the limit was reached again
+# within an hour of lifting it early, which means the report was wrong: then the pause lasts as long as the message says.
+usage_back() {
+  local since lifted usage
+  since=$(stat -c %Y "$PAUSE_FILE" 2>/dev/null) || return 1
+  lifted=$(stat -c %Y "$USAGE_BACK_FILE" 2>/dev/null) || lifted=0
+  ((since - lifted > 3600)) || return 1
+  usage=$(get /system/claude-usage) || return 1
+  jq -e --argjson since "$since" '(.reportedAt // "" | sub("\\.[0-9]+"; "") | try fromdateiso8601 catch 0) > $since
+    and .error == null and (.limits | length > 0 and all(.percent < 100))' <<<"$usage" >/dev/null || return 1
+  touch "$USAGE_BACK_FILE"
+  rm -f "$PAUSE_FILE"
+  paused_until=0
+  log "Claude usage is back before the time its limit message gave; resuming"
+}
+
 get() { curl -sf "$KANBAN/api$1"; }
 
 # The board's IDLE_COLUMNS.

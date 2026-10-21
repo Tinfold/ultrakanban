@@ -85,7 +85,9 @@
 #
 # A run that fails because the account is out of Claude usage doesn't count as a failure. The loop says so on the
 # ticket, quoting claude's message, and starts no runs at all until the time the message says the limit resets
-# (RETRY_SECONDS later if it doesn't say), then resumes the run.
+# (RETRY_SECONDS later if it doesn't say), then resumes the run. It ends the pause sooner when usage is back before then,
+# as when it is reset on claude.ai: every USAGE_CHECK_SECONDS it reads the usage the agent supervisor reports to the
+# board (every few minutes), and resumes once a report read after the pause began has no limit used up.
 #
 # The usage reserve (on the overview, one setting for the whole Claude account) stops agents before that, keeping the
 # rest of the week, of the current session or both for people: once a weekly limit or the current session reaches its
@@ -141,6 +143,8 @@
 #   INHIBIT_SLEEP       1 keeps the machine from suspending or going idle while a run is going (a systemd-logind
 #                       inhibitor lock, where systemd-inhibit is available), 0 doesn't (default: 1)
 #   RETRY_SECONDS       wait before retrying a failed run, doubled after each failure (default: 600)
+#   USAGE_CHECK_SECONDS how often, while out of Claude usage, the board's usage report is read to see whether it is
+#                       back before the time claude's limit message gave (default: 60)
 #   MAX_ATTEMPTS        failed runs in a row before waiting for new feedback (default: 3)
 #   MAX_CI_RUNS         runs in a row started only by failing CI, with no human feedback between (default: 2)
 #   CLAIM_LIMIT         most new tickets claimed whose first run hasn't finished yet (it is going, failed or stopped),
@@ -206,6 +210,7 @@ TICKET_CHECK_SECONDS=${TICKET_CHECK_SECONDS:-30}
 RUN_STEP_SECONDS=${RUN_STEP_SECONDS:-10}
 INHIBIT_SLEEP=${INHIBIT_SLEEP:-1}
 RETRY_SECONDS=${RETRY_SECONDS:-600}
+USAGE_CHECK_SECONDS=${USAGE_CHECK_SECONDS:-60}
 MAX_ATTEMPTS=${MAX_ATTEMPTS:-3}
 MAX_CI_RUNS=${MAX_CI_RUNS:-2}
 MAX_BUILD_GB=${MAX_BUILD_GB:-20}
@@ -318,7 +323,12 @@ fi
 # A run stopped along with the loop left its work here; keep it now, so whichever loop resumes the ticket gets it back.
 if [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]]; then save_work; fi
 while true; do
-  paused && pause "$((paused_until - $(date +%s)))"
+  # Waits out a usage-limit pause a little at a time, to resume as soon as usage is back.
+  if paused && ! usage_back; then
+    left=$((paused_until - $(date +%s)))
+    pause "$((left < USAGE_CHECK_SECONDS ? left : USAGE_CHECK_SECONDS))"
+    continue
+  fi
   if [[ $(watched) != "$watching" ]]; then
     log "the agent scripts were updated; stopping to start again with the new ones"
     exit 75

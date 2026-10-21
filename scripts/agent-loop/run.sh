@@ -565,7 +565,8 @@ there is new feedback, such as a comment."
     log "Claude usage limit reached ($limit); waiting until $(date -d "@$paused_until" '+%F %T')"
     update_state "$id" '.session.why = $v' "it ran out of Claude usage"
     note "$id" "Out of Claude usage, so this run stopped. Claude said: \"$limit\". The loop starts no runs on any \
-ticket until $(date -d "@$paused_until" '+%-I:%M%P %Z on %b %-d'), then resumes this one where it left off."
+ticket until $(date -d "@$paused_until" '+%-I:%M%P %Z on %b %-d') (or until the board's Claude usage shows it is back, if \
+that is sooner), then resumes this one where it left off."
     return 0
   fi
   if [[ $code == 124 ]]; then
