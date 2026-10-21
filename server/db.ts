@@ -406,6 +406,12 @@ const MIGRATIONS = [
   -- The credits the Claude account can spend on usage besides its plan's limits (see ClaudeUsageCredit), as JSON.
   ALTER TABLE claude_usage ADD COLUMN credits TEXT NOT NULL DEFAULT '[]';
   `,
+  `
+  -- Whether agents go on claiming once a Claude usage limit is used up, on usage credits (see ClaudeUsageReserve).
+  ALTER TABLE claude_usage ADD COLUMN usage_credits INTEGER NOT NULL DEFAULT 0;
+  -- Credits now say their kind; the supervisor's next report fills them in again.
+  UPDATE claude_usage SET credits = '[]';
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

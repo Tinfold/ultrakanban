@@ -733,8 +733,8 @@ export function releaseIdleTickets(columnId: string, input: ReleaseIdleInput, ac
 
 /**
  * Turns down claiming new tickets while the usage reserve holds agents back (see `ClaudeUsage.reserveReached`), so the
- * rest of the week or of the current session is left for the user. Only new tickets: those agents already hold go on
- * getting runs.
+ * rest of the week or of the current session, or the usage credits once a limit is used up, are left for the user.
+ * Only new tickets: those agents already hold go on getting runs.
  */
 function assertBelowUsageReserve() {
   const { reserveReached: limit, reserve } = getClaudeUsage()
@@ -742,14 +742,16 @@ function assertBelowUsageReserve() {
   const reservePercent = reserveFor(limit, reserve)
   const kept = isWeeklyLimit(limit) ? "the week's Claude usage" : 'the current Claude session'
   const resets = limit.resetsAt ? ` It resets at ${limit.resetsAt}.` : ''
-  throw new HttpError(
-    404,
-    'usage_reserve_reached',
-    `Agents claim no new tickets while the rest of ${kept} is kept for people's own work: ` +
-      `${limit.label} is at ${Math.round(limit.percent)}%, and its usage reserve starts at ${reservePercent}%. ` +
-      `Tickets agents already hold can still be worked.${resets}`,
-    { limit, reservePercent },
-  )
+  const why =
+    reservePercent === null
+      ? `Agents claim no new tickets while ${limit.label} is used up, rather than spend the account's usage credits ` +
+        `(agents may spend them if the usage reserve allows it). `
+      : `Agents claim no new tickets while the rest of ${kept} is kept for people's own work: ` +
+        `${limit.label} is at ${Math.round(limit.percent)}%, and its usage reserve starts at ${reservePercent}%. `
+  throw new HttpError(404, 'usage_reserve_reached', `${why}Tickets agents already hold can still be worked.${resets}`, {
+    limit,
+    reservePercent,
+  })
 }
 
 /**

@@ -1086,12 +1086,20 @@ export interface ClaudeUsageLimit {
 }
 
 /**
- * Money the Claude account can spend on usage besides the plan's limits: a credit grant, or extra usage (usage credits
- * that cover it once a plan limit is reached), in `currency` units, e.g. dollars.
+ * Money the Claude account can spend on usage besides the plan's limits, in `currency` units, e.g. dollars. Neither
+ * kind is API credits, the prepaid balance of a Claude Console organisation that API keys spend: the claude.ai login
+ * the board reads usage with can't see that one.
  */
 export interface ClaudeUsageCredit {
-  /** "Credits" for a grant, "Extra usage" for extra usage. */
+  /**
+   * `grant`: dollars granted to the plan ("Credit grant"). `usage`: usage credits, what claude.ai calls extra usage,
+   * bought there and spent once a plan limit is reached, while they are switched on ("Usage credits").
+   */
+  kind: 'grant' | 'usage'
+  /** "Credit grant" or "Usage credits". */
   label: string
+  /** Whether usage spends it now: usage credits only while switched on; a grant always. */
+  enabled: boolean
   /** e.g. "USD". */
   currency: string
   used: number
@@ -1124,6 +1132,12 @@ export interface ClaudeUsageReserve {
   week: number | null
   /** For the current session. */
   session: number | null
+  /**
+   * Whether agents go on claiming new tickets once a limit is used up, with Claude then spending the account's usage
+   * credits (see `ClaudeUsageCredit`) when they are on. False (the default) stops claiming there, keeping them for
+   * people.
+   */
+  usageCredits: boolean
 }
 
 /** The reserve that applies to a usage limit: the week's to the weekly ones, the session's to the current session. */

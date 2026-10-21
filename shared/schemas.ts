@@ -316,12 +316,12 @@ const reservePercent = z.int().min(1).max(100).nullable()
 
 /**
  * Setting the usage reserve (see `ClaudeUsageReserve`): a whole percent of the week or of the current session, or `null`
- * for off. One left out stays as it is.
+ * for off, and whether agents may spend usage credits. One left out stays as it is.
  */
 export const setUsageReserveSchema = z
-  .object({ week: reservePercent.optional(), session: reservePercent.optional() })
-  .refine((input) => input.week !== undefined || input.session !== undefined, {
-    message: 'Say which reserve to set: week, session or both',
+  .object({ week: reservePercent.optional(), session: reservePercent.optional(), usageCredits: z.boolean().optional() })
+  .refine((input) => input.week !== undefined || input.session !== undefined || input.usageCredits !== undefined, {
+    message: 'Say what to set: week, session or usageCredits',
   })
 
 const bytes = z.number().int().nonnegative()

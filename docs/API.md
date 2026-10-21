@@ -10,8 +10,8 @@ JSON over HTTP. Base URL: `http://127.0.0.1:4317/api` (in development the Vite d
   - `404 not_found` - unknown board/column/tag/ticket or route.
   - `404 no_ticket_available` - `claim-next` found nothing to claim.
   - `404 usage_reserve_reached` - `claim-next` hands out no new tickets while the week's or the current session's
-    Claude usage is at its usage reserve (see [Claude usage](#claude-usage)); `details` has the `limit` and its
-    `reservePercent`. Try again later.
+    Claude usage is at its usage reserve, or a limit is used up and agents may not spend usage credits (see
+    [Claude usage](#claude-usage)); `details` has the `limit` and its `reservePercent`. Try again later.
   - `409 already_claimed` / `claimed_by_other` - someone else holds the ticket (`details.ticket` has its current state).
   - `409 version_conflict` - `ifVersion` did not match (`details.ticket` has its current state).
   - `409 tag_exists` - tag names are unique per board (case-insensitive).
@@ -790,10 +790,14 @@ login (from Claude's usage endpoint, what `/usage` in claude shows). `GET /syste
   reportedAt: string | null // when the supervisor last reported; null if it never has
   plan: string | null // the subscription, e.g. "pro" or "max"
   limits: Array<{ label: string; percent: number; resetsAt: string | null }> // e.g. "Current session", "Week, all models"
-  // the money the account can spend on usage besides its limits: "Credits" (a grant) or "Extra usage" (usage credits
-  // that cover it once a limit is reached, when on); amounts in `currency` units, limit and remaining null when unknown
+  // the money the account can spend on usage besides its limits, amounts in `currency` units, limit and remaining null
+  // when unknown: kind "grant" ("Credit grant", dollars granted to the plan) or "usage" ("Usage credits", what claude.ai
+  // calls extra usage: they cover usage once a limit is reached, while `enabled`). Never API credits, the Claude Console
+  // balance API keys spend: the claude login can't read it
   credits: Array<{
+    kind: 'grant' | 'usage'
     label: string
+    enabled: boolean // always true for a grant; usage credits are listed when off too
     currency: string
     used: number
     limit: number | null
@@ -801,7 +805,8 @@ login (from Claude's usage endpoint, what `/usage` in claude shows). `GET /syste
     resetsAt: string | null
   }>
   error: string | null // why there are no limits, e.g. no claude login on the host
-  reserve: { week: number | null; session: number | null } // the usage reserve, 1-100 each (see below); null when off
+  // the usage reserve, 1-100 each (see below), null when off; usageCredits: whether agents go on past a used-up limit
+  reserve: { week: number | null; session: number | null; usageCredits: boolean }
   reserveReached: { label: string; percent: number; resetsAt: string | null } | null // the limit holding agents back now
 }
 ```
@@ -811,10 +816,12 @@ endpoint's answer as it is (the board picks the limits and credits out of it), `
 
 **The usage reserve** keeps some of the week, of the current session or both for people's own Claude sessions. It is
 one setting for the whole Claude account, not per board: `PUT /system/claude-usage/reserve` with
-`{ "week": 80, "session": 90 }` (each a whole percent, 1-100, or `null` for off; one left out stays as it is) answers
-with the usage above. Once a weekly limit (`Week, all models` or a per-model one such as `Week, Opus`) is at or over
+`{ "week": 80, "session": 90, "usageCredits": false }` (each a whole percent, 1-100, or `null` for off; one left out
+stays as it is) answers with the usage above. Once a weekly limit (`Week, all models` or a per-model one such as `Week, Opus`) is at or over
 `week`, or the current session at or over `session`, `claim-next` hands out no new tickets and answers
-`404 usage_reserve_reached`, with the limit and its reserve in `details`; `reserveReached` says which limit it is (of
+`404 usage_reserve_reached`, with the limit and its reserve in `details`. Unless `usageCredits` is true, a limit at 100%
+does the same without a reserve (`reservePercent` is then `null`), so agents don't run on the account's usage credits
+once a limit is used up (by default they don't); `reserveReached` says which limit it is (of
 several, the one that resets last, as claiming starts again only once all of them have). It only goes by a fresh
 report, from the last 30 minutes (the supervisor reports every 5), and a limit counts as reset once its `resetsAt` has
 passed: a stale or missing report never holds agents back, so agents don't stop because the supervisor did. Only
