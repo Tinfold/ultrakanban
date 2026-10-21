@@ -362,7 +362,10 @@ isn't from the code.
 A failed run saves nothing and is retried with backoff (`RETRY_SECONDS`, doubling, up to `MAX_ATTEMPTS` in a row,
 then again when new feedback arrives), with a ticket note saying why it failed. Running out of Claude usage doesn't
 count as a failure: the note quotes claude's limit message, and the loop starts no runs on any ticket until the time
-the message says the limit resets.
+the message says the limit resets, or until the Claude usage the supervisor reports to the board shows none of its
+limits used up, if that is sooner (as when you reset your usage on claude.ai or buy more): while paused, the loop reads
+the board's report every `USAGE_CHECK_SECONDS` (default 60), and the supervisor reads the usage every
+`CLAUDE_USAGE_SECONDS` (default 300), so it picks back up within a few minutes.
 
 Runs that don't finish pick up where they left off. Each run is a `claude` session whose id the loop keeps with the
 ticket until the run ends. When a run is cut short by the usage limit, or by the loop stopping (restarting the service,
