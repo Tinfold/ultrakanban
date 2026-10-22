@@ -16,6 +16,9 @@ services:
       - ultrakanban-data:/app/data
     expose:
       - '4317'
+    # A leak gets the server restarted (restart: always) rather than slowly filling the machine's memory and swap. It
+    # uses about 150 MB. Docker and Podman let it fill as much swap again as this.
+    mem_limit: 1g
 
   nginx:
     # nginx with deploy/nginx.conf
@@ -25,6 +28,7 @@ services:
     restart: always
     ports:
       - '${ULTRAKANBAN_PORT:-4317}:80'
+    mem_limit: 128m
     depends_on:
       - app
 
