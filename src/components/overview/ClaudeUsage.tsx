@@ -10,11 +10,12 @@ import {
   isSessionLimit,
   reserveFor,
 } from '@shared/domain'
-import type { SetUsageReserveInput } from '@shared/schemas'
+import type { SetAgentApiKeyInput, SetUsageReserveInput } from '@shared/schemas'
+import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { queryKeys } from '@/hooks/queries'
 import { api, errorMessage } from '@/lib/api'
-import { formatDateTime, formatDuration, formatMoney, formatRelative } from '@/lib/format'
+import { formatCost, formatDateTime, formatDuration, formatMoney, formatRelative } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 /** Why the credits leave API credits out. */
@@ -29,6 +30,8 @@ const RESERVE_CHOICES = [50, 60, 70, 75, 80, 85, 90, 95]
 const RESERVE_OFF = 'off'
 const CREDITS_SPEND = 'spend'
 const CREDITS_KEEP = 'keep'
+const RUN_OUT_WAIT = 'wait'
+const RUN_OUT_API_KEY = 'api-key'
 
 /** A limit's name in a sentence: `week` for all models, `Opus week` for one, `current session`. */
 function limitName(limit: ClaudeUsageLimit) {
@@ -256,7 +259,9 @@ function UsageReserve({ usage, now }: { usage: ClaudeUsageData; now: number }) {
           : 'Agents may use the whole week and every session. '}
         {reserve.usageCredits
           ? `Once a limit is used up they go on claiming, ${creditsOn ? 'on your usage credits' : 'on usage credits if you switch them on'}. `
-          : 'Once a limit is used up they claim none, rather than spend usage credits. '}
+          : usage.apiKey.usable
+            ? 'Once a limit is used up they go on claiming, and run on the API key (below). '
+            : 'Once a limit is used up they claim none, rather than spend usage credits. '}
         Tickets they hold still get runs for their feedback.
       </p>
       {reserveReached && (
@@ -272,6 +277,151 @@ function UsageReserve({ usage, now }: { usage: ClaudeUsageData; now: number }) {
         <p className="text-xs text-muted-foreground">
           The reserve only goes by a report from the last {CLAUDE_USAGE_FRESH_MINUTES} minutes, so it doesn’t hold
           agents back until the supervisor reports again.
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * A dollar amount the user types, saved when the field loses focus or on Enter: a positive number, or empty for none
+ * when `optional`. Anything else goes back to the saved value.
+ */
+function DollarInput({
+  id,
+  label,
+  value,
+  optional,
+  disabled,
+  onChange,
+}: {
+  id: string
+  label: string
+  value: number | null
+  optional?: boolean
+  disabled: boolean
+  onChange: (value: number | null) => void
+}) {
+  const saved = value === null ? '' : String(value)
+  const [text, setText] = useState(saved)
+  const [editing, setEditing] = useState(false)
+  const commit = () => {
+    setEditing(false)
+    const trimmed = text.trim()
+    const next = trimmed === '' ? null : Number(trimmed)
+    if ((next === null && !optional) || (next !== null && !(next > 0))) return setText(saved)
+    if (next !== value) onChange(next)
+  }
+  return (
+    <span className="flex items-center gap-1.5">
+      <label htmlFor={id}>{label}</label>
+      <span className="relative">
+        <span className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2">$</span>
+        <Input
+          id={id}
+          type="number"
+          min="0.01"
+          step="0.01"
+          inputMode="decimal"
+          placeholder={optional ? 'None' : undefined}
+          className="h-7 w-20 pl-5 text-xs md:text-xs"
+          disabled={disabled}
+          value={editing ? text : saved}
+          onFocus={() => {
+            setText(saved)
+            setEditing(true)
+          }}
+          onChange={(event) => setText(event.target.value)}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') event.currentTarget.blur()
+          }}
+        />
+      </span>
+    </span>
+  )
+}
+
+/**
+ * What agents do once Claude usage runs out (see `AgentApiKey`): wait for it to reset, or go on on their API key, within
+ * a cap per run and per month, and what runs on the key spent this month.
+ */
+function ApiKeySetting({ usage }: { usage: ClaudeUsageData }) {
+  const queryClient = useQueryClient()
+  const [saving, setSaving] = useState(false)
+  const { enabled, available, runBudgetUsd, monthlyBudgetUsd, spentThisMonthUsd } = usage.apiKey
+  const capReached = monthlyBudgetUsd !== null && spentThisMonthUsd >= monthlyBudgetUsd
+
+  const change = async (input: SetAgentApiKeyInput) => {
+    setSaving(true)
+    try {
+      queryClient.setQueryData(queryKeys.claudeUsage, await api.setAgentApiKey(input))
+    } catch (error) {
+      toast.error(errorMessage(error))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  let note: string
+  if (!enabled) {
+    note = 'Agents wait for the limit to reset. Tickets they hold get their runs then.'
+  } else if (!available) {
+    note =
+      'The agents have no API key, so they wait for the limit to reset: set AGENT_API_KEY in their environment (see docs/agents.md).'
+  } else {
+    note =
+      `A run that hits the limit is retried on the API key, and runs go on it until the limit resets, each spending at ` +
+      `most ${formatCost(runBudgetUsd)}. Agents go on claiming new tickets, within the usage reserve. The key’s API ` +
+      `credits are billed, unlike the plan’s estimated cost.`
+  }
+
+  return (
+    <div className="grid gap-2 border-t pt-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <span className="flex items-center gap-1.5">
+          <label htmlFor="usage-runs-out" className="font-medium text-foreground">
+            When usage runs out
+          </label>
+          <Select
+            value={enabled ? RUN_OUT_API_KEY : RUN_OUT_WAIT}
+            onValueChange={(next) => change({ enabled: next === RUN_OUT_API_KEY })}
+          >
+            <SelectTrigger id="usage-runs-out" size="sm" className="h-7 text-xs" disabled={saving}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={RUN_OUT_WAIT}>Wait for it</SelectItem>
+              <SelectItem value={RUN_OUT_API_KEY}>Use the API key</SelectItem>
+            </SelectContent>
+          </Select>
+        </span>
+        {enabled && (
+          <>
+            <DollarInput
+              id="api-key-run-budget"
+              label="Cap per run"
+              value={runBudgetUsd}
+              disabled={saving}
+              onChange={(value) => value !== null && change({ runBudgetUsd: value })}
+            />
+            <DollarInput
+              id="api-key-monthly-budget"
+              label="Cap per month"
+              value={monthlyBudgetUsd}
+              optional
+              disabled={saving}
+              onChange={(value) => change({ monthlyBudgetUsd: value })}
+            />
+          </>
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground">{note}</p>
+      {(enabled || spentThisMonthUsd > 0) && (
+        <p className={cn('text-xs', capReached ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}>
+          Billed to the API key this month: {formatCost(spentThisMonthUsd)}
+          {monthlyBudgetUsd !== null && ` of ${formatCost(monthlyBudgetUsd)}`}
+          {capReached && enabled && '. The monthly cap is reached, so agents wait for usage again.'}
         </p>
       )}
     </div>
@@ -327,6 +477,7 @@ export function ClaudeUsage({ usage, now }: { usage: ClaudeUsageData; now: numbe
       )}
       {note && <p className="text-sm text-muted-foreground">{note}</p>}
       <UsageReserve usage={usage} now={now} />
+      <ApiKeySetting usage={usage} />
     </div>
   )
 }

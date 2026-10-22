@@ -82,7 +82,8 @@ current_step() {
 
 # A run's record, the body of POST /tickets/:id/runs (see RunRecord in shared/domain.ts), from RUN_SUMMARY's output
 # and what the loop knows: $outcome, the exit $code, the $duration in ms, the run's $usage (USAGE's output, or null)
-# for its cost, and the end of what claude printed to stderr ($errors), the message of a run that left no other.
+# for its cost, whether it went on the agents' API key ($apiKey), and the end of what claude printed to stderr
+# ($errors), the message of a run that left no other.
 # The message is clipped to 4000 characters (RUN_MESSAGE_MAX), and a run of more than 150 tool calls (RUN_MAX_STEPS)
 # keeps its first and last 75, saying how many were left out between them.
 read -r -d '' RUN_RECORD <<'JQ'
@@ -91,7 +92,7 @@ def clip($n): if length > $n then .[:($n - 1)] + "…" else . end;
 | (.steps // []) as $steps
 | ($steps | length) as $count
 | {agent: $agent, outcome: $outcome, exitCode: $code, durationMs: $duration,
-   turns: (.result.num_turns // .turns // null), costUsd: (($usage | objects | .costUsd) // null),
+   turns: (.result.num_turns // .turns // null), costUsd: (($usage | objects | .costUsd) // null), apiKey: $apiKey,
    message: (((.result.result // .text // (.output // [] | join("\n"))) | strings | select(test("\\S"))) // $errors
      | clip(4000)),
    steps: (if $count > 2 * $half then $steps[:$half] + $steps[($count - $half):] else $steps end),
@@ -101,7 +102,7 @@ JQ
 # The tokens a run used, from the result object of claude's output (every model it called, subagents included), in all
 # and per model, as the body of POST /tickets/:id/usage. Claude prices models it doesn't know (another provider's, or
 # a local one, through ANTHROPIC_BASE_URL) as if they were Opus and says so with costBasis "unknown": those costs are
-# left out.
+# left out. $apiKey says whether the run went on the agents' API key, its cost then billed rather than estimated.
 read -r -d '' USAGE <<'JQ'
 def total($field): [.[] | .[$field] // 0] | add // 0;
 def cost: if .costBasis == "unknown" then null else .costUSD end;
@@ -115,7 +116,7 @@ select(.type == "result")
    cacheWriteTokens: ($models | total("cacheCreationInputTokens")),
    costUsd: (if any(.modelUsage // {} | .[]; .costBasis == "unknown") then [.modelUsage[] | cost // empty] | add
      else .total_cost_usd end),
-   durationMs: .duration_ms,
+   durationMs: .duration_ms, apiKey: $apiKey,
    models: [.modelUsage // {} | to_entries[] | {model: .key, inputTokens: (.value.inputTokens // 0),
      outputTokens: (.value.outputTokens // 0), cacheReadTokens: (.value.cacheReadInputTokens // 0),
      cacheWriteTokens: (.value.cacheCreationInputTokens // 0), costUsd: (.value | cost)}]}
@@ -373,7 +374,7 @@ record_run() {
   local id=$1 code=$2 summary=$3 usage=$4 duration=$5 record response
   record=$(jq -c --arg agent "$worker" --arg outcome "$(run_outcome "$code")" --argjson code "$code" \
     --argjson duration "$duration" --argjson usage "$usage" --arg errors "$(tail -n 20 <<<"$claude_errors")" \
-    "$RUN_RECORD" <<<"$summary") || { log "can't make the record of the run on $id"; return 1; }
+    --argjson apiKey "$([[ -n $api_key_budget ]] && echo true || echo false)" "$RUN_RECORD" <<<"$summary") || { log "can't make the record of the run on $id"; return 1; }
   response=$(post "/tickets/$id/runs" "$record")
   [[ ${response##*$'\n'} == 201 ]] || log "can't record the run on $id: ${response%$'\n'*}"
 }
@@ -384,16 +385,26 @@ record_run() {
 # it used and records what it did on the ticket (record_run). Returns claude's exit status. If someone takes the ticket
 # away from the agent meanwhile, the run is stopped and claude_stopped says why; if someone asks for the run to stop, it
 # is stopped and claude_stop_requested says who asked (both are empty otherwise). A run stopped either way returns a
-# failure, whatever claude exited with.
+# failure, whatever claude exited with. With api_key_budget set (see use_api_key), the run goes on the agents' API key
+# (AGENT_API_KEY, as claude's ANTHROPIC_API_KEY) and may spend at most that many dollars; other runs never see the key.
+# claude_subtype is the subtype of the run's result, e.g. error_max_budget_usd for one that reached that cap.
 run_claude() {
-  local id=$1 prompt=$2 output errors stopped code usage=null response scratch= run started summary kind= reason=
+  local id=$1 prompt=$2 output errors stopped code usage=null response scratch= run started summary kind= reason= \
+    budget_args=()
   shift 2
   output=$(mktemp) && errors=$(mktemp) && stopped=$(mktemp) || return 1
   use_skills
   if ! use_docker "$id"; then
-    claude_stopped= claude_stop_requested= claude_errors= claude_result="Can't run it in Docker: $docker_error."
+    claude_stopped= claude_stop_requested= claude_errors= claude_subtype= claude_result="Can't run it in Docker: $docker_error."
     rm -f "$output" "$errors" "$stopped"
     return 1
+  fi
+  if [[ -n $api_key_budget ]]; then
+    budget_args=(--max-budget-usd "$api_key_budget")
+    # The container gets the key from the environment, as an option before the image.
+    if ((${#docker_args[@]})); then
+      docker_args=("${docker_args[@]:0:${#docker_args[@]}-1}" --env ANTHROPIC_API_KEY "${docker_args[-1]}")
+    fi
   fi
   # A run in a container has its own /tmp, which goes with the container.
   if ! ((${#docker_args[@]})) && scratch=$(make_scratch "$id"); then
@@ -410,8 +421,12 @@ in memory and is never cleaned up. \$TMPDIR is on disk, and the loop empties it 
     # The marker stop_leftovers looks for, inherited by everything the run starts.
     export ULTRAKANBAN_RUN=$run
     if [[ -n $scratch ]]; then export TMPDIR=$scratch; fi
+    # The agents' API key reaches only a run that goes on it, as claude's own.
+    if [[ -n $api_key_budget ]]; then export ANTHROPIC_API_KEY=$AGENT_API_KEY; fi
+    unset AGENT_API_KEY
     exec timeout --foreground "$TICKET_TIMEOUT" ${docker_args[@]+"${docker_args[@]}"} claude -p ${claude_args[@]+"${claude_args[@]}"} \
-      ${skill_args[@]+"${skill_args[@]}"} --model "$model" --effort "$effort" --output-format stream-json --verbose "$@"
+      ${skill_args[@]+"${skill_args[@]}"} ${budget_args[@]+"${budget_args[@]}"} --model "$model" --effort "$effort" \
+      --output-format stream-json --verbose "$@"
   ) <<<"$prompt" >"$output" 2>"$errors" &
   running=$!
   inhibit_sleep "$id" "$running"
@@ -439,8 +454,10 @@ in memory and is never cleaned up. \$TMPDIR is on disk, and the loop empties it 
   summary=$(jq -cnR --arg cwd "$PWD" "$RUN_SUMMARY" "$output" 2>/dev/null) || summary='{}'
   # The final message, or what claude printed instead of JSON when it couldn't run (e.g. an error about its options).
   claude_result=$(jq -r 'if .result then .result.result // empty else .output // [] | join("\n") end' <<<"$summary")
+  claude_subtype=$(jq -r '.result.subtype // empty' <<<"$summary")
   printf '%s\n' "$claude_result"
-  if usage=$(jq -c '.result // empty' <<<"$summary" | jq -ce --arg agent "$worker" "$USAGE" 2>/dev/null); then
+  if usage=$(jq -c '.result // empty' <<<"$summary" | jq -ce --arg agent "$worker" \
+    --argjson apiKey "$([[ -n $api_key_budget ]] && echo true || echo false)" "$USAGE" 2>/dev/null); then
     response=$(post "/tickets/$id/usage" "$usage")
     [[ ${response##*$'\n'} == 201 ]] || log "can't record the token usage of the run on $id: ${response%$'\n'*}"
   else
@@ -468,12 +485,15 @@ new_session_id() { { uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid; } 
 # run resumes the session with that feedback, and drops `stopped`.
 run_on_ticket() {
   local id=$1 prompt=$2 snapshot=$3 fingerprint=$4 ci_runs=${5:-0} branch=${6:-} code limit why state session \
-    start=--session-id previous work=
+    start=--session-id previous work= until
+  # Whether this run goes on the API key, Claude usage having run out (see use_api_key), which turns into a pause if
+  # the board no longer allows that.
+  use_api_key
   # Another loop may have run out of Claude usage since this round started.
   paused && return 0
   state=$(read_state "$id")
   session=$(jq -r '.session.id // ""' <<<"$state")
-  claude_stopped= claude_stop_requested=
+  claude_stopped= claude_stop_requested= claude_subtype=
   if branch=$(checkout "$branch"); then
     if [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]]; then
       printf '%s %s\n' "$id" "$(git rev-parse HEAD)" >"$(run_file)"
@@ -557,6 +577,36 @@ there is new feedback, such as a comment."
     return 0
   fi
   log "claude exited with status $code on $id"
+  if [[ -z $api_key_budget && $code != 124 ]] && limit=$(grep -iE -m1 "$USAGE_LIMIT_PATTERN" <<<"$claude_result") &&
+    [[ -n ${AGENT_API_KEY:-} ]] && get /system/claude-usage | jq -e '.apiKey.usable' >/dev/null 2>&1; then
+    # Out of Claude usage, but the board lets runs go on the agents' API key: no pause, and not the ticket's fault.
+    # Runs on every ticket go on the key until the limit resets (see use_api_key), starting with this one's next run,
+    # which resumes this one where it left off.
+    until=$(limit_reset "$limit")
+    printf '%s\n' "$until" >"$API_KEY_FILE"
+    log "Claude usage limit reached ($limit); runs go on the API key until $(date -d "@$until" '+%F %T')"
+    update_state "$id" '.session.why = $v' "it ran out of Claude usage; this run goes on the agents' API key instead"
+    note "$id" "Out of Claude usage, so this run stopped. Claude said: \"$limit\". The board lets agents go on on \
+their API key, so the next run resumes this one on it, and runs on any ticket go on the key until $(date -d "@$until" \
+'+%-I:%M%P %Z on %b %-d') (or until the board's Claude usage shows it is back, if that is sooner). Its cost is billed \
+to the key's API credits."
+    return 0
+  fi
+  if [[ -n $api_key_budget && $code != 124 ]] &&
+    limit=$(grep -iE -m1 "$API_CREDIT_PATTERN" <<<"$claude_result"$'\n'"$claude_errors"); then
+    # The API key is out of credits: wait for the plan's limit to reset, as without the key.
+    until=$(cat "$API_KEY_FILE" 2>/dev/null)
+    [[ $until =~ ^[0-9]+$ ]] && ((until > $(date +%s))) || until=$(limit_reset "")
+    rm -f "$API_KEY_FILE"
+    printf '%s\n' "$until" >"$PAUSE_FILE"
+    paused_until=$until
+    log "the API key is out of credits ($limit); waiting until $(date -d "@$until" '+%F %T') for Claude usage"
+    update_state "$id" '.session.why = $v' "the agents' API key ran out of credits"
+    note "$id" "The agents' API key is out of API credits, so this run stopped. Claude said: \"$limit\". The loop \
+starts no runs on any ticket until $(date -d "@$until" '+%-I:%M%P %Z on %b %-d'), when Claude usage is back (or sooner, \
+if the board's Claude usage shows it), then resumes this one where it left off."
+    return 0
+  fi
   if [[ $code != 124 ]] && limit=$(grep -iE -m1 "$USAGE_LIMIT_PATTERN" <<<"$claude_result"); then
     # Out of Claude usage: not the ticket's fault, so it doesn't count as a failure. Nothing can run until the limit
     # resets, so the whole loop waits for that.
@@ -569,7 +619,10 @@ ticket until $(date -d "@$paused_until" '+%-I:%M%P %Z on %b %-d') (or until the 
 that is sooner), then resumes this one where it left off."
     return 0
   fi
-  if [[ $code == 124 ]]; then
+  if [[ $claude_subtype == error_max_budget_usd ]]; then
+    why="it went on the agents' API key and reached its spending cap of \$$api_key_budget (the board's cap per run on the \
+key, or what was left of the month's)"
+  elif [[ $code == 124 ]]; then
     why="it ran longer than the $TICKET_TIMEOUT timeout (TICKET_TIMEOUT) and was stopped"
   elif [[ $code == 137 ]]; then
     why="claude was killed (SIGKILL), most likely by the kernel for running out of memory: the machine's, or what \

@@ -17,6 +17,14 @@ describe('Claude usage', () => {
       credits: [],
       error: null,
       reserve: { week: null, session: null, usageCredits: false },
+      apiKey: {
+        enabled: false,
+        available: false,
+        runBudgetUsd: 5,
+        monthlyBudgetUsd: null,
+        spentThisMonthUsd: 0,
+        usable: false,
+      },
       reserveReached: null,
     })
 
@@ -249,13 +257,14 @@ describe('the usage reserve', () => {
   test('stops claim-next once a limit is used up, unless agents may spend usage credits', async () => {
     await addTicket({ title: 'On credits' })
     assert.equal((await setReserve({ usageCredits: 'yes' })).status, 400)
+    const sessionReset = inHours(2)
     await report([
-      { kind: 'session', percent: 100, resets_at: inHours(2) },
+      { kind: 'session', percent: 100, resets_at: sessionReset },
       { kind: 'weekly_all', percent: 40, resets_at: nextWeek },
     ])
     // With no reserve set, a used-up limit still holds agents back, so they don't run on the usage credits.
     const reached = await usage()
-    assert.deepEqual(reached.reserveReached, { label: 'Current session', percent: 100, resetsAt: inHours(2) })
+    assert.deepEqual(reached.reserveReached, { label: 'Current session', percent: 100, resetsAt: sessionReset })
     const refused = await claimNext()
     assert.equal(refused.status, 404)
     assert.equal(refused.body.error.code, 'usage_reserve_reached')
@@ -319,5 +328,117 @@ describe('the usage reserve', () => {
       ),
       null,
     )
+  })
+})
+
+describe("the agents' API key", () => {
+  const usage = async () => (await call<ClaudeUsage>('GET', '/system/claude-usage')).body
+  const setApiKey = (body: Record<string, unknown>) => call<ClaudeUsage>('PUT', '/system/claude-usage/api-key', body)
+  const checkIn = (apiKey?: boolean) =>
+    call(
+      'POST',
+      '/system/agents',
+      { runsIn: 'machine', ...(apiKey === undefined ? {} : { apiKey }) },
+      'agent-supervisor',
+    )
+  const report = (limits: Record<string, unknown>[]) =>
+    call<ClaudeUsage>('POST', '/system/claude-usage', { usage: { limits } }, 'agent-supervisor')
+  const claimNext = () =>
+    call<Ticket & ApiErrorBody>('POST', `/boards/${boardId}/tickets/claim-next`, { agent: 'a', column: 'Todo' })
+  const spend = (ticketId: string, costUsd: number, apiKey: boolean) =>
+    call('POST', `/tickets/${ticketId}/usage`, { agent: 'a', inputTokens: 1, outputTokens: 1, costUsd, apiKey })
+
+  test('is a setting of its own, with caps, that the agents need a key for', async () => {
+    for (const body of [
+      {},
+      { enabled: 'yes' },
+      { runBudgetUsd: 0 },
+      { runBudgetUsd: -1 },
+      { monthlyBudgetUsd: '50' },
+    ]) {
+      assert.equal((await setApiKey(body)).status, 400, JSON.stringify(body))
+    }
+    const set = await setApiKey({ enabled: true, runBudgetUsd: 2.5, monthlyBudgetUsd: 50 })
+    assert.equal(set.status, 200)
+    assert.deepEqual(set.body.apiKey, {
+      enabled: true,
+      available: false,
+      runBudgetUsd: 2.5,
+      monthlyBudgetUsd: 50,
+      spentThisMonthUsd: 0,
+      usable: false,
+    })
+    // The agents checking in with a key make it usable; the check-in never has the key itself.
+    assert.equal((await checkIn(true)).status, 200)
+    assert.equal((await call<{ agents: { apiKey: boolean } }>('GET', '/system/setup')).body.agents.apiKey, true)
+    assert.equal((await usage()).apiKey.usable, true)
+    // One left out stays as it is.
+    assert.deepEqual((await setApiKey({ monthlyBudgetUsd: null })).body.apiKey, {
+      enabled: true,
+      available: true,
+      runBudgetUsd: 2.5,
+      monthlyBudgetUsd: null,
+      spentThisMonthUsd: 0,
+      usable: true,
+    })
+    await checkIn()
+    assert.equal((await usage()).apiKey.available, false)
+    await setApiKey({ enabled: false, runBudgetUsd: 5 })
+  })
+
+  test("counts this month's spending on the key, apart from the plan's, against its monthly cap", async () => {
+    const ticket = await addTicket({ title: 'Spent on' })
+    await checkIn(true)
+    await setApiKey({ enabled: true, monthlyBudgetUsd: 3 })
+    await spend(ticket.id, 1.25, true)
+    await spend(ticket.id, 7, false)
+    assert.deepEqual((await usage()).apiKey.spentThisMonthUsd, 1.25)
+    const runs = (await call<{ apiKey: boolean }[]>('GET', `/tickets/${ticket.id}/usage`)).body
+    assert.deepEqual(
+      runs.map((run) => run.apiKey),
+      [true, false],
+    )
+    assert.equal((await usage()).apiKey.usable, true)
+    await spend(ticket.id, 2, true)
+    const capped = (await usage()).apiKey
+    assert.equal(capped.spentThisMonthUsd, 3.25)
+    assert.equal(capped.usable, false)
+    await setApiKey({ enabled: false, monthlyBudgetUsd: null })
+    await checkIn()
+  })
+
+  test('lets claim-next go on once a limit is used up while the key is usable, but not past a reserve', async () => {
+    await addTicket({ title: 'On the key' })
+    await report([{ kind: 'session', percent: 100, resets_at: new Date(Date.now() + 2 * 3600_000).toISOString() }])
+    await setApiKey({ enabled: true })
+    // Without a key in the agents' environment, they wait as before.
+    assert.equal((await usage()).reserveReached?.label, 'Current session')
+    const refused = await claimNext()
+    assert.equal(refused.status, 404)
+    assert.match(refused.body.error.message, /or go on on their API key if that is allowed/)
+
+    await checkIn(true)
+    assert.equal((await usage()).reserveReached, null)
+    assert.equal((await claimNext()).body.title, 'On the key')
+    // The usage reserve still keeps the plan's usage for people.
+    const reserved = await call<ClaudeUsage>('PUT', '/system/claude-usage/reserve', { session: 90 })
+    assert.equal(reserved.body.reserveReached?.label, 'Current session')
+    await call('PUT', '/system/claude-usage/reserve', { session: null })
+    await setApiKey({ enabled: false })
+    await checkIn()
+    await report([])
+  })
+
+  test('records whether a run went on the key', async () => {
+    const ticket = await addTicket({ title: 'Run record' })
+    const run = (apiKey?: boolean) =>
+      call<{ apiKey: boolean }>('POST', `/tickets/${ticket.id}/runs`, {
+        agent: 'a',
+        outcome: 'finished',
+        costUsd: 1,
+        ...(apiKey === undefined ? {} : { apiKey }),
+      })
+    assert.equal((await run(true)).body.apiKey, true)
+    assert.equal((await run()).body.apiKey, false)
   })
 })

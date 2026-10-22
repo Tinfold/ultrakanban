@@ -42,6 +42,8 @@ services:
       GH_TOKEN: ${GITHUB_TOKEN:-}
       # Optional: a token from `claude setup-token`, instead of logging the agents in to Claude on the Setup page
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # Optional: a Claude Console API key runs go on once Claude usage runs out, if the overview allows it
+      AGENT_API_KEY: ${AGENT_API_KEY:-}
       # Optional: an endpoint that serves a local model or another provider's instead of Claude, and its token
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
       ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}

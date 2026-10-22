@@ -511,14 +511,16 @@ A run can also say how its tokens split between the models it called (`models`, 
 `claude -p`'s `modelUsage`; the agent loop sends it), so the overview can show token usage by model. The overview
 counts a run that doesn't as one of the model in its agent's name (`opus` for `claude/opus/high`, `gpt-5.1-codex`
 for `codex/gpt-5.1-codex/minimal`), or of `unknown`. `costUsd` is optional: leave it out when the agent doesn't know
-its cost (local models cost nothing), and the totals show no cost rather than $0 until a run reports one.
+its cost (local models cost nothing), and the totals show no cost rather than $0 until a run reports one. `apiKey`
+(default false) says the run went on the agents' API key rather than the Claude plan, so its cost was billed, not
+estimated (see [Claude usage](#claude-usage)).
 
-| Method | Path                       | Body                                                                                                                                                                                               | Returns                                              |
-| ------ | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| POST   | `/tickets/:ticketId/usage` | `{ agent, inputTokens, outputTokens, cacheReadTokens?, cacheWriteTokens?, costUsd?, durationMs?, models?: { model, inputTokens, outputTokens, cacheReadTokens?, cacheWriteTokens?, costUsd? }[] }` | `TokenUsage` (201)                                   |
-| GET    | `/tickets/:ticketId/usage` |                                                                                                                                                                                                    | `TokenUsage[]` (oldest first)                        |
-| POST   | `/boards/:boardId/usage`   | same as for a ticket                                                                                                                                                                               | `TokenUsage` (201) with `ticketId: null`             |
-| GET    | `/boards/:boardId/usage`   |                                                                                                                                                                                                    | `TokenUsage[]` (oldest first), on its tickets or not |
+| Method | Path                       | Body                                                                                                                                                                                                        | Returns                                              |
+| ------ | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| POST   | `/tickets/:ticketId/usage` | `{ agent, inputTokens, outputTokens, cacheReadTokens?, cacheWriteTokens?, costUsd?, durationMs?, apiKey?, models?: { model, inputTokens, outputTokens, cacheReadTokens?, cacheWriteTokens?, costUsd? }[] }` | `TokenUsage` (201)                                   |
+| GET    | `/tickets/:ticketId/usage` |                                                                                                                                                                                                             | `TokenUsage[]` (oldest first)                        |
+| POST   | `/boards/:boardId/usage`   | same as for a ticket                                                                                                                                                                                        | `TokenUsage` (201) with `ticketId: null`             |
+| GET    | `/boards/:boardId/usage`   |                                                                                                                                                                                                             | `TokenUsage[]` (oldest first), on its tickets or not |
 
 ```ts
 interface TokenUsage {
@@ -530,7 +532,8 @@ interface TokenUsage {
   outputTokens: number
   cacheReadTokens: number // input read from the prompt cache
   cacheWriteTokens: number // input written to the prompt cache
-  costUsd: number | null // estimated cost, if the agent reported one
+  costUsd: number | null // estimated cost, if the agent reported one; billed, for a run on the API key
+  apiKey: boolean // whether the run went on the agents' API key rather than the Claude plan
   durationMs: number | null
   // The same split by model (e.g. claude-opus-5-5), most tokens first; empty if the agent didn't report it
   models: { model; inputTokens; outputTokens; cacheReadTokens; cacheWriteTokens; costUsd: number | null }[]
@@ -546,10 +549,10 @@ final message and the tool calls it made. `scripts/agent-loop.sh` records every 
 failed, timed out or was killed, from claude's `--output-format stream-json` output (see [Agents](agents.md)). Unlike
 token usage, a run is recorded even when it ended without a result.
 
-| Method | Path                      | Body / query                                                                                                                                    | Returns                                       |
-| ------ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| POST   | `/tickets/:ticketId/runs` | `{ agent, outcome, exitCode?, durationMs?, turns?, costUsd?, message?, steps?: { tool, summary?, error? }[], omittedSteps?: { after, count } }` | `RunRecord` (201)                             |
-| GET    | `/tickets/:ticketId/runs` | `?limit=20` (1 to 50)                                                                                                                           | `RunRecord[]` (newest first, at most `limit`) |
+| Method | Path                      | Body / query                                                                                                                                             | Returns                                       |
+| ------ | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| POST   | `/tickets/:ticketId/runs` | `{ agent, outcome, exitCode?, durationMs?, turns?, costUsd?, apiKey?, message?, steps?: { tool, summary?, error? }[], omittedSteps?: { after, count } }` | `RunRecord` (201)                             |
+| GET    | `/tickets/:ticketId/runs` | `?limit=20` (1 to 50)                                                                                                                                    | `RunRecord[]` (newest first, at most `limit`) |
 
 Records stay small: `message` is clipped to 4000 characters, `steps` holds at most 150 tool calls (send the first and
 last ones of a longer run, and say how many were left out between them with `omittedSteps`), and each ticket keeps its
@@ -569,6 +572,7 @@ interface RunRecord {
   durationMs: number | null
   turns: number | null // responses of the model
   costUsd: number | null
+  apiKey: boolean // whether it went on the agents' API key (its cost billed, not estimated)
   message: string // the final message (markdown), or what the run last said or printed; '' when there was nothing
   // Its tool calls in order (not its subagents'): summary is a short target for people, e.g. a command's first line,
   // a file's path or a search pattern; error says whether the tool reported one
@@ -807,6 +811,15 @@ login (from Claude's usage endpoint, what `/usage` in claude shows). `GET /syste
   error: string | null // why there are no limits, e.g. no claude login on the host
   // the usage reserve, 1-100 each (see below), null when off; usageCredits: whether agents go on past a used-up limit
   reserve: { week: number | null; session: number | null; usageCredits: boolean }
+  // what agents do once usage runs out: wait, or go on on their API key (see below)
+  apiKey: {
+    enabled: boolean // go on on the key rather than wait
+    available: boolean // the agents last checked in with a key (AGENT_API_KEY); never the key itself
+    runBudgetUsd: number // most a run on the key may spend (claude -p --max-budget-usd); default 5
+    monthlyBudgetUsd: number | null // most runs on the key may spend in a calendar month (UTC); null for no cap
+    spentThisMonthUsd: number // what runs on the key reported spending this calendar month (UTC)
+    usable: boolean // enabled, available and under the monthly cap
+  }
   reserveReached: { label: string; percent: number; resetsAt: string | null } | null // the limit holding agents back now
 }
 ```
@@ -828,6 +841,15 @@ passed: a stale or missing report never holds agents back, so agents don't stop 
 claiming new tickets stops. Tickets agents already hold still get runs for their feedback, and claiming a given ticket
 (`POST /tickets/:ticketId/claim`) still works, so work under way and pull requests in review aren't left halfway;
 Claude's own limits stop those runs when the session or the week runs out.
+
+**The agents' API key** lets agents go on once usage runs out instead of waiting for it to reset: a Claude Console key
+in the agents' environment (`AGENT_API_KEY`), which the board never sees, and whose runs are billed to its API credits.
+`PUT /system/claude-usage/api-key` with `{ "enabled": true, "runBudgetUsd": 5, "monthlyBudgetUsd": 100 }` (dollars,
+more than 0; `monthlyBudgetUsd: null` for no monthly cap; one left out stays as it is) answers with the usage above.
+While `apiKey.usable`, a limit at 100% no longer holds back `claim-next` (a reserve still does), and the agent loop
+retries a run that hits the usage limit on the key and runs on it until the limit resets, each run with
+`--max-budget-usd` of `runBudgetUsd` or what is left of the month's, if less. It reports those runs' usage and records
+with `apiKey: true`, and `spentThisMonthUsd` adds up their cost.
 
 ## Disk usage
 
@@ -879,6 +901,7 @@ supervisor runs where the agents run. `GET /system/setup` returns:
     githubLogin: string | null // gh's account
     claudeAccount: string | null // claude's account email, "token" for CLAUDE_CODE_OAUTH_TOKEN
     gitIdentity: string | null // git's commit name and email
+    apiKey: boolean // whether they have an API key for when Claude usage runs out (AGENT_API_KEY)
     login: {
       kind: 'github' | 'claude'
       state: 'requested' | 'waiting' | 'checking' | 'done' | 'failed'
@@ -903,7 +926,8 @@ removes it. Both answer with the setup.
 `failed`). `POST /system/agents/login/code` with `{ code }` passes the code from Claude's sign-in page to it
 (`409 login_not_waiting` unless a Claude login waits for one). `DELETE /system/agents/login` cancels it.
 
-The supervisor checks in with `POST /system/agents` and `{ runsIn, githubLogin?, claudeAccount?, gitIdentity? }`,
+The supervisor checks in with `POST /system/agents` and `{ runsIn, githubLogin?, claudeAccount?, gitIdentity?, apiKey? }`
+(`apiKey`: whether the agents have `AGENT_API_KEY`, never the key itself),
 reads the login with `GET /system/agents/login` (with the pasted `code`), and reports on it with
 `POST /system/agents/login/status` and `{ state, url?, userCode?, message? }`: `waiting` takes the request and says
 what to show, `checking` takes the code, `done` and `failed` end it (`409 login_not_requested` when there is no login

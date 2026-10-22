@@ -1,11 +1,12 @@
 import {
+  type AgentApiKey,
   CLAUDE_USAGE_FRESH_MINUTES,
   type ClaudeUsage,
   type ClaudeUsageCredit,
   type ClaudeUsageLimit,
   reserveFor,
 } from '../../shared/domain.ts'
-import type { ReportClaudeUsageInput, SetUsageReserveInput } from '../../shared/schemas.ts'
+import type { ReportClaudeUsageInput, SetAgentApiKeyInput, SetUsageReserveInput } from '../../shared/schemas.ts'
 import { now, sql } from '../db.ts'
 
 interface ClaudeUsageRow {
@@ -17,6 +18,9 @@ interface ClaudeUsageRow {
   week_reserve_percent: number | null
   session_reserve_percent: number | null
   usage_credits: number
+  api_key_fallback: number
+  api_key_run_budget_usd: number
+  api_key_monthly_budget_usd: number | null
 }
 
 /** When a limit resets; never for one that isn't running (no reset time). */
@@ -29,16 +33,25 @@ const liftsAfter = (a: ClaudeUsageLimit, b: ClaudeUsageLimit) =>
 /**
  * The limit that holds agents back with the usage reserve at `at` (see `ClaudeUsage.reserveReached`): of the limits at
  * or over their reserve that haven't reset since the report, the one that lifts last, when the report is fresh. Unless
- * agents may spend usage credits, a limit that is used up holds them back without a reserve too. A stale or missing
- * report never holds them back, so agents don't stop with a supervisor that did.
+ * agents may spend usage credits or go on on their API key (`apiKey.usable`), a limit that is used up holds them back
+ * without a reserve too. A stale or missing report never holds them back, so agents don't stop with a supervisor that
+ * did.
  */
 export function reserveReached(
-  { reportedAt, limits, reserve }: Pick<ClaudeUsage, 'reportedAt' | 'limits' | 'reserve'>,
+  {
+    reportedAt,
+    limits,
+    reserve,
+    apiKey,
+  }: Pick<ClaudeUsage, 'reportedAt' | 'limits' | 'reserve'> & {
+    apiKey?: Pick<AgentApiKey, 'usable'>
+  },
   at = Date.now(),
 ): ClaudeUsageLimit | null {
   if (!reportedAt || Date.parse(reportedAt) < at - CLAUDE_USAGE_FRESH_MINUTES * 60_000) return null
+  const goOn = reserve.usageCredits || !!apiKey?.usable
   const reached = limits.filter((limit) => {
-    const percent = reserveFor(limit, reserve) ?? (reserve.usageCredits ? null : 100)
+    const percent = reserveFor(limit, reserve) ?? (goOn ? null : 100)
     // Past its reset time a limit starts again from nothing, even before the next report says so.
     const running = limit.resetsAt === null || Date.parse(limit.resetsAt) > at
     return percent !== null && running && limit.percent >= percent
@@ -61,11 +74,49 @@ function toClaudeUsage(row: ClaudeUsageRow): ClaudeUsage {
       session: row.session_reserve_percent,
       usageCredits: row.usage_credits === 1,
     },
+    apiKey: toApiKey(row),
   }
   return { ...usage, reserveReached: reserveReached(usage) }
 }
 
+/** The start of the calendar month (UTC) `at` is in, as stored timestamps are written. */
+export const monthStart = (at = new Date()) =>
+  new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), 1)).toISOString()
+
+function toApiKey(row: ClaudeUsageRow): AgentApiKey {
+  const available =
+    sql.get<{ agents_api_key: number }>('SELECT agents_api_key FROM setup WHERE id = 1')?.agents_api_key === 1
+  const spent =
+    sql.get<{ cost: number | null }>(
+      'SELECT sum(cost_usd) AS cost FROM token_usage WHERE api_key = 1 AND created_at >= ?',
+      monthStart(),
+    )?.cost ?? 0
+  const enabled = row.api_key_fallback === 1
+  const monthly = row.api_key_monthly_budget_usd
+  return {
+    enabled,
+    available,
+    runBudgetUsd: row.api_key_run_budget_usd,
+    monthlyBudgetUsd: monthly,
+    spentThisMonthUsd: spent,
+    usable: enabled && available && (monthly === null || spent < monthly),
+  }
+}
+
 export const getClaudeUsage = () => toClaudeUsage(sql.get<ClaudeUsageRow>('SELECT * FROM claude_usage WHERE id = 1')!)
+
+/** Sets what agents do once Claude usage runs out (see `AgentApiKey`); what the input leaves out stays as it is. */
+export function setAgentApiKey({ enabled, runBudgetUsd, monthlyBudgetUsd }: SetAgentApiKeyInput): ClaudeUsage {
+  const current = getClaudeUsage().apiKey
+  sql.run(
+    `UPDATE claude_usage SET api_key_fallback = ?, api_key_run_budget_usd = ?, api_key_monthly_budget_usd = ?
+     WHERE id = 1`,
+    (enabled ?? current.enabled) ? 1 : 0,
+    runBudgetUsd ?? current.runBudgetUsd,
+    monthlyBudgetUsd === undefined ? current.monthlyBudgetUsd : monthlyBudgetUsd,
+  )
+  return getClaudeUsage()
+}
 
 /**
  * Sets the usage reserve of the week, the current session or both (see `ClaudeUsageReserve`), null switching it off,

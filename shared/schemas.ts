@@ -324,6 +324,22 @@ export const setUsageReserveSchema = z
     message: 'Say what to set: week, session or usageCredits',
   })
 
+const dollars = z.number().positive().max(100_000)
+
+/**
+ * Setting what agents do once Claude usage runs out (see `AgentApiKey`): whether they go on on their API key, and what a
+ * run and a calendar month on it may spend (`null` for no monthly cap). One left out stays as it is.
+ */
+export const setAgentApiKeySchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    runBudgetUsd: dollars.optional(),
+    monthlyBudgetUsd: dollars.nullable().optional(),
+  })
+  .refine((input) => Object.values(input).some((value) => value !== undefined), {
+    message: 'Say what to set: enabled, runBudgetUsd or monthlyBudgetUsd',
+  })
+
 const bytes = z.number().int().nonnegative()
 
 /** The agent supervisor reporting the disk space of each board's agent folder, in bytes (see `AgentDiskUsage`). */
@@ -362,6 +378,8 @@ export const reportAgentHostSchema = z.object({
   githubLogin: z.string().trim().max(100).nullable().optional(),
   claudeAccount: z.string().trim().max(300).nullable().optional(),
   gitIdentity: z.string().trim().max(300).nullable().optional(),
+  /** Whether the agents have an API key (`AGENT_API_KEY`); never the key itself. */
+  apiKey: z.boolean().optional(),
 })
 
 /** Switching every board's agents off or on again (see `AgentServices`). */
@@ -408,6 +426,8 @@ export const recordUsageSchema = z.object({
   agent: name,
   ...tokenCounts,
   durationMs: tokens.nullable().default(null),
+  /** Whether the run went on the agents' API key (see `AgentApiKey`). */
+  apiKey: z.boolean().default(false),
   /** The same split by the models the run called (claude's `modelUsage`), one entry per model. */
   models: z
     .array(z.object({ model: name, ...tokenCounts }))
@@ -432,6 +452,7 @@ export const recordRunSchema = z
     durationMs: tokens.nullable().default(null),
     turns: tokens.nullable().default(null),
     costUsd: cost,
+    apiKey: z.boolean().default(false),
     message: clipped(RUN_MESSAGE_MAX).default(''),
     steps: z
       .array(
@@ -565,6 +586,7 @@ export type SubmitForReviewInput = z.input<typeof submitForReviewSchema>
 export type ReportAppUpdateInput = z.input<typeof reportAppUpdateSchema>
 export type ReportClaudeUsageInput = z.input<typeof reportClaudeUsageSchema>
 export type SetUsageReserveInput = z.input<typeof setUsageReserveSchema>
+export type SetAgentApiKeyInput = z.input<typeof setAgentApiKeySchema>
 export type ReportDiskUsageInput = z.input<typeof reportDiskUsageSchema>
 export type AttachmentCleanupInput = z.input<typeof attachmentCleanupSchema>
 export type ReportAgentHostInput = z.input<typeof reportAgentHostSchema>

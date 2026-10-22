@@ -344,9 +344,12 @@ report_agents() {
     email=$(git config --global user.email)
     [[ -n $name && -n $email ]] && identity="$name <$email>"
     # `if` needs its `else`: jq 1.6 (the agents container's, Debian's and Ubuntu 22.04's) doesn't compile one without.
-    agents_fields=$(jq -nc --arg runsIn "$runs_in" --arg github "$github" --arg claude "$claude" --arg git "$identity" '
+    # Whether the agents have an API key for when Claude usage runs out (AGENT_API_KEY); never the key itself.
+    agents_fields=$(jq -nc --arg runsIn "$runs_in" --arg github "$github" --arg claude "$claude" --arg git "$identity" \
+      --argjson apiKey "$([[ -n ${AGENT_API_KEY:-} ]] && echo true || echo false)" '
       def orNull: if . == "" then null else . end;
-      {runsIn: $runsIn, githubLogin: ($github | orNull), claudeAccount: ($claude | orNull), gitIdentity: ($git | orNull)}')
+      {runsIn: $runsIn, githubLogin: ($github | orNull), claudeAccount: ($claude | orNull), gitIdentity: ($git | orNull),
+       apiKey: $apiKey}')
   fi
   state=$(curl -sf -X POST "$KANBAN/api/system/agents" -H 'Content-Type: application/json' \
     -H 'X-Actor: agent-supervisor' -d "$agents_fields" | jq -r '.login.state // empty' 2>/dev/null) ||

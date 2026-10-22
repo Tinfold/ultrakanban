@@ -170,6 +170,9 @@
 #                       git, gh, jq, curl) the first time a run needs it (default: ultrakanban-agent)
 #   DOCKER_ARGS         extra arguments for docker run, separated by spaces, e.g. --memory 8g --cpus 4
 #   CLAUDE_ARGS         extra arguments for claude; set the model and effort with MODEL and EFFORT, not here
+#   AGENT_API_KEY       a Claude API key (Claude Console) runs go on once Claude usage runs out, when the board allows
+#                       it (Overview → Claude usage, "When usage runs out"): passed to those runs only, as
+#                       ANTHROPIC_API_KEY, with the board's spending cap (--max-budget-usd). Never sent to the board
 #   STATE_DIR           where watermarks are kept (default: $XDG_STATE_HOME/ultrakanban-agent-loop/BOARD-AGENT)
 #   AGENT_LOOP_CLEAN    1 when running in a dedicated clone: before each run the loop fetches, discards local
 #                       changes and checks out the default branch (or the pull request's branch for feedback runs).
@@ -222,6 +225,8 @@ INFRA_PATTERN+='|was not started|minutes quota|exceeded .*(minutes|quota)'
 # What claude prints when the account is out of Claude usage, e.g. "You've hit your session limit · resets 2:50pm
 # (America/New_York)".
 USAGE_LIMIT_PATTERN="hit your [a-z -]*limit|usage limit|limit reached|out of (extra )?usage"
+# What claude prints when a run on the API key (AGENT_API_KEY) is out of API credits.
+API_CREDIT_PATTERN="credit balance is too low|insufficient credit"
 STATE_DIR=${STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/ultrakanban-agent-loop/$BOARD-${AGENT//\//_}}
 read -r -a claude_args <<<"${CLAUDE_ARGS:-}"
 if [[ ${SKIP_PERMISSIONS:-1} == 1 ]]; then
@@ -286,6 +291,8 @@ listener=
 # Set when Claude usage runs out: no run starts before this time (seconds since the epoch). Kept in PAUSE_FILE, so
 # the other loops working the board wait too.
 paused_until=0
+# Set while a run goes on the agents' API key, Claude usage having run out: what it may spend (see use_api_key).
+api_key_budget=
 # The pending claims last reported as holding back claim_next, so the log says it once rather than every round.
 claim_held=
 # Set while the usage reserve holds back claim_next, so the log says it once rather than every round.

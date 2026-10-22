@@ -669,8 +669,10 @@ export interface TokenUsage extends TokenCounts {
   /** `null` for runs that weren't on a ticket. */
   ticketId: string | null
   agent: string
-  /** Estimated cost in US dollars, when the agent reports one. */
+  /** Estimated cost in US dollars, when the agent reports one: billed, not estimated, for a run on the API key. */
   costUsd: number | null
+  /** Whether the run went on the agents' API key (see `AgentApiKey`) rather than the Claude plan. */
+  apiKey: boolean
   /** How long the run took. */
   durationMs: number | null
   /** The run's tokens split by the models that used them, most first; empty when the agent didn't report that. */
@@ -730,8 +732,10 @@ export interface RunRecord {
   durationMs: number | null
   /** How many turns (responses of the model) the run took. */
   turns: number | null
-  /** Estimated cost in US dollars, when the agent reports one. */
+  /** Estimated cost in US dollars, when the agent reports one: billed, not estimated, for a run on the API key. */
   costUsd: number | null
+  /** Whether the run went on the agents' API key (see `AgentApiKey`) rather than the Claude plan. */
+  apiKey: boolean
   /**
    * The run's final message (Markdown), or what it last said or printed when it ended without one; at most
    * `RUN_MESSAGE_MAX` characters. Empty when there was nothing.
@@ -984,6 +988,8 @@ export interface OverviewUsage extends TokenCounts {
   ticketId: string | null
   boardId: string
   costUsd: number | null
+  /** Whether the run went on the agents' API key, its cost billed rather than estimated (see `AgentApiKey`). */
+  apiKey: boolean
   /**
    * Split by model. Runs that didn't report it count as a run of the model in the agent's name (see `workerModel`),
    * or of `UNKNOWN_MODEL`.
@@ -1140,6 +1146,34 @@ export interface ClaudeUsageReserve {
   usageCredits: boolean
 }
 
+/** What an agent run on the API key may spend when the setting doesn't say (`AgentApiKey.runBudgetUsd`), in dollars. */
+export const DEFAULT_API_KEY_RUN_BUDGET_USD = 5
+
+/**
+ * What agents do once Claude usage runs out, one setting for the whole Claude account like the usage reserve: wait
+ * until the limit resets (the default), or go on on the agents' API key, `AGENT_API_KEY` in their environment, which
+ * never reaches the board. Runs on the key spend the API credits of its Claude Console organisation: money really
+ * billed, unlike the estimated cost of runs on the plan.
+ */
+export interface AgentApiKey {
+  /**
+   * Whether a run that hits the usage limit is retried on the API key, and runs go on on it until the limit resets,
+   * rather than the loop waiting for that. While the key is `usable`, a used-up limit doesn't stop `claim-next` either;
+   * the usage reserve still does.
+   */
+  enabled: boolean
+  /** Whether the agents last checked in with a key (`AgentHost.apiKey`). */
+  available: boolean
+  /** Most a run on the key may spend, in dollars (`claude -p --max-budget-usd`). */
+  runBudgetUsd: number
+  /** Most runs on the key may spend in a calendar month (UTC), in dollars; null for no cap. */
+  monthlyBudgetUsd: number | null
+  /** What runs on the key spent this calendar month (UTC), from the cost they reported. */
+  spentThisMonthUsd: number
+  /** Whether runs may go on on the key now: `enabled`, `available` and under the monthly cap. */
+  usable: boolean
+}
+
 /** The reserve that applies to a usage limit: the week's to the weekly ones, the session's to the current session. */
 export function reserveFor(limit: Pick<ClaudeUsageLimit, 'label'>, reserve: ClaudeUsageReserve) {
   return isWeeklyLimit(limit) ? reserve.week : isSessionLimit(limit) ? reserve.session : null
@@ -1168,6 +1202,8 @@ export interface ClaudeUsage {
   error: string | null
   /** How far agents may use the week and the current session (see `ClaudeUsageReserve`). */
   reserve: ClaudeUsageReserve
+  /** Whether agents go on on their API key once usage runs out (see `AgentApiKey`). */
+  apiKey: AgentApiKey
   /**
    * The limit that holds agents back right now: one at or over its reserve (see `reserveFor`) that hasn't reset since,
    * when the report is fresh (see `CLAUDE_USAGE_FRESH_MINUTES`). Of several, the one that resets last (the most used of
@@ -1218,6 +1254,8 @@ export interface AgentHost {
   claudeAccount: string | null
   /** git's commit name and email, as `Name <email>`; null when not set, so commits would fail. */
   gitIdentity: string | null
+  /** Whether they have an API key to go on with once Claude usage runs out (`AGENT_API_KEY`, see `AgentApiKey`). */
+  apiKey: boolean
   /** The latest login asked for, if any. */
   login: AgentLogin | null
 }

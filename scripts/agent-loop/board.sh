@@ -43,6 +43,10 @@ paused() {
   ((paused_until > $(date +%s)))
 }
 
+# Where loops sharing STATE_DIR keep the time until which runs go on the agents' API key (AGENT_API_KEY), when Claude
+# usage ran out and the board allows that (see AgentApiKey in shared/domain.ts): the time the limit resets.
+API_KEY_FILE=$STATE_DIR/api-key-until
+
 # Where loops sharing STATE_DIR note when they last lifted the pause early (see usage_back).
 USAGE_BACK_FILE=$STATE_DIR/usage-back
 
@@ -50,18 +54,48 @@ USAGE_BACK_FILE=$STATE_DIR/usage-back
 # bought: the supervisor's report on the board (GET /system/claude-usage), read after the pause began, has limits and
 # none of them used up. If so, lifts the pause for every loop sharing STATE_DIR. Not when the limit was reached again
 # within an hour of lifting it early, which means the report was wrong: then the pause lasts as long as the message says.
+# Given API_KEY_FILE, it is about runs going on the API key instead of the pause: they go back to the plan.
 usage_back() {
-  local since lifted usage
-  since=$(stat -c %Y "$PAUSE_FILE" 2>/dev/null) || return 1
+  local file=${1:-$PAUSE_FILE} since lifted usage
+  since=$(stat -c %Y "$file" 2>/dev/null) || return 1
   lifted=$(stat -c %Y "$USAGE_BACK_FILE" 2>/dev/null) || lifted=0
   ((since - lifted > 3600)) || return 1
   usage=$(get /system/claude-usage) || return 1
   jq -e --argjson since "$since" '(.reportedAt // "" | sub("\\.[0-9]+"; "") | try fromdateiso8601 catch 0) > $since
     and .error == null and (.limits | length > 0 and all(.percent < 100))' <<<"$usage" >/dev/null || return 1
   touch "$USAGE_BACK_FILE"
-  rm -f "$PAUSE_FILE"
-  paused_until=0
-  log "Claude usage is back before the time its limit message gave; resuming"
+  rm -f "$file"
+  if [[ $file == "$PAUSE_FILE" ]]; then
+    paused_until=0
+    log "Claude usage is back before the time its limit message gave; resuming"
+  else
+    log "Claude usage is back before the time its limit message gave; runs go back from the API key to the plan"
+  fi
+}
+
+# Whether the next run goes on the agents' API key: Claude usage ran out (in this loop or another one), the limit
+# hasn't reset (nor is usage back early, see usage_back), and the board still allows it (GET /system/claude-usage's
+# apiKey.usable: switched on, and under the monthly cap). Sets api_key_budget to what the run may spend: the run's cap,
+# or what is left of the month's if that is less. When the board no longer allows it, or the loop has no key, runs wait
+# for the limit like any other, so this turns into the usage-limit pause and returns 1.
+use_api_key() {
+  local until settings
+  api_key_budget=
+  until=$(cat "$API_KEY_FILE" 2>/dev/null)
+  [[ $until =~ ^[0-9]+$ ]] && ((until > $(date +%s))) || return 1
+  usage_back "$API_KEY_FILE" && return 1
+  if [[ -n ${AGENT_API_KEY:-} ]] && settings=$(get /system/claude-usage) &&
+    api_key_budget=$(jq -er '.apiKey | select(.usable) | [.runBudgetUsd, if .monthlyBudgetUsd == null then empty
+      else .monthlyBudgetUsd - .spentThisMonthUsd end] | min | . * 100 | floor / 100 | select(. > 0)' <<<"$settings"); then
+    return 0
+  fi
+  api_key_budget=
+  rm -f "$API_KEY_FILE"
+  printf '%s\n' "$until" >"$PAUSE_FILE"
+  paused_until=$until
+  log "runs may no longer go on the API key (switched off, over its monthly cap, or no AGENT_API_KEY); waiting until \
+$(date -d "@$until" '+%F %T') for Claude usage"
+  return 1
 }
 
 get() { curl -sf "$KANBAN/api$1"; }

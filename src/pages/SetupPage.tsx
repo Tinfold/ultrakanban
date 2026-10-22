@@ -419,6 +419,28 @@ export function SetupPage() {
           />
         )}
 
+        {agents.seenAt && (
+          <Step
+            state={agents.apiKey ? 'done' : 'later'}
+            title="API key for when Claude usage runs out (optional)"
+            status={
+              agents.apiKey ? (
+                <>
+                  The agents have one (<code>AGENT_API_KEY</code>). Whether they go on on it once usage runs out is set
+                  under <strong className="text-foreground">Overview → Claude usage</strong>; runs on it are billed to
+                  its API credits.
+                </>
+              ) : (
+                <>
+                  Without one, the agents wait for Claude usage to reset once it runs out. To let them go on, set{' '}
+                  <code>AGENT_API_KEY</code> in their environment to a Claude Console API key (see docs/agents.md), then
+                  switch it on under <strong className="text-foreground">Overview → Claude usage</strong>.
+                </>
+              )
+            }
+          />
+        )}
+
         <Step
           state={boardWithAgent ? 'done' : 'todo'}
           title="Switch the agent on for a board"

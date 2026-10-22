@@ -182,6 +182,32 @@ request in review whose reviewer asks for a change shouldn't wait a week, and th
 session or the week does run out, Claude's own limit stops them (see below). The reserve only goes by a report from
 the last 30 minutes: when the supervisor stops reporting, agents claim as usual rather than stop with it.
 
+**API key for when usage runs out.** Instead of waiting for a used-up limit to reset, the agents can go on on an API
+key: a Claude Console key, whose runs spend that organisation's prepaid API credits, money that is really billed. It
+is the agents' own and never reaches the board: set `AGENT_API_KEY` in their environment (in `.env` for the agents
+container, then `docker compose --profile agents up -d`; on the machine, run
+`systemctl --user edit ultrakanban-agent.service ultrakanban-agent@.service` and add `Environment=AGENT_API_KEY=sk-ant-…`
+under `[Service]`). The supervisor tells the board only whether there is one, which the Setup page shows. Then, under
+the Claude usage on the overview, set **When usage runs out** to **Use the API key** (by default the agents **wait for
+it**), with a **Cap per run** (default $5) and, if you like, a **Cap per month**. From then on:
+
+- A run that hits the usage limit isn't paused: its next run resumes it on the key, and runs on every ticket of the
+  loops sharing its state go on the key until the limit resets, or until the supervisor's report shows usage back. The
+  key reaches those runs only, as `ANTHROPIC_API_KEY` (in Docker too), never a run on the plan.
+- Each run on the key gets `claude -p --max-budget-usd` with the run's cap, or what is left of the month's if that is
+  less. A run that reaches it fails, with a note saying so, and is retried like any failed run.
+- `claim-next` doesn't refuse for a used-up limit while the key is usable (switched on, the agents have one, and the
+  month's cap isn't reached). The usage reserve still applies: runs only go on the key once the limit is actually hit,
+  so without it agents would use the plan up past the reserve you keep for yourself.
+- Once the month's cap is reached, or the setting is switched off, the loop waits for the limit again. A run on the key
+  that finds its API credits used up (`Credit balance is too low`) pauses the loop until the plan's limit resets.
+- Each run's record and token usage say whether it went on the key. The overview shows what runs on the key spent this
+  month (calendar month, UTC) next to the setting, and its **Tokens used** keeps that spending apart from the plan's
+  estimated cost; a ticket's run says `billed to the API key`.
+
+The setting is one for the account, like the reserve, not per board: the key is the agents', and the limit it stands
+in for is the account's.
+
 **Disk usage.** Every 30 minutes (`DISK_USAGE_SECONDS`) the supervisor also measures, at low priority and in the
 background, how much disk space each board's agent folder (`~/.local/share/ultrakanban-agent/boards/<board>`) takes:
 its clone, the worktrees of its parallel runs, and the rest (loop state and the runs' scratch files). The overview's
@@ -369,7 +395,8 @@ count as a failure: the note quotes claude's limit message, and the loop starts 
 the message says the limit resets, or until the Claude usage the supervisor reports to the board shows none of its
 limits used up, if that is sooner (as when you reset your usage on claude.ai or buy more): while paused, the loop reads
 the board's report every `USAGE_CHECK_SECONDS` (default 60), and the supervisor reads the usage every
-`CLAUDE_USAGE_SECONDS` (default 300), so it picks back up within a few minutes.
+`CLAUDE_USAGE_SECONDS` (default 300), so it picks back up within a few minutes. With an API key for the agents and the
+board allowing it (see **API key for when usage runs out** above), runs go on the key until then instead.
 
 Runs that don't finish pick up where they left off. Each run is a `claude` session whose id the loop keeps with the
 ticket until the run ends. When a run is cut short by the usage limit, or by the loop stopping (restarting the service,

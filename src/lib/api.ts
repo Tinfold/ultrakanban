@@ -34,6 +34,7 @@ import type {
   CreateTagInput,
   CreateTicketInput,
   MoveTicketInput,
+  SetAgentApiKeyInput,
   SetUsageReserveInput,
   UpdateBoardInput,
   UpdateColumnInput,
@@ -157,6 +158,7 @@ export const api = {
   /** Sets how far agents may use the week, the current session or both before they claim no new tickets. */
   setUsageReserve: (reserve: SetUsageReserveInput) =>
     request<ClaudeUsage>('PUT', '/system/claude-usage/reserve', reserve),
+  setAgentApiKey: (input: SetAgentApiKeyInput) => request<ClaudeUsage>('PUT', '/system/claude-usage/api-key', input),
   requestAppUpdate: () => request<AppUpdate>('POST', '/system/update'),
   cancelAppUpdate: () => request<AppUpdate>('DELETE', '/system/update'),
   setup: () => request<SetupStatus>('GET', '/system/setup'),

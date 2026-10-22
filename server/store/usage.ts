@@ -15,6 +15,7 @@ interface UsageRow {
   cache_read_tokens: number
   cache_write_tokens: number
   cost_usd: number | null
+  api_key: number
   duration_ms: number | null
   created_at: string
 }
@@ -48,6 +49,7 @@ const toUsage = (row: UsageRow, models: ModelUsage[]): TokenUsage => ({
   cacheReadTokens: row.cache_read_tokens,
   cacheWriteTokens: row.cache_write_tokens,
   costUsd: row.cost_usd,
+  apiKey: row.api_key === 1,
   durationMs: row.duration_ms,
   models: models.sort((a, b) => totalTokens(b) - totalTokens(a) || a.model.localeCompare(b.model)),
   createdAt: row.created_at,
@@ -95,8 +97,8 @@ function insertUsage(boardId: string, ticketId: string | null, input: RecordUsag
   const { lastInsertRowid } = sql.run(
     `INSERT INTO token_usage
        (board_id, ticket_id, agent, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd,
-        duration_ms, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        api_key, duration_ms, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     boardId,
     ticketId,
     input.agent,
@@ -105,6 +107,7 @@ function insertUsage(boardId: string, ticketId: string | null, input: RecordUsag
     input.cacheReadTokens,
     input.cacheWriteTokens,
     input.costUsd,
+    input.apiKey ? 1 : 0,
     input.durationMs,
     now(),
   )

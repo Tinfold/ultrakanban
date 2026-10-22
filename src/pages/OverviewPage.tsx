@@ -77,16 +77,19 @@ interface StatProps {
   label: string
   value: ReactNode
   detail: ReactNode
+  /** A second line of detail, if any. */
+  more?: ReactNode
   /** The section that breaks the number down. */
   target?: SectionId
 }
 
-function Stat({ label, value, detail, target }: StatProps) {
+function Stat({ label, value, detail, more, target }: StatProps) {
   const body = (
     <>
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="mt-1 text-2xl font-semibold tracking-tight">{value}</p>
       <p className="mt-0.5 truncate text-xs text-muted-foreground">{detail}</p>
+      {more && <p className="truncate text-xs text-muted-foreground">{more}</p>}
     </>
   )
   if (!target) return <div className="rounded-xl border bg-card p-4">{body}</div>
@@ -260,6 +263,9 @@ export function OverviewPage() {
     const workedMs = daily.reduce((total, day) => total + day.workedMs, 0)
     const created = daily.reduce((total, day) => total + day.events.created, 0)
     const usage = daily.reduce((total, day) => mergeUsage(total, day.usage), noUsage())
+    // What runs on the agents' API key spent is billed, so it is told apart from the plan's estimated cost.
+    const apiKeyCost = daily.reduce((total, day) => total + day.apiKeyCostUsd, 0)
+    const planCost = usage.costUsd === null ? null : Math.max(0, usage.costUsd - apiKeyCost)
     const models = modelSeries(usage, formatModel)
     const attention = needsAttention(agents, now)
     const unclaimed = totals.open - totals.working - totals.review
@@ -329,9 +335,8 @@ export function OverviewPage() {
           <Stat
             label="Tokens used"
             value={formatTokens(totalTokens(usage))}
-            detail={
-              usage.costUsd === null ? runs(usage.runs) : `${formatCost(usage.costUsd)} estimated, ${runs(usage.runs)}`
-            }
+            detail={planCost === null ? runs(usage.runs) : `${formatCost(planCost)} estimated, ${runs(usage.runs)}`}
+            more={apiKeyCost > 0 && `${formatCost(apiKeyCost)} billed to the API key`}
             target={SECTIONS.tokens}
           />
           <Stat
