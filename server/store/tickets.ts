@@ -745,7 +745,7 @@ function assertBelowUsageReserve() {
   const why =
     reservePercent === null
       ? `Agents claim no new tickets while ${limit.label} is used up, rather than spend the account's usage credits ` +
-        `(agents may spend them if the usage reserve allows it). `
+        `(agents may spend them if the usage reserve allows it, or go on on their API key if that is allowed). `
       : `Agents claim no new tickets while the rest of ${kept} is kept for people's own work: ` +
         `${limit.label} is at ${Math.round(limit.percent)}%, and its usage reserve starts at ${reservePercent}%. `
   throw new HttpError(404, 'usage_reserve_reached', `${why}Tickets agents already hold can still be worked.${resets}`, {

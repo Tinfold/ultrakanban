@@ -24,6 +24,8 @@ export interface Day {
   workedMs: number
   /** Tokens agents' runs used that day. */
   usage: UsageTotals
+  /** Of their cost, what runs on the agents' API key spent: billed, not estimated (see `AgentApiKey`). */
+  apiKeyCostUsd: number
 }
 
 const sessionEnd = (session: WorkSession, now: number) => (session.end ? Date.parse(session.end) : now)
@@ -36,6 +38,7 @@ export function dailyActivity(overview: Overview, now: number): Day[] {
     events: { created: 0, completed: 0, comment: 0, update: 0 },
     workedMs: 0,
     usage: noUsage(),
+    apiKeyCostUsd: 0,
   }))
   for (const event of overview.events) {
     const index = differenceInCalendarDays(Date.parse(event.at), first)
@@ -43,7 +46,9 @@ export function dailyActivity(overview: Overview, now: number): Day[] {
   }
   for (const run of overview.usage) {
     const index = differenceInCalendarDays(Date.parse(run.at), first)
-    if (index >= 0 && index < days.length) addUsage(days[index].usage, run)
+    if (index < 0 || index >= days.length) continue
+    addUsage(days[index].usage, run)
+    if (run.apiKey && run.costUsd !== null) days[index].apiKeyCostUsd += run.costUsd
   }
   for (const session of overview.sessions) {
     const start = Date.parse(session.start)

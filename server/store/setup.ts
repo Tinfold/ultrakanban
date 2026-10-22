@@ -10,6 +10,7 @@ interface SetupRow {
   agents_github_login: string | null
   agents_claude_account: string | null
   agents_git_identity: string | null
+  agents_api_key: number
   login_kind: AgentLoginKind | null
   login_state: AgentLoginState | null
   login_requested_at: string | null
@@ -71,6 +72,7 @@ export function getAgentHost(): AgentHost {
     githubLogin: row.agents_github_login,
     claudeAccount: row.agents_claude_account,
     gitIdentity: row.agents_git_identity,
+    apiKey: row.agents_api_key === 1,
     login: toLogin(row),
   }
 }
@@ -85,12 +87,13 @@ export function setStoredGitHubToken(token: string | null) {
 export function reportAgentHost(input: ReportAgentHostInput): AgentHost {
   sql.run(
     `UPDATE setup SET agents_seen_at = ?, agents_run_in = ?, agents_github_login = ?, agents_claude_account = ?,
-     agents_git_identity = ? WHERE id = 1`,
+     agents_git_identity = ?, agents_api_key = ? WHERE id = 1`,
     now(),
     input.runsIn,
     input.githubLogin ?? null,
     input.claudeAccount ?? null,
     input.gitIdentity ?? null,
+    input.apiKey ? 1 : 0,
   )
   return getAgentHost()
 }

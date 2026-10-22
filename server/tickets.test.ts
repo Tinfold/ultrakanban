@@ -634,6 +634,7 @@ describe('run records', () => {
         durationMs: null,
         turns: null,
         costUsd: null,
+        apiKey: false,
         message: '',
         steps: [],
         omittedSteps: null,

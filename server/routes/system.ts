@@ -11,6 +11,7 @@ import {
   requestAgentLoginSchema,
   setAgentServicesSchema,
   setGitHubTokenSchema,
+  setAgentApiKeySchema,
   setUsageReserveSchema,
 } from '../../shared/schemas.ts'
 import type { AppServices } from '../app.ts'
@@ -19,7 +20,7 @@ import { gitHubFailure } from '../errors.ts'
 import { actorOf, readJson } from '../http.ts'
 import { getAgentServices, reportAgentServices, setAgentsPaused } from '../store/agent-services.ts'
 import { cancelAppUpdate, getAppUpdate, reportAppUpdate, requestAppUpdate } from '../store/app-update.ts'
-import { getClaudeUsage, reportClaudeUsage, setUsageReserve } from '../store/claude-usage.ts'
+import { getClaudeUsage, reportClaudeUsage, setAgentApiKey, setUsageReserve } from '../store/claude-usage.ts'
 import { reportDiskUsage } from '../store/disk-usage.ts'
 import {
   cancelAgentLogin,
@@ -67,6 +68,10 @@ export const systemRoutes = ({ pullRequests: { github } }: AppServices) => {
       .put('/claude-usage/reserve', async (c) => {
         const input = await readJson(c, setUsageReserveSchema)
         return c.json(transaction(() => setUsageReserve(input)))
+      })
+      .put('/claude-usage/api-key', async (c) => {
+        const input = await readJson(c, setAgentApiKeySchema)
+        return c.json(transaction(() => setAgentApiKey(input)))
       })
       .post('/disk-usage', async (c) => {
         const input = await readJson(c, reportDiskUsageSchema)
