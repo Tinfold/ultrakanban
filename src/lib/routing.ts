@@ -3,7 +3,7 @@ import { formatCost, formatTokens } from './format.ts'
 
 export const ROUTING_LABELS: Record<RoutedSource, string> = {
   jev: 'Jev',
-  history: 'History suggestion',
+  history: 'Similar-tickets suggestion',
   default: 'Board default',
 }
 

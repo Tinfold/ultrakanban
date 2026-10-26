@@ -250,6 +250,7 @@ function addBoard(boardId: string, totals: Record<RoutedSource, SourceTotals>, j
   const board = getBoard(boardId)
   const agent = board.agentName ?? AGENT_DEFAULTS.name
   const threshold = board.jevThreshold ?? JEV_DEFAULTS.threshold
+  const jevOnly = board.jevCombine === 'jev-only'
   const finished = new Map(decidedTickets(boardId).map((row) => [row.id, !!row.finished]))
 
   // Each decided ticket's cost over all its runs, and the tokens of each agent name that worked it.
@@ -322,9 +323,9 @@ function addBoard(boardId: string, totals: Record<RoutedSource, SourceTotals>, j
     const fromJev = jevPick(route)
     const jevAbove = fromJev && (fromJev.confidence ?? 0) >= threshold ? fromJev : null
     // Each source's own pick, and the one it would have routed with: below Jev's threshold, routing falls back to the
-    // history suggestion, and without one to the board's default.
+    // history suggestion (unless the board uses Jev only), and without one to the board's default.
     const picks: Record<RoutedSource, [Setting | null, Setting]> = {
-      jev: [jevAbove, jevAbove ?? history ?? fallback],
+      jev: [jevAbove, jevAbove ?? (jevOnly ? null : history) ?? fallback],
       history: [history, history ?? fallback],
       default: [fallback, fallback],
     }

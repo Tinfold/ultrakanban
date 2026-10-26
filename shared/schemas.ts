@@ -6,6 +6,7 @@ import {
   AGENT_LOGIN_KINDS,
   AGENT_MAX_CONCURRENCY,
   COLORS,
+  JEV_COMBINES,
   JEV_MODES,
   MERGE_METHODS,
   OVERVIEW_RANGES,
@@ -105,6 +106,7 @@ export const createBoardSchema = z.object({
   jevModels: jevModels.optional(),
   jevThreshold: jevThreshold.optional(),
   jevOnlyLower: z.boolean().optional(),
+  jevCombine: z.enum(JEV_COMBINES).nullable().optional(),
   jevMode: z.enum(JEV_MODES).optional(),
 })
 
@@ -138,6 +140,7 @@ export const updateBoardSchema = z.object({
   jevModels: jevModels.optional(),
   jevThreshold: jevThreshold.optional(),
   jevOnlyLower: z.boolean().optional(),
+  jevCombine: z.enum(JEV_COMBINES).nullable().optional(),
   jevMode: z.enum(JEV_MODES).optional(),
 })
 

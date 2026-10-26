@@ -39,6 +39,7 @@ import {
   agentWorkerName,
   type BoardSummary,
   JEV_DEFAULTS,
+  type JevCombine,
   type JevMode,
   TICKET_SIZES,
   type TicketSize,
@@ -205,17 +206,28 @@ export function BoardSettingsDialog({ open, onOpenChange }: { open: boolean; onO
   )
 }
 
-type JevSettings = Pick<BoardSummary, 'jevEnabled' | 'jevModels' | 'jevThreshold' | 'jevOnlyLower' | 'jevMode'>
+type JevSettings = Pick<
+  BoardSummary,
+  'jevEnabled' | 'jevModels' | 'jevThreshold' | 'jevOnlyLower' | 'jevCombine' | 'jevMode'
+>
 
-/** The board's "Route with Jev" settings (see docs/JEV.md); only shown when a TypeSafe API key is set. */
-function JevFieldset({ value, onChange }: { value: JevSettings; onChange: (value: JevSettings) => void }) {
+/** The board's "Route with Jev" settings (see docs/JEV.md); greyed out and not saved without a TypeSafe API key. */
+function JevFieldset({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: JevSettings
+  onChange: (value: JevSettings) => void
+  disabled: boolean
+}) {
   const models = value.jevModels ?? [...AGENT_MODELS]
   const toggleModel = (model: AgentModelAlias, checked: boolean) => {
     const next = AGENT_MODELS.filter((each) => (each === model ? checked : models.includes(each)))
     if (next.length) onChange({ ...value, jevModels: next.length === AGENT_MODELS.length ? null : next })
   }
   return (
-    <fieldset className="grid gap-3 border-t pt-4">
+    <fieldset disabled={disabled} className="grid gap-5 border-t pt-5 disabled:opacity-50">
       <legend className="sr-only">Route with Jev</legend>
       <div className="grid gap-1">
         <label className="flex items-center gap-2 text-sm font-medium">
@@ -234,9 +246,8 @@ function JevFieldset({ value, onChange }: { value: JevSettings; onChange: (value
           Route with Jev
         </label>
         <p className="pl-6 text-xs text-muted-foreground">
-          Lets TypeSafe's Jev pick the model and effort for tickets that don't set their own. Each ticket's title,
-          description and tags are sent to TypeSafe to do that. Starts in dry run, which only records Jev's picks, so
-          you can see how it would have done before using them.
+          Jev (TypeSafe) picks the model and effort for tickets that don't set their own.
+          {disabled && ' Needs a TypeSafe API key.'}
         </p>
       </div>
       {value.jevEnabled && (
@@ -250,9 +261,9 @@ function JevFieldset({ value, onChange }: { value: JevSettings; onChange: (value
               <SelectTrigger id="board-settings-jev-mode" className="w-full">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="dry-run">Dry run: record Jev's pick, don't use it</SelectItem>
-                <SelectItem value="on">On: work tickets with Jev's pick</SelectItem>
+              <SelectContent position="popper">
+                <SelectItem value="dry-run">Dry run — record Jev's picks only</SelectItem>
+                <SelectItem value="on">On — work tickets at Jev's pick</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -272,44 +283,70 @@ function JevFieldset({ value, onChange }: { value: JevSettings; onChange: (value
               ))}
             </div>
           </div>
-          <div className="grid gap-1">
-            <div className="flex items-center gap-2 text-sm">
-              <Label htmlFor="board-settings-jev-threshold" className="font-normal">
-                Use its pick from a confidence of
-              </Label>
-              <Input
-                id="board-settings-jev-threshold"
-                type="number"
-                min={0}
-                max={1}
-                step={0.05}
-                value={value.jevThreshold ?? ''}
-                onChange={(event) => {
-                  const threshold = event.target.value === '' ? null : Number(event.target.value)
-                  onChange({ ...value, jevThreshold: threshold === null || Number.isNaN(threshold) ? null : threshold })
-                }}
-                placeholder={String(JEV_DEFAULTS.threshold)}
-                className="h-7 w-20"
-              />
+          <details className="rounded-md border p-3 [&>div]:mt-4">
+            <summary className="cursor-pointer text-sm font-medium">Advanced</summary>
+            <div className="grid gap-1">
+              <div className="flex items-center gap-2 text-sm">
+                <Label htmlFor="board-settings-jev-threshold" className="font-normal">
+                  Use its pick from a confidence of
+                </Label>
+                <Input
+                  id="board-settings-jev-threshold"
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={value.jevThreshold ?? ''}
+                  onChange={(event) => {
+                    const threshold = event.target.value === '' ? null : Number(event.target.value)
+                    onChange({
+                      ...value,
+                      jevThreshold: threshold === null || Number.isNaN(threshold) ? null : threshold,
+                    })
+                  }}
+                  placeholder={String(JEV_DEFAULTS.threshold)}
+                  className="h-7 w-20"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Below it, the similar-tickets suggestion or board setting is used.
+              </p>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Below it, the ticket is worked at the history suggestion or the board's setting instead.
-            </p>
-          </div>
-          <div className="grid gap-1">
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={value.jevOnlyLower}
-                onChange={(event) => onChange({ ...value, jevOnlyLower: event.target.checked })}
-                className="size-4 accent-primary"
-              />
-              Only pick cheaper settings
-            </label>
-            <p className="pl-6 text-xs text-muted-foreground">
-              Jev may pick a cheaper model or lower effort than the board's agent setting, never a dearer one.
-            </p>
-          </div>
+            <div className="grid gap-1">
+              <Label htmlFor="board-settings-jev-combine">When Jev and the similar-tickets suggestion disagree</Label>
+              <Select
+                value={value.jevCombine ?? JEV_DEFAULTS.combine}
+                onValueChange={(combine) =>
+                  onChange({ ...value, jevCombine: combine === JEV_DEFAULTS.combine ? null : (combine as JevCombine) })
+                }
+              >
+                <SelectTrigger id="board-settings-jev-combine" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="jev-only">Use Jev only</SelectItem>
+                  <SelectItem value="jev-first">Prefer Jev (fall back to similar tickets)</SelectItem>
+                  <SelectItem value="higher">Use the higher setting</SelectItem>
+                  <SelectItem value="lower">Use the lower setting</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                The similar-tickets suggestion is what similar finished tickets used.
+              </p>
+            </div>
+            <div className="grid gap-1">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={value.jevOnlyLower}
+                  onChange={(event) => onChange({ ...value, jevOnlyLower: event.target.checked })}
+                  className="size-4 accent-primary"
+                />
+                Only pick cheaper settings
+              </label>
+              <p className="pl-6 text-xs text-muted-foreground">Never above the board's agent setting.</p>
+            </div>
+          </details>
         </>
       )}
     </fieldset>
@@ -393,8 +430,8 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
   const hasBacklog = detail.columns.some((column) => column.name.toLowerCase() === 'backlog')
   const hasTypesafeKey = !!useSetup().data?.typesafe.source
   const [jev, setJev] = useState<JevSettings>(() => {
-    const { jevEnabled, jevModels, jevThreshold, jevOnlyLower, jevMode } = detail.board
-    return { jevEnabled, jevModels, jevThreshold, jevOnlyLower, jevMode }
+    const { jevEnabled, jevModels, jevThreshold, jevOnlyLower, jevCombine, jevMode } = detail.board
+    return { jevEnabled, jevModels, jevThreshold, jevOnlyLower, jevCombine, jevMode }
   })
   const tabs = useRef<(HTMLButtonElement | null)[]>([])
   const form = useRef<HTMLFormElement>(null)
@@ -865,8 +902,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
                 listed in each request a run makes, which costs tokens.
               </CheckboxField>
             </Group>
-
-            {hasTypesafeKey && <JevFieldset value={jev} onChange={setJev} />}
+            <JevFieldset value={jev} onChange={setJev} disabled={!hasTypesafeKey} />
           </Section>
 
           <Section
