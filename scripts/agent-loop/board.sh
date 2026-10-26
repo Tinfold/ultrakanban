@@ -125,12 +125,13 @@ post() {
     -H 'Content-Type: application/json' -H "X-Actor: ${3:-$worker}" -d "$2"
 }
 
-# Tells the board the agent is working on a ticket right now, and what the run is doing (run_step), so the ticket's
-# card shows the run. Sets stop_requested_by to who asked for the run to stop (empty when no one did): the board
-# answers with it, so the loop needn't read the ticket for it.
+# Tells the board the agent is working on a ticket right now, what the run is doing (run_step) and how many tokens it
+# has used so far (run_tokens), so the ticket's card shows the run. Sets stop_requested_by to who asked for the run to
+# stop (empty when no one did): the board answers with it, so the loop needn't read the ticket for it.
 heartbeat() {
   stop_requested_by=$(curl -s -X POST "$KANBAN/api/tickets/$1/heartbeat" -H 'Content-Type: application/json' \
-    -H "X-Actor: $worker" -d "$(jq -nc --arg step "${run_step:-}" 'if $step == "" then {} else {step: $step} end')" |
+    -H "X-Actor: $worker" -d "$(jq -nc --arg step "${run_step:-}" --arg tokens "${run_tokens:-}" \
+      '(if $step == "" then {} else {step: $step} end) + (if $tokens == "" then {} else {tokens: ($tokens | tonumber)} end)')" |
     jq -r '.stopRequested.by // empty' 2>/dev/null) || stop_requested_by=
 }
 

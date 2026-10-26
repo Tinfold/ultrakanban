@@ -78,6 +78,7 @@ interface TicketRow {
   agent_seen_at: string | null
   run_started_at: string | null
   run_step: string | null
+  run_tokens: number | null
   stop_requested_at: string | null
   stop_requested_by: string | null
   estimate: TicketSize | null
@@ -169,15 +170,15 @@ function toPullRequest(url: string, row: TicketRow): PullRequest {
 
 type RunRow = Pick<
   TicketRow,
-  'agent_seen_at' | 'run_started_at' | 'run_step' | 'stop_requested_at' | 'stop_requested_by'
+  'agent_seen_at' | 'run_started_at' | 'run_step' | 'run_tokens' | 'stop_requested_at' | 'stop_requested_by'
 >
 
 /** The run working a ticket: one has started, hasn't ended, and sent a heartbeat within `AGENT_IDLE_MINUTES`. */
 function runOf(row: RunRow): AgentRun | null {
-  const { agent_seen_at: seenAt, run_started_at: startedAt, run_step: step } = row
+  const { agent_seen_at: seenAt, run_started_at: startedAt, run_step: step, run_tokens: tokens } = row
   if (!startedAt || !seenAt || Date.parse(seenAt) < Date.now() - AGENT_IDLE_MINUTES * 60_000) return null
   const { stop_requested_at: at, stop_requested_by: by } = row
-  return { startedAt, seenAt, step, stopRequested: at && by ? { at, by } : null }
+  return { startedAt, seenAt, step, tokens, stopRequested: at && by ? { at, by } : null }
 }
 
 /**
@@ -362,12 +363,17 @@ export const compactTicket = (ticket: Ticket): CompactTicket => ({
   },
 })
 
+/** What a 409 says about the ticket: enough to retry, without the whole ticket. */
+function conflictState(ticket: Pick<Ticket, 'version' | 'assignee' | 'columnId'>) {
+  return { version: ticket.version, assignee: ticket.assignee, columnId: ticket.columnId }
+}
+
 function assertVersion(ticket: Ticket, ifVersion: number | undefined) {
   if (ifVersion !== undefined && ticket.version !== ifVersion) {
     throw conflict(
       'version_conflict',
       `Ticket was modified concurrently (current version ${ticket.version}, expected ${ifVersion})`,
-      { ticket },
+      conflictState(ticket),
     )
   }
 }
@@ -445,7 +451,6 @@ function assertCanEnter(
     ticket.pullRequest
       ? `Tickets enter "${target.name}" when their pull request is merged; ${ticket.pullRequest.url} is ${ticket.pullRequest.state}. It will move automatically once merged.`
       : `Tickets enter "${target.name}" only with a merged pull request, or without one as questions (tagged "${QUESTION_TAG}") or once all their sub-tickets are finished. Link one with POST /api/tickets/:id/review.`,
-    { ticket },
   )
 }
 
@@ -640,7 +645,11 @@ export function bulkUpdateTickets(boardId: string, input: BulkTicketsInput, acto
   const epic = input.epic === undefined ? undefined : resolveEpic(boardId, input.epic, { create: true })
   return tickets.map((ticket) => {
     const tagIds = [...new Set([...ticket.tagIds, ...added])].filter((tagId) => !removed.includes(tagId))
-    updateTicket(ticket.id, { priority: input.priority, tags: tagIds, epic }, actor)
+    updateTicket(
+      ticket.id,
+      { priority: input.priority, tags: tagIds, epic, agentModel: input.agentModel, agentEffort: input.agentEffort },
+      actor,
+    )
     if (target && target.id !== ticket.columnId) {
       moveTicket(ticket.id, { column: target.id, force: input.force }, actor)
     }
@@ -652,7 +661,7 @@ export function claimTicket(id: string, input: ClaimTicketInput): Ticket {
   const ticket = getTicket(id)
   assertVersion(ticket, input.ifVersion)
   if (ticket.assignee && ticket.assignee !== input.agent) {
-    throw conflict('already_claimed', `Ticket is already claimed by "${ticket.assignee}"`, { ticket })
+    throw conflict('already_claimed', `Ticket is already claimed by "${ticket.assignee}"`, conflictState(ticket))
   }
   // A ticket the agent already holds stays its own, whatever has come up since.
   if (ticket.assignee !== input.agent) assertClaimable(ticket)
@@ -686,13 +695,17 @@ function assertClaimable(ticket: Ticket) {
       : unfinishedSubtickets
         ? 'its sub-tickets are not all finished yet'
         : null
-  if (reason) throw conflict('blocked', `Ticket is blocked: ${reason}`, { ticket })
+  if (reason) throw conflict('blocked', `Ticket is blocked: ${reason}`, conflictState(ticket))
 }
 
 export function releaseTicket(id: string, input: ReleaseTicketInput): Ticket {
   const ticket = getTicket(id)
   if (ticket.assignee && ticket.assignee !== input.agent && !input.force) {
-    throw conflict('claimed_by_other', `Ticket is claimed by "${ticket.assignee}", not "${input.agent}"`, { ticket })
+    throw conflict(
+      'claimed_by_other',
+      `Ticket is claimed by "${ticket.assignee}", not "${input.agent}"`,
+      conflictState(ticket),
+    )
   }
   touchBoard(ticket.boardId)
   assign(ticket, null, input.agent)
@@ -703,7 +716,7 @@ export function releaseTicket(id: string, input: ReleaseTicketInput): Ticket {
 
 const getRunRow = (id: string) => {
   const row = sql.get<RunRow & { board_id: string }>(
-    `SELECT board_id, agent_seen_at, run_started_at, run_step, stop_requested_at, stop_requested_by
+    `SELECT board_id, agent_seen_at, run_started_at, run_step, run_tokens, stop_requested_at, stop_requested_by
      FROM tickets WHERE id = ?`,
     id,
   )
@@ -713,8 +726,9 @@ const getRunRow = (id: string) => {
 
 /**
  * Notes that an agent is working on the ticket right now, starting a run unless one is going on (see `AgentRun`), and
- * what the run is doing if the agent says (it keeps its step otherwise). Not a change to the ticket: nothing is logged
- * or bumped, but boards are told when a run starts or its step changes, so they show it. A new run starts without a
+ * what the run is doing and the tokens it has used if the agent says (it keeps them otherwise). Not a change to the
+ * ticket: nothing is logged or bumped, but boards are told when a run starts or its step or tokens change, so they
+ * show it. A new run starts without a
  * stop request, even if the run before it went quiet with one.
  */
 export function recordHeartbeat(id: string, input: HeartbeatInput) {
@@ -722,18 +736,20 @@ export function recordHeartbeat(id: string, input: HeartbeatInput) {
   const run = runOf(row)
   const at = now()
   const step = input.step === undefined ? (run?.step ?? null) : input.step || null
+  const tokens = input.tokens ?? run?.tokens ?? null
   sql.run(
-    `UPDATE tickets SET agent_seen_at = ?, run_started_at = ?, run_step = ?, stop_requested_at = ?,
+    `UPDATE tickets SET agent_seen_at = ?, run_started_at = ?, run_step = ?, run_tokens = ?, stop_requested_at = ?,
        stop_requested_by = ?
      WHERE id = ?`,
     at,
     run?.startedAt ?? at,
     step,
+    tokens,
     run?.stopRequested?.at ?? null,
     run?.stopRequested?.by ?? null,
     id,
   )
-  if (!run || step !== run.step) publish({ boardId: row.board_id })
+  if (!run || step !== run.step || tokens !== run.tokens) publish({ boardId: row.board_id })
   return { stopRequested: run?.stopRequested ?? null }
 }
 
@@ -742,7 +758,8 @@ export function endRun(id: string) {
   const row = getRunRow(id)
   if (!row.run_started_at) return
   sql.run(
-    `UPDATE tickets SET run_started_at = NULL, run_step = NULL, stop_requested_at = NULL, stop_requested_by = NULL
+    `UPDATE tickets SET run_started_at = NULL, run_step = NULL, run_tokens = NULL, stop_requested_at = NULL,
+       stop_requested_by = NULL
      WHERE id = ?`,
     id,
   )
@@ -892,7 +909,11 @@ export function submitForReview(id: string, input: SubmitForReviewInput): Ticket
   const ticket = getTicket(id)
   assertVersion(ticket, input.ifVersion)
   if (ticket.assignee && ticket.assignee !== input.agent) {
-    throw conflict('claimed_by_other', `Ticket is claimed by "${ticket.assignee}", not "${input.agent}"`, { ticket })
+    throw conflict(
+      'claimed_by_other',
+      `Ticket is claimed by "${ticket.assignee}", not "${input.agent}"`,
+      conflictState(ticket),
+    )
   }
   assertNotHeld(ticket)
   const { review } = workflowColumns(ticket.boardId)
@@ -921,7 +942,7 @@ function assertNotHeld(ticket: Ticket) {
     throw conflict(
       'awaiting_approval',
       "The ticket's plan waits for approval; don't work it until someone approves it (POST /tickets/:id/approve)",
-      { ticket },
+      conflictState(ticket),
     )
   }
 }
@@ -934,7 +955,11 @@ function assertNotHeld(ticket: Ticket) {
 export function postPlan(id: string, input: PostPlanInput): Ticket {
   const ticket = getTicket(id)
   if (ticket.assignee && ticket.assignee !== input.agent) {
-    throw conflict('claimed_by_other', `Ticket is claimed by "${ticket.assignee}", not "${input.agent}"`, { ticket })
+    throw conflict(
+      'claimed_by_other',
+      `Ticket is claimed by "${ticket.assignee}", not "${input.agent}"`,
+      conflictState(ticket),
+    )
   }
   const { approval_size: approvalSize } = sql.get<{ approval_size: TicketSize | null }>(
     'SELECT approval_size FROM boards WHERE id = ?',
@@ -955,10 +980,10 @@ export function approvePlan(id: string, input: ApprovePlanInput, actor: string):
   const ticket = getTicket(id)
   assertVersion(ticket, input.ifVersion)
   if (ticket.approval !== 'pending') {
-    throw conflict('not_awaiting_approval', "The ticket's plan doesn't wait for approval", { ticket })
+    throw conflict('not_awaiting_approval', "The ticket's plan doesn't wait for approval", conflictState(ticket))
   }
   if (ticket.assignee && isAgentOf(ticket.assignee, actor)) {
-    throw conflict('own_plan', "The ticket's agent can't approve its own plan; a person has to", { ticket })
+    throw conflict('own_plan', "The ticket's agent can't approve its own plan; a person has to", conflictState(ticket))
   }
   touchBoard(ticket.boardId)
   updateRow('tickets', id, { approval: 'approved' })

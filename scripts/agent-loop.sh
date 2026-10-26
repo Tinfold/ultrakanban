@@ -42,8 +42,8 @@
 # also sends the board a heartbeat for the ticket (POST /tickets/:id/heartbeat): the board counts tickets without one
 # (and without other activity) for 10 minutes as idle, and offers to move them back to the todo column. The heartbeats
 # say what the run is doing (its latest tool call, read from its output every RUN_STEP_SECONDS, or before its first one
-# what it is for: working the ticket, or the feedback it answers), and the loop tells the board when the run ends, so
-# the ticket's card shows the run while it goes on.
+# what it is for: working the ticket, or the feedback it answers) and how many tokens it has used so far, and the loop
+# tells the board when the run ends, so the ticket's card shows the run while it goes on.
 #
 # People can also stop a run without taking the ticket away, to give the agent new instructions (the Stop button,
 # POST /tickets/:id/stop). The same check of the ticket sees that and stops the run, but keeps its session and its

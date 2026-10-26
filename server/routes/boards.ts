@@ -189,6 +189,7 @@ export const boardRoutes = ({ pullRequests, mergeQueue, attachmentFiles }: AppSe
         title: c.req.query('title'),
         tag: c.req.queries('tag'),
         steps: c.req.query('steps'),
+        estimate: c.req.query('estimate'),
       })
       const boardId = c.req.param('boardId')
       return c.json({ ...suggestAgent(boardId, query), routing: compareRouting([boardId]) })

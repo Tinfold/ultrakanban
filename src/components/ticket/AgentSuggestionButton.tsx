@@ -21,6 +21,12 @@ interface AgentSuggestionButtonProps {
 const cost = (stats: Pick<AgentSettingStats, 'costUsd' | 'tokens'>) =>
   stats.costUsd !== null ? formatCost(stats.costUsd) : `${formatTokens(stats.tokens)} tokens`
 
+/** What a finished ticket costs at the setting, as settings are compared: in dollars, else in weighted tokens. */
+const costPerFinished = (stats: AgentSettingStats) =>
+  stats.costPerFinishedUsd !== null
+    ? formatCost(stats.costPerFinishedUsd)
+    : `${formatTokens(stats.weightedTokensPerFinished ?? 0)} weighted tokens`
+
 /**
  * Suggests a model and effort for a new ticket from how similar tickets on the board went, as it is being written.
  * Shown only when the suggestion differs from what the ticket would run at.
@@ -84,7 +90,7 @@ export function AgentSuggestionButton({
       <TooltipContent className="flex-col items-start">
         <p className="max-w-80">
           {suggestion.finished} of {suggestion.tickets} similar {suggestion.tickets === 1 ? 'ticket' : 'tickets'} done
-          at this setting, {cost(suggestion)} each on average. Click to use it.
+          at this setting, {costPerFinished(suggestion)} per finished ticket on average. Click to use it.
         </p>
         <ul className="max-w-80">
           {suggestion.similar.map((ticket) => (

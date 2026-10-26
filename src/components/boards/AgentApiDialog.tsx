@@ -1,15 +1,22 @@
 import { CheckIcon, CopyIcon, ExternalLinkIcon } from 'lucide-react'
 import { useState } from 'react'
+import { toast } from 'sonner'
 import type { Column } from '@shared/domain'
 import { useBoardContext } from '@/components/board/board-context'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { copyText } from '@/lib/clipboard'
 import { cn } from '@/lib/utils'
 
 function CodeBlock({ title, code, wrap }: { title: string; code: string; wrap?: boolean }) {
   const [copied, setCopied] = useState(false)
   const copy = async () => {
-    await navigator.clipboard.writeText(code)
+    try {
+      await copyText(code)
+    } catch {
+      toast.error("Couldn't copy to the clipboard")
+      return
+    }
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }

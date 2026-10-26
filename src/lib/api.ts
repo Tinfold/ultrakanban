@@ -49,11 +49,14 @@ import { readActor } from './actor'
 export class ApiError extends Error {
   readonly status: number
   readonly code: string
+  /** More about the error, e.g. the ticket as it is now on a `version_conflict`. */
+  readonly details?: unknown
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, details?: unknown) {
     super(message)
     this.status = status
     this.code = code
+    this.details = details
   }
 }
 
@@ -68,7 +71,12 @@ async function request<T>(method: string, path: string, body?: unknown, keepaliv
   })
   if (!response.ok) {
     const data = (await response.json().catch(() => null)) as ApiErrorBody | null
-    throw new ApiError(response.status, data?.error.code ?? 'http_error', data?.error.message ?? response.statusText)
+    throw new ApiError(
+      response.status,
+      data?.error.code ?? 'http_error',
+      data?.error.message ?? response.statusText,
+      data?.error.details,
+    )
   }
   return response.status === 204 ? (undefined as T) : response.json()
 }

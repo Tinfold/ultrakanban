@@ -3,7 +3,7 @@ import { Placeholder } from '@tiptap/extensions'
 import { Markdown } from '@tiptap/markdown'
 import { EditorContent, Extension, InputRule, useEditor } from '@tiptap/react'
 import { StarterKit } from '@tiptap/starter-kit'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { CodeBlockWithCopy } from './code-block'
 import { EditorToolbar } from './EditorToolbar'
@@ -32,6 +32,8 @@ interface DescriptionEditorProps {
   value: string
   onChange: (markdown: string) => void
   onBlur?: () => void
+  /** Called whenever the editor shows `value`, rather than unsaved edits. */
+  onSync?: (markdown: string) => void
   placeholder?: string
   autoFocus?: boolean
   className?: string
@@ -42,6 +44,7 @@ export function DescriptionEditor({
   value,
   onChange,
   onBlur,
+  onSync,
   placeholder = 'Add a description…',
   autoFocus,
   className,
@@ -69,9 +72,16 @@ export function DescriptionEditor({
   })
 
   // Apply changes made elsewhere (other tabs, agents) unless the user is editing.
+  const onSyncRef = useRef(onSync)
   useEffect(() => {
-    if (editor.isFocused || editor.getMarkdown() === value) return
-    editor.commands.setContent(value, { contentType: 'markdown', emitUpdate: false })
+    onSyncRef.current = onSync
+  })
+  useEffect(() => {
+    if (editor.getMarkdown() !== value) {
+      if (editor.isFocused) return
+      editor.commands.setContent(value, { contentType: 'markdown', emitUpdate: false })
+    }
+    onSyncRef.current?.(value)
   }, [editor, value])
 
   return (

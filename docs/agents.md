@@ -388,7 +388,9 @@ is never asked for it.
 While a run is going, its card and the ticket show what it does: its latest tool call (`Bash: npm test`, or the
 Agent call that started a subagent while that works), which the loop reads from the same output every
 `RUN_STEP_SECONDS` (10) and sends with the run's heartbeat when it changed. Before its first call, and with
-`RUN_STEP_SECONDS=0`, they show what the run is for: working the ticket, or the feedback it answers.
+`RUN_STEP_SECONDS=0`, they show what the run is for: working the ticket, or the feedback it answers. They also show
+the tokens the run has used so far, which the loop adds up from the same output and sends with each heartbeat, so a
+runaway run shows while it goes on; its record on the ticket shows the tokens it used in all once it ends.
 
 Nothing is missed, even while a run is going: before each run the loop notes the newest ticket activity id,
 pull request comment, review and inline comment ids, and the head commit's checks and conflict state. It saves

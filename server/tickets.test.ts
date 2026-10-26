@@ -61,14 +61,20 @@ describe('tickets', () => {
   test('rejects stale writes with ifVersion', async () => {
     const ticket = await addTicket({ title: 'A' })
     const ok = await call<Ticket>('PATCH', `/tickets/${ticket.id}`, { title: 'B', ifVersion: 1 })
-    const stale = await call<{ error: { code: string } }>('PATCH', `/tickets/${ticket.id}`, {
-      title: 'C',
-      ifVersion: 1,
-    })
+    const stale = await call<{ error: { code: string; details: Record<string, unknown> } }>(
+      'PATCH',
+      `/tickets/${ticket.id}`,
+      {
+        title: 'C',
+        ifVersion: 1,
+      },
+    )
 
     assert.equal(ok.body.version, 2)
     assert.equal(stale.status, 409)
     assert.equal(stale.body.error.code, 'version_conflict')
+    assert.deepEqual(Object.keys(stale.body.error.details).sort(), ['assignee', 'columnId', 'version'])
+    assert.equal(stale.body.error.details.version, 2)
   })
 
   test('validates input', async () => {
@@ -137,7 +143,11 @@ describe('agent claiming', () => {
 
     const claimed = await call<Ticket>('POST', `/tickets/${ticket.id}/claim`, { agent: 'alpha', moveTo: 'Doing' })
     const again = await call<Ticket>('POST', `/tickets/${ticket.id}/claim`, { agent: 'alpha' })
-    const stolen = await call<{ error: { code: string } }>('POST', `/tickets/${ticket.id}/claim`, { agent: 'beta' })
+    const stolen = await call<{ error: { code: string; details: Record<string, unknown> } }>(
+      'POST',
+      `/tickets/${ticket.id}/claim`,
+      { agent: 'beta' },
+    )
     const badRelease = await call('POST', `/tickets/${ticket.id}/release`, { agent: 'beta' })
     const released = await call<Ticket>('POST', `/tickets/${ticket.id}/release`, { agent: 'alpha' })
     const reclaimed = await call<Ticket>('POST', `/tickets/${ticket.id}/claim`, { agent: 'beta' })
@@ -147,6 +157,8 @@ describe('agent claiming', () => {
     assert.equal(again.status, 200)
     assert.equal(stolen.status, 409)
     assert.equal(stolen.body.error.code, 'already_claimed')
+    assert.deepEqual(Object.keys(stolen.body.error.details).sort(), ['assignee', 'columnId', 'version'])
+    assert.equal(stolen.body.error.details.assignee, 'alpha')
     assert.equal(badRelease.status, 409)
     assert.equal(released.body.assignee, null)
     assert.equal(reclaimed.body.assignee, 'beta')
@@ -417,11 +429,18 @@ describe('idle tickets', () => {
 
     await call('POST', `/tickets/${ticket.id}/heartbeat`, { step: 'Fixing CI' })
     assert.equal((await run())?.step, 'Fixing CI')
+    assert.equal((await run())?.tokens, null)
     assert.equal(events.length, 2)
+
+    // The tokens a run has used so far change what boards show, and a heartbeat without them keeps them.
+    await call('POST', `/tickets/${ticket.id}/heartbeat`, { tokens: 120_000 })
+    await call('POST', `/tickets/${ticket.id}/heartbeat`, { step: 'Fixing CI' })
+    assert.deepEqual(await run().then((current) => [current?.step, current?.tokens]), ['Fixing CI', 120_000])
+    assert.equal(events.length, 3)
 
     assert.equal((await call('DELETE', `/tickets/${ticket.id}/heartbeat`)).status, 204)
     assert.equal(await run(), null)
-    assert.equal(events.length, 3)
+    assert.equal(events.length, 4)
     unsubscribe()
     assert.equal((await call('DELETE', '/tickets/missing/heartbeat')).status, 404)
     assert.equal((await call('POST', `/tickets/${ticket.id}/heartbeat`, { step: 'x'.repeat(201) })).status, 400)
@@ -740,6 +759,7 @@ describe('run records', () => {
     exitCode: 0,
     durationMs: 1_380_000,
     turns: 41,
+    tokens: 1_234_567,
     costUsd: 1.2,
     message: 'Opened the pull request.',
     steps: [
@@ -765,6 +785,7 @@ describe('run records', () => {
       { tool: 'Edit', summary: 'src/app.ts', error: true },
     ])
     assert.equal(first.body.omittedSteps, null)
+    assert.equal(first.body.tokens, 1_234_567)
     // A run that ended without a result has little more to say.
     assert.deepEqual(
       { ...second.body, id: 0, createdAt: '' },
@@ -776,6 +797,7 @@ describe('run records', () => {
         exitCode: 124,
         durationMs: null,
         turns: null,
+        tokens: null,
         costUsd: null,
         apiKey: false,
         message: '',

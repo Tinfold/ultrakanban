@@ -4,16 +4,16 @@ import { AGENT_IDLE_MINUTES, AGENT_RUN_STALLED_MINUTES, type Ticket } from '@sha
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { Button } from '@/components/ui/button'
 import { useNow } from '@/hooks/use-now'
-import { formatDuration, ticketRef } from '@/lib/format'
+import { formatDuration, formatTokens, ticketRef } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { useBoardContext } from './board-context'
 
 const stopPropagation = (event: SyntheticEvent) => event.stopPropagation()
 
 /**
- * The agent run working a ticket: how long it has gone on and its step, or that its heartbeats stopped, with a button
- * that stops it; "Stopping…" once someone asked it to stop, until it has. `children` are more buttons for the ticket,
- * shown after that one. Render it only for a ticket with a run, as it keeps a timer.
+ * The agent run working a ticket: how long it has gone on, the tokens it has used so far and its step, or that its
+ * heartbeats stopped, with a button that stops it; "Stopping…" once someone asked it to stop, until it has. `children`
+ * are more buttons for the ticket, shown after that one. Render it only for a ticket with a run, as it keeps a timer.
  */
 export function RunStatus({
   ticket,
@@ -35,12 +35,13 @@ export function RunStatus({
   const stalled = silentMs >= AGENT_RUN_STALLED_MINUTES * 60_000
   const stopping = run.stopRequested
   const elapsed = formatDuration(now - Date.parse(run.startedAt))
+  const tokens = run.tokens !== null ? `${formatTokens(run.tokens)} tokens` : null
   const title = stopping
     ? `${stopping.by} asked the agent run to stop ${formatDuration(now - Date.parse(stopping.at))} ago. Its loop ` +
       'stops it at its next check of the ticket, and it carries on where it left off once there is new feedback.'
     : stalled
       ? `Agent run started ${elapsed} ago; no heartbeat for ${formatDuration(silentMs)}, it may have stalled`
-      : `Agent run going on for ${elapsed}${run.step ? `: ${run.step}` : ''}`
+      : `Agent run going on for ${elapsed}${tokens ? `, ${tokens} so far` : ''}${run.step ? `: ${run.step}` : ''}`
 
   return (
     <div
@@ -57,6 +58,7 @@ export function RunStatus({
       </span>
       <span className="shrink-0 font-medium tabular-nums">
         {stopping ? 'Stopping…' : stalled ? `No heartbeat for ${formatDuration(silentMs)}` : `Running ${elapsed}`}
+        {tokens && <> · {tokens}</>}
       </span>
       {!stalled && !stopping && run.step && <span className="truncate text-muted-foreground">· {run.step}</span>}
       {(!stopping || children) && (

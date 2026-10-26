@@ -167,6 +167,9 @@ export interface BulkChange {
   removeTagIds?: string[]
   /** The epic to put them in; null takes them out of theirs. */
   epicId?: string | null
+  /** The model and effort to work them with; null follows the board's setting. */
+  agentModel?: string | null
+  agentEffort?: Ticket['agentEffort']
 }
 
 /** Applies the same change to several tickets; moved tickets are appended in the order given, like the API does. */
@@ -180,7 +183,14 @@ export function bulkChangeTickets(detail: BoardDetail, ticketIds: string[], chan
         (tagId) => !change.removeTagIds?.includes(tagId),
       )
       const epicId = change.epicId === undefined ? ticket.epicId : change.epicId
-      return { ...ticket, tagIds, epicId, priority: change.priority ?? ticket.priority }
+      return {
+        ...ticket,
+        tagIds,
+        epicId,
+        priority: change.priority ?? ticket.priority,
+        agentModel: change.agentModel === undefined ? ticket.agentModel : change.agentModel,
+        agentEffort: change.agentEffort === undefined ? ticket.agentEffort : change.agentEffort,
+      }
     }),
   }
   if (change.moveTo) {

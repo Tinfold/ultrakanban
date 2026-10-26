@@ -80,9 +80,24 @@ current_step() {
     jq -nRr --arg cwd "$PWD" "$RUN_STEP" 2>/dev/null
 }
 
+# The tokens a run that is going on has used so far, for its heartbeat: the input, output and cache tokens of each of
+# its model's responses in claude's output, subagents' included. A response that came in several parts repeats its
+# usage in each, so each counts once, with its latest. Prints nothing before the first response.
+read -r -d '' RUN_TOKENS <<'JQ'
+reduce (inputs | try fromjson catch null | objects | select(.type == "assistant") | .message | objects
+  | select(.id and .usage)) as $m ({}; .[$m.id] = ($m.usage | (.input_tokens // 0) + (.output_tokens // 0)
+    + (.cache_read_input_tokens // 0) + (.cache_creation_input_tokens // 0)))
+| if . == {} then empty else add end
+JQ
+
+# Prints the tokens used so far by the run whose output (claude's stream-json) is in the given file (see RUN_TOKENS).
+current_tokens() {
+  grep -F '"type":"assistant"' "$1" 2>/dev/null | jq -nR "$RUN_TOKENS" 2>/dev/null
+}
+
 # A run's record, the body of POST /tickets/:id/runs (see RunRecord in shared/domain.ts), from RUN_SUMMARY's output
 # and what the loop knows: $outcome, the exit $code, the $duration in ms, the run's $usage (USAGE's output, or null)
-# for its cost, whether it went on the agents' API key ($apiKey), and the end of what claude printed to stderr
+# for its tokens and cost, whether it went on the agents' API key ($apiKey), and the end of what claude printed to stderr
 # ($errors), the message of a run that left no other.
 # The message is clipped to 4000 characters (RUN_MESSAGE_MAX), and a run of more than 150 tool calls (RUN_MAX_STEPS)
 # keeps its first and last 75, saying how many were left out between them.
@@ -92,7 +107,9 @@ def clip($n): if length > $n then .[:($n - 1)] + "…" else . end;
 | (.steps // []) as $steps
 | ($steps | length) as $count
 | {agent: $agent, outcome: $outcome, exitCode: $code, durationMs: $duration,
-   turns: (.result.num_turns // .turns // null), costUsd: (($usage | objects | .costUsd) // null), apiKey: $apiKey,
+   turns: (.result.num_turns // .turns // null),
+   tokens: ($usage | objects | .inputTokens + .outputTokens + .cacheReadTokens + .cacheWriteTokens) // null,
+   costUsd: (($usage | objects | .costUsd) // null), apiKey: $apiKey,
    message: (((.result.result // .text // (.output // [] | join("\n"))) | strings | select(test("\\S"))) // $errors
      | clip(4000)),
    steps: (if $count > 2 * $half then $steps[:$half] + $steps[($count - $half):] else $steps end),
@@ -185,9 +202,11 @@ stop_reason() {
 # takes the ticket away from the agent or asks for the run to stop, writing why to the given file (see stop_reason).
 # Each check also tells the board the agent is working on the ticket, so the board doesn't count it as idle. Every
 # RUN_STEP_SECONDS it also reads the run's latest tool call from its output file (see current_step), and tells the
-# board when it changed, so the ticket shows what the run does as it goes.
+# board when it changed, so the ticket shows what the run does as it goes. Each heartbeat also says how many tokens
+# the run has used so far (see current_tokens), so a runaway run shows while it goes on.
 watch_run() {
   local id=$1 pid=$2 file=$3 output=$4 idle= reason step due checked=$SECONDS interval=$TICKET_CHECK_SECONDS
+  local run_tokens=
   trap - INT TERM
   if [[ -n $lock_fd ]]; then exec {lock_fd}>&-; fi
   ((RUN_STEP_SECONDS > 0 && RUN_STEP_SECONDS < interval)) && interval=$RUN_STEP_SECONDS
@@ -201,6 +220,7 @@ watch_run() {
     elif ((!due)); then
       continue
     fi
+    run_tokens=$(current_tokens "$output")
     heartbeat "$id"
     if [[ -n $stop_requested_by ]]; then
       printf 'requested\t%s\n' "$stop_requested_by" >"$file"
