@@ -5,6 +5,7 @@ import {
   AGENT_IDLE_MINUTES,
   type ApiErrorBody,
   type BoardDetail,
+  type CompactTicket,
   RUN_MAX_STEPS,
   RUN_MESSAGE_MAX,
   RUN_RECORDS_KEPT,
@@ -277,6 +278,22 @@ describe('lean responses', () => {
     }
     assert.equal(board.columns.length > 0, true)
     assert.equal((await call<Ticket[]>('GET', `/boards/${boardId}/tickets`)).body[0].description, 'Long text')
+  })
+
+  test("keeps what the agent loop reads of a ticket's feedback in the compact board", async () => {
+    await addTicket({
+      title: 'A',
+      agentModel: 'sonnet',
+      agentEffort: 'high',
+      pullRequest: 'https://github.com/acme/app/pull/7',
+    })
+    const { body: board } = await call<BoardDetail>('GET', `/boards/${boardId}?compact=1`)
+    const [compact] = board.tickets as unknown as CompactTicket[]
+
+    assert.equal(compact.agentModel, 'sonnet')
+    assert.equal(compact.agentEffort, 'high')
+    assert.equal(compact.pullRequest?.repo, 'acme/app')
+    assert.equal(compact.pullRequest?.number, 7)
   })
 
   test('filters the tickets list by column and assignee', async () => {

@@ -615,7 +615,9 @@ export type CompactTicket = Pick<
   | 'archived'
   | 'subtickets'
   | 'commentCount'
-> & { pullRequest: Pick<PullRequest, 'url' | 'state' | 'checks' | 'conflicts'> | null }
+  | 'agentModel'
+  | 'agentEffort'
+> & { pullRequest: Pick<PullRequest, 'url' | 'repo' | 'number' | 'state' | 'checks' | 'conflicts'> | null }
 
 /**
  * Why the board's auto-merge (`BoardSummary.autoMerge`) isn't merging a ticket's pull request yet, as its latest round

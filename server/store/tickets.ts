@@ -355,8 +355,12 @@ export const compactTicket = (ticket: Ticket): CompactTicket => ({
   archived: ticket.archived,
   subtickets: ticket.subtickets,
   commentCount: ticket.commentCount,
+  agentModel: ticket.agentModel,
+  agentEffort: ticket.agentEffort,
   pullRequest: ticket.pullRequest && {
     url: ticket.pullRequest.url,
+    repo: ticket.pullRequest.repo,
+    number: ticket.pullRequest.number,
     state: ticket.pullRequest.state,
     checks: ticket.pullRequest.checks,
     conflicts: ticket.pullRequest.conflicts,
