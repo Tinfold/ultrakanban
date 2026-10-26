@@ -30,6 +30,69 @@ export interface JevResult {
   usage: JevUsage
 }
 
+type WireAnswer = {
+  type: string
+  choice?: string
+  score?: number
+  noul?: number
+  confidence?: number
+  probabilities?: Record<string, number>
+}
+
+/** The questions as `/v1/systemone` takes them: an object keyed by id, with each option or level in `criteria`. */
+export function toWireQuestions(questions: JevQuestion[]) {
+  const describe = (name: string, description?: string) => (description ? `${name}: ${description}` : name)
+  return Object.fromEntries(
+    questions.map((question) => {
+      if (question.type === 'choice') {
+        const criteria = Object.fromEntries(question.options.map((o) => [o.name, o.description ?? o.name]))
+        return [question.id, { type: 'choice', question: question.question, criteria }]
+      }
+      if (question.type === 'score') {
+        const criteria = question.levels.map((level) => describe(level.name, level.description))
+        return [question.id, { type: 'score', question: question.question, criteria }]
+      }
+      return [question.id, { type: 'noul', question: question.question, instructions: question.question }]
+    }),
+  )
+}
+
+/** The answers as `answers` arrive (an object keyed by id, a score as a level's index) turned back into `JevAnswer`s. */
+export function fromWireAnswers(wire: Record<string, WireAnswer>, questions: JevQuestion[]): JevAnswer[] {
+  return questions.flatMap((question): JevAnswer[] => {
+    const entry = wire[question.id]
+    if (!entry || entry.type !== question.type) return []
+    if (question.type === 'choice' && typeof entry.choice === 'string') {
+      return [
+        {
+          id: question.id,
+          type: 'choice',
+          choice: entry.choice,
+          probabilities: entry.probabilities ?? {},
+          confidence: entry.confidence ?? 0,
+        },
+      ]
+    }
+    if (question.type === 'score' && typeof entry.score === 'number') {
+      const names = question.levels.map((level) => level.name)
+      const name = names[Math.round(entry.score)]
+      if (!name) return []
+      const probabilities = Object.fromEntries(
+        Object.entries(entry.probabilities ?? {}).flatMap(([index, p]) =>
+          names[Number(index)] ? [[names[Number(index)], p]] : [],
+        ),
+      )
+      return [
+        { id: question.id, type: 'score', score: name, probabilities, confidence: entry.confidence ?? 0, legend: null },
+      ]
+    }
+    if (question.type === 'noul' && typeof entry.noul === 'number') {
+      return [{ id: question.id, type: 'noul', probability: entry.noul }]
+    }
+    return []
+  })
+}
+
 /** The `fetch` Jev is called with; tests swap in a fake so they never reach the network. */
 let fetchImpl: typeof fetch = (input, init) => fetch(input, init)
 export const setJevFetch = (impl: typeof fetch | null) => void (fetchImpl = impl ?? ((i, n) => fetch(i, n)))
@@ -48,17 +111,17 @@ export async function systemOne(state: unknown, questions: JevQuestion[]): Promi
     const response = await fetchImpl(`${typesafeBase()}/v1/systemone`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: JEV_MODEL, state, questions }),
+      body: JSON.stringify({ model: JEV_MODEL, state, questions: toWireQuestions(questions) }),
       signal: AbortSignal.timeout(JEV_TIMEOUT_MS),
     })
     if (!response.ok) throw new Error(`TypeSafe responded ${response.status}`)
     const data = (await response.json()) as {
-      answers?: JevAnswer[]
+      answers?: Record<string, WireAnswer>
       usage?: { input_tokens?: number; output_tokens?: number; prompt_tokens?: number }
     }
-    if (!Array.isArray(data.answers)) throw new Error('no answers in the response')
+    if (!data.answers || typeof data.answers !== 'object') throw new Error('no answers in the response')
     return {
-      answers: data.answers,
+      answers: fromWireAnswers(data.answers, questions),
       usage: {
         inputTokens: data.usage?.input_tokens ?? data.usage?.prompt_tokens ?? 0,
         outputTokens: data.usage?.output_tokens ?? 0,

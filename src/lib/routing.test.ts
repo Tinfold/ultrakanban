@@ -40,9 +40,9 @@ describe('routing comparison', () => {
     const result = comparison([stats('jev', 12, 0.15), stats('history', 12, 0.2), stats('default', 20, 1)], 'jev')
     assert.equal(
       routingVerdict(result),
-      'Jev costs the least per finished ticket: $0.15, against $0.20 for History suggestion and $1.00 for Board default.',
+      'Jev costs the least per finished ticket: $0.15, against $0.20 for Similar-tickets suggestion and $1.00 for Board default.',
     )
-    assert.equal(routingCosts(result), 'Jev $0.15 · History suggestion $0.20 · Board default $1.00')
+    assert.equal(routingCosts(result), 'Jev $0.15 · Similar-tickets suggestion $0.20 · Board default $1.00')
     assert.equal(
       routingCosts({ ...result, unit: 'tokens', sources: [stats('default', 1, 12_500)] }),
       'Board default 12.5K tokens',

@@ -321,6 +321,7 @@ interface BoardSummary {
   jevModels: string[] | null // models Jev may pick from; all when null
   jevThreshold: number | null // smallest confidence at which Jev's pick is used (0.7 when null)
   jevOnlyLower: boolean // Jev may only pick a cheaper setting than the board's default
+  jevCombine: 'jev-only' | 'jev-first' | 'higher' | 'lower' | null // how Jev and the similar-tickets suggestion combine (jev-first when null)
   jevMode: 'dry-run' | 'on' | null // dry-run records Jev's pick only; set to dry-run when Jev is first switched on
   ticketCount: number // open tickets: all but those in the done column or the one named Cancelled (any case)
   waitingCount: number // open tickets whose agent waits for a person: approval of its plan, or an answer to its comment
@@ -567,7 +568,7 @@ interface RunRouting {
 
 Each claim (`claim` and `claim-next`) records how the ticket is routed: the setting it is worked at and where that came
 from (`ticket` when it names its own `agentModel`/`agentEffort`, else the board's `default`), and what the other sources
-would have picked: the [history suggestion](#suggested-model-and-effort) when it is built on 3 or more similar tickets,
+would have picked: the [similar-tickets suggestion](#suggested-model-and-effort) when it is built on 3 or more similar tickets,
 and, on a board that routes with Jev (`jevEnabled`, see [docs/JEV.md](JEV.md)), Jev's pick and confidence. Jev is asked
 before the claim returns, and in `dry-run` mode its pick is only recorded, never used. A Jev request that fails is
 left out and never fails the claim. Each Jev request is recorded as a run on the ticket (agent `jev`, model
@@ -581,10 +582,17 @@ In `on` mode the claim also returns the setting to work the ticket at as `routed
    board's default to `haiku` or to `low` effort needs more: halfway from the threshold to 1 (0.85 at 0.7). When
    Jev's effort probability is spread over two efforts (within 0.1 of each other), the higher one is taken, or the
    lower one when Jev thinks the ticket is fully specified.
-3. `history`: the history suggestion, when it is built on 3 or more similar tickets.
+3. `history`: the similar-tickets suggestion, when it is built on 3 or more similar tickets.
 4. `default`: the board's `agentModel` and `agentEffort`.
 
-Jev's and the history suggestion's picks must be among the board's `jevModels`, and with `jevOnlyLower` each is held to
+The board's `jevCombine` changes steps 2 and 3: `jev-first` (the default) is the order above; `jev-only` skips the
+similar-tickets suggestion, so below the threshold the ticket gets the board's default; `higher` and `lower` take, when both
+Jev (above its threshold) and the similar-tickets suggestion have a pick, the more or the less capable model and effort of the
+two, each compared on its own by its order in `AGENT_MODELS` and `AGENT_EFFORTS` (with only one pick, that one). The
+route's `source` is the one whose model was taken, or whose effort was on the same model (`jev` on a full tie), and its
+`confidence` is Jev's only when the source is `jev`.
+
+Jev's and the similar-tickets suggestion's picks must be among the board's `jevModels`, and with `jevOnlyLower` each is held to
 the board's default (its model and its effort each no dearer). Whichever of `jev`, `history` and `default` routes, the
 ticket never goes below the setting the board agent's newest run on it worked at, its model and its effort each: a
 ticket whose run failed or that came back from review with changes keeps or raises its setting. Jev's pick is kept with a hash of what it was told about
@@ -613,7 +621,8 @@ matches. The [suggestion](#suggested-model-and-effort) and the [overview](#overv
 _finished_ ticket (cost divided by success rate), on the tickets decided since routing was recorded:
 
 - Each source is counted as if it had picked every ticket's setting: Jev when its confidence is at least the board's
-  `jevThreshold` (else it falls back to the history suggestion, then the default, as routing would), the history
+  `jevThreshold` (else it falls back to the similar-tickets suggestion, unless `jevCombine` is `jev-only`, then the default, as
+  routing would), the similar-tickets
   suggestion (else the default), and the default.
 - A ticket worked at the setting a source picked counts as it went. One worked at another setting counts at the
   board's average for the pick (its cost per decided ticket and its success rate), once the board has decided 3 or

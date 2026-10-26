@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, mock, test } from 'node:test'
 import type { ApiErrorBody, BoardSummary } from '../shared/domain.ts'
-import { JEV_MODEL, systemOne, type JevQuestion } from './jev.ts'
+import { fromWireAnswers, JEV_MODEL, systemOne, toWireQuestions, type JevQuestion } from './jev.ts'
 import { boardId, call, jev } from './test-app.ts'
 
 describe('jev client', () => {
@@ -28,6 +28,40 @@ describe('jev client', () => {
     assert.equal(jev.calls[0].url, 'https://api.typesafe.ai/v1/systemone')
     assert.equal(jev.calls[0].auth, 'Bearer ts_key')
     assert.equal(jev.calls[0].body.model, JEV_MODEL)
+  })
+
+  test('speaks the wire format: questions keyed by id, scores as level indexes', () => {
+    const asked: JevQuestion[] = [
+      ...questions,
+      {
+        id: 'effort',
+        type: 'score',
+        question: 'How much?',
+        levels: [{ name: 'low', description: 'easy' }, { name: 'high' }],
+      },
+      { id: 'spec', type: 'noul', question: 'Fully specified.' },
+    ]
+    const wire = toWireQuestions(asked) as Record<string, any>
+    assert.deepEqual(Object.keys(wire), ['model', 'effort', 'spec'])
+    assert.deepEqual(wire.effort.criteria, ['low: easy', 'high'])
+    assert.ok(wire.spec.instructions)
+    const answers = fromWireAnswers(
+      {
+        model: { type: 'choice', choice: 'haiku', confidence: 1, probabilities: { haiku: 1, sonnet: 0 } },
+        effort: { type: 'score', score: 1, confidence: 0.9, probabilities: { '0': 0.2, '1': 0.8 } },
+        spec: { type: 'noul', noul: 0.3 },
+      },
+      asked,
+    )
+    assert.deepEqual(answers[1], {
+      id: 'effort',
+      type: 'score',
+      score: 'high',
+      probabilities: { low: 0.2, high: 0.8 },
+      confidence: 0.9,
+      legend: null,
+    })
+    assert.deepEqual(answers[2], { id: 'spec', type: 'noul', probability: 0.3 })
   })
 
   test('returns null on a timeout, an error status or no key', async () => {
@@ -57,10 +91,10 @@ describe('Route with Jev board setting', () => {
   })
 
   test('is off by default, with no mode until it is first switched on', async () => {
-    const { jevEnabled, jevModels, jevThreshold, jevOnlyLower, jevMode } = await board()
+    const { jevEnabled, jevModels, jevThreshold, jevOnlyLower, jevCombine, jevMode } = await board()
     assert.deepEqual(
-      { jevEnabled, jevModels, jevThreshold, jevOnlyLower, jevMode },
-      { jevEnabled: false, jevModels: null, jevThreshold: null, jevOnlyLower: false, jevMode: null },
+      { jevEnabled, jevModels, jevThreshold, jevOnlyLower, jevCombine, jevMode },
+      { jevEnabled: false, jevModels: null, jevThreshold: null, jevOnlyLower: false, jevCombine: null, jevMode: null },
     )
   })
 
@@ -77,14 +111,22 @@ describe('Route with Jev board setting', () => {
     assert.equal((await patch({ jevEnabled: true, jevMode: 'on' })).body.jevMode, 'on')
   })
 
-  test('saves the models, threshold and "may only lower" switch, and clears them back to the defaults', async () => {
-    const saved = (await patch({ jevModels: ['haiku', 'sonnet'], jevThreshold: 0.85, jevOnlyLower: true })).body
-    assert.deepEqual([saved.jevModels, saved.jevThreshold, saved.jevOnlyLower], [['haiku', 'sonnet'], 0.85, true])
-    const cleared = (await patch({ jevModels: null, jevThreshold: null, jevOnlyLower: false })).body
-    assert.deepEqual([cleared.jevModels, cleared.jevThreshold, cleared.jevOnlyLower], [null, null, false])
+  test('saves the models, threshold, "may only lower" switch and combining, and clears them back to the defaults', async () => {
+    const saved = (
+      await patch({ jevModels: ['haiku', 'sonnet'], jevThreshold: 0.85, jevOnlyLower: true, jevCombine: 'lower' })
+    ).body
+    assert.deepEqual(
+      [saved.jevModels, saved.jevThreshold, saved.jevOnlyLower, saved.jevCombine],
+      [['haiku', 'sonnet'], 0.85, true, 'lower'],
+    )
+    const cleared = (await patch({ jevModels: null, jevThreshold: null, jevOnlyLower: false, jevCombine: null })).body
+    assert.deepEqual(
+      [cleared.jevModels, cleared.jevThreshold, cleared.jevOnlyLower, cleared.jevCombine],
+      [null, null, false, null],
+    )
   })
 
-  test('turns down unknown models, an empty list, thresholds outside 0 to 1 and unknown modes', async () => {
+  test('turns down unknown models, an empty list, thresholds outside 0 to 1, unknown modes and combinings', async () => {
     for (const body of [
       { jevModels: ['gpt-5'] },
       { jevModels: [] },
@@ -92,6 +134,7 @@ describe('Route with Jev board setting', () => {
       { jevThreshold: 1.5 },
       { jevThreshold: -0.1 },
       { jevMode: 'off' },
+      { jevCombine: 'average' },
     ]) {
       assert.equal((await patch(body)).status, 400, JSON.stringify(body))
     }

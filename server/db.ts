@@ -522,6 +522,10 @@ export const MIGRATIONS = [
   ALTER TABLE token_usage ADD COLUMN api_key INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE run_records ADD COLUMN api_key INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  -- How Jev's pick and the history suggestion combine (see BoardSummary.jevCombine; JEV_DEFAULTS when NULL).
+  ALTER TABLE boards ADD COLUMN jev_combine TEXT;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'
