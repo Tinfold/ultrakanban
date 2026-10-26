@@ -20,6 +20,14 @@ export type AgentEffort = (typeof AGENT_EFFORTS)[number]
 export const AGENT_MODELS = ['fable', 'opus', 'sonnet', 'haiku'] as const
 export type AgentModelAlias = (typeof AGENT_MODELS)[number]
 
+/** One-line hint on what each model suits and costs, shown in the model picker. */
+export const AGENT_MODEL_HINTS: Record<AgentModelAlias, string> = {
+  fable: 'Most capable, highest cost',
+  opus: 'Hard or multi-file work, high cost',
+  sonnet: 'Routine, well-scoped work, medium cost',
+  haiku: 'Mechanical edits, lowest cost',
+}
+
 /** Whether a model is one of Claude's: an alias (`AGENT_MODELS`) or a full name such as claude-opus-5-5. */
 export const isClaudeModel = (model: string) =>
   (AGENT_MODELS as readonly string[]).includes(model) || /^claude-/i.test(model)
@@ -81,7 +89,7 @@ export const TICKET_TEMPLATES: readonly TicketTemplate[] = [
     description:
       '## Steps to reproduce\n\n## Expected\n\n## Actual\n\n- [ ] Find the cause\n- [ ] Fix it\n- [ ] Add a test that would have caught it',
     tags: ['bug'],
-    agentEffort: 'medium',
+    agentEffort: 'high',
     agentModel: 'opus',
   },
   {
@@ -91,6 +99,14 @@ export const TICKET_TEMPLATES: readonly TicketTemplate[] = [
     tags: ['feature'],
     agentEffort: 'medium',
     agentModel: 'opus',
+  },
+  {
+    id: 'small',
+    name: 'Small change',
+    description: '## What to change\n\n- [ ] Make the change\n- [ ] Check it',
+    tags: ['chore'],
+    agentEffort: 'low',
+    agentModel: 'sonnet',
   },
   {
     id: 'question',
@@ -605,11 +621,29 @@ export interface AgentSettingStats {
   successRate: number
   /** Cost per ticket in US dollars, averaged by similarity over those that reported one; null when none did. */
   costUsd: number | null
+  /**
+   * Cost per finished ticket: `costUsd` over `successRate`, as each finished ticket also pays for the ones given up on.
+   * Null when none reported a cost or none was finished. Settings are compared by it.
+   */
+  costPerFinishedUsd: number | null
   /** Tokens per ticket, averaged by similarity. */
   tokens: number
+  /** Tokens per ticket weighted by kind (see `TOKEN_WEIGHTS`), averaged by similarity. */
+  weightedTokens: number
+  /**
+   * Weighted tokens per finished ticket, `weightedTokens` over `successRate`; null when none was finished. Settings are
+   * compared by it when they don't both have a `costPerFinishedUsd`.
+   */
+  weightedTokensPerFinished: number | null
   /** Those tickets, most similar first (at most 5). */
   similar: SimilarTicket[]
 }
+
+/**
+ * How every decided ticket went at one model and effort, the one that did most of its work (`Overview.settings`). The
+ * same figures as `AgentSettingStats`, with every ticket counting fully rather than by similarity.
+ */
+export type SettingReport = Omit<AgentSettingStats, 'similar'>
 
 /**
  * The model and effort to work a new ticket at, from how similar tickets went (`GET /boards/:id/agent-suggestion`):
@@ -634,6 +668,11 @@ export interface AgentRun {
   seenAt: string
   /** What the run is doing, as its agent last said, e.g. "Answering review feedback". */
   step: string | null
+  /**
+   * Tokens the run has used so far (input, output and cache, subagents included), as its agent last said; null until
+   * it does.
+   */
+  tokens: number | null
   /**
    * When someone asked for the run to stop (`POST /tickets/:id/stop`) and who, until it ends: the agent loop stops it
    * at its next check of the ticket, keeping its session and work, and resumes it once there is new feedback. Null
@@ -780,6 +819,11 @@ export const ROUTING_MIN_FINISHED = 10
  * board has decided at least this many tickets at it.
  */
 export const ROUTING_MIN_SETTING_TICKETS = 3
+/**
+ * A setting is suggested (`GET /boards/:id/agent-suggestion`) only once at least this many similar decided tickets were
+ * worked at it: one says more about that ticket than about the setting.
+ */
+export const SUGGESTION_MIN_TICKETS = 2
 /** History routes a ticket only when its suggestion is built on at least this many similar tickets. */
 export const HISTORY_MIN_TICKETS = 3
 
@@ -882,6 +926,8 @@ export interface RunRecord {
   durationMs: number | null
   /** How many turns (responses of the model) the run took. */
   turns: number | null
+  /** Tokens the run used (input, output and cache, see `totalTokens`), when the agent reports them. */
+  tokens: number | null
   /** Estimated cost in US dollars, when the agent reports one: billed, not estimated, for a run on the API key. */
   costUsd: number | null
   /** Whether the run went on the agents' API key (see `AgentApiKey`) rather than the Claude plan. */
@@ -1200,6 +1246,8 @@ export interface Overview {
   tickets: OverviewTicketUsage[]
   /** How routing sources compare on every board, over all time: routing data is slow to build up. */
   routing: RoutingComparison
+  /** How each model and effort did on every board's decided tickets, over all time, the most tickets first. */
+  settings: SettingReport[]
   /** The latest activity entries across all boards, newest first. */
   recent: OverviewActivity[]
 }
@@ -1355,7 +1403,7 @@ export interface ClaudeUsage {
   limits: ClaudeUsageLimit[]
   /** The credits the account can spend on usage besides its limits; empty when it has none. */
   credits: ClaudeUsageCredit[]
-  /** Why the last report has no usage, e.g. no claude login on the host; the last limits stay until they go stale. */
+  /** Why the last report has no limits, e.g. no claude login on the host; the last limits stay until they go stale. */
   error: string | null
   /** How far agents may use the week and the current session (see `ClaudeUsageReserve`). */
   reserve: ClaudeUsageReserve

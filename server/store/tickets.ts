@@ -77,6 +77,7 @@ interface TicketRow {
   agent_seen_at: string | null
   run_started_at: string | null
   run_step: string | null
+  run_tokens: number | null
   stop_requested_at: string | null
   stop_requested_by: string | null
   estimate: TicketSize | null
@@ -168,15 +169,15 @@ function toPullRequest(url: string, row: TicketRow): PullRequest {
 
 type RunRow = Pick<
   TicketRow,
-  'agent_seen_at' | 'run_started_at' | 'run_step' | 'stop_requested_at' | 'stop_requested_by'
+  'agent_seen_at' | 'run_started_at' | 'run_step' | 'run_tokens' | 'stop_requested_at' | 'stop_requested_by'
 >
 
 /** The run working a ticket: one has started, hasn't ended, and sent a heartbeat within `AGENT_IDLE_MINUTES`. */
 function runOf(row: RunRow): AgentRun | null {
-  const { agent_seen_at: seenAt, run_started_at: startedAt, run_step: step } = row
+  const { agent_seen_at: seenAt, run_started_at: startedAt, run_step: step, run_tokens: tokens } = row
   if (!startedAt || !seenAt || Date.parse(seenAt) < Date.now() - AGENT_IDLE_MINUTES * 60_000) return null
   const { stop_requested_at: at, stop_requested_by: by } = row
-  return { startedAt, seenAt, step, stopRequested: at && by ? { at, by } : null }
+  return { startedAt, seenAt, step, tokens, stopRequested: at && by ? { at, by } : null }
 }
 
 /**
@@ -617,7 +618,11 @@ export function bulkUpdateTickets(boardId: string, input: BulkTicketsInput, acto
   const epic = input.epic === undefined ? undefined : resolveEpic(boardId, input.epic, { create: true })
   return tickets.map((ticket) => {
     const tagIds = [...new Set([...ticket.tagIds, ...added])].filter((tagId) => !removed.includes(tagId))
-    updateTicket(ticket.id, { priority: input.priority, tags: tagIds, epic }, actor)
+    updateTicket(
+      ticket.id,
+      { priority: input.priority, tags: tagIds, epic, agentModel: input.agentModel, agentEffort: input.agentEffort },
+      actor,
+    )
     if (target && target.id !== ticket.columnId) {
       moveTicket(ticket.id, { column: target.id, force: input.force }, actor)
     }
@@ -684,7 +689,7 @@ export function releaseTicket(id: string, input: ReleaseTicketInput): Ticket {
 
 const getRunRow = (id: string) => {
   const row = sql.get<RunRow & { board_id: string }>(
-    `SELECT board_id, agent_seen_at, run_started_at, run_step, stop_requested_at, stop_requested_by
+    `SELECT board_id, agent_seen_at, run_started_at, run_step, run_tokens, stop_requested_at, stop_requested_by
      FROM tickets WHERE id = ?`,
     id,
   )
@@ -694,8 +699,9 @@ const getRunRow = (id: string) => {
 
 /**
  * Notes that an agent is working on the ticket right now, starting a run unless one is going on (see `AgentRun`), and
- * what the run is doing if the agent says (it keeps its step otherwise). Not a change to the ticket: nothing is logged
- * or bumped, but boards are told when a run starts or its step changes, so they show it. A new run starts without a
+ * what the run is doing and the tokens it has used if the agent says (it keeps them otherwise). Not a change to the
+ * ticket: nothing is logged or bumped, but boards are told when a run starts or its step or tokens change, so they
+ * show it. A new run starts without a
  * stop request, even if the run before it went quiet with one.
  */
 export function recordHeartbeat(id: string, input: HeartbeatInput) {
@@ -703,18 +709,20 @@ export function recordHeartbeat(id: string, input: HeartbeatInput) {
   const run = runOf(row)
   const at = now()
   const step = input.step === undefined ? (run?.step ?? null) : input.step || null
+  const tokens = input.tokens ?? run?.tokens ?? null
   sql.run(
-    `UPDATE tickets SET agent_seen_at = ?, run_started_at = ?, run_step = ?, stop_requested_at = ?,
+    `UPDATE tickets SET agent_seen_at = ?, run_started_at = ?, run_step = ?, run_tokens = ?, stop_requested_at = ?,
        stop_requested_by = ?
      WHERE id = ?`,
     at,
     run?.startedAt ?? at,
     step,
+    tokens,
     run?.stopRequested?.at ?? null,
     run?.stopRequested?.by ?? null,
     id,
   )
-  if (!run || step !== run.step) publish({ boardId: row.board_id })
+  if (!run || step !== run.step || tokens !== run.tokens) publish({ boardId: row.board_id })
 }
 
 /** Ends the run working the ticket, if any: the agent says it has stopped. Its stop request, if any, goes with it. */
@@ -722,7 +730,8 @@ export function endRun(id: string) {
   const row = getRunRow(id)
   if (!row.run_started_at) return
   sql.run(
-    `UPDATE tickets SET run_started_at = NULL, run_step = NULL, stop_requested_at = NULL, stop_requested_by = NULL
+    `UPDATE tickets SET run_started_at = NULL, run_step = NULL, run_tokens = NULL, stop_requested_at = NULL,
+       stop_requested_by = NULL
      WHERE id = ?`,
     id,
   )

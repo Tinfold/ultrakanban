@@ -280,6 +280,8 @@ export function useBoardActions(boardId: string) {
               addTags: change.addTagIds,
               removeTags: change.removeTagIds,
               epic: change.epicId,
+              agentModel: change.agentModel,
+              agentEffort: change.agentEffort,
             }),
           (d) => updates.bulkChangeTickets(d, ticketIds, change),
         )

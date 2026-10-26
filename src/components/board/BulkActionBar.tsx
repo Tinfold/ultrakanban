@@ -2,6 +2,8 @@ import {
   ArrowRightIcon,
   CheckIcon,
   CircleOffIcon,
+  CpuIcon,
+  GaugeIcon,
   LayersIcon,
   SignalHighIcon,
   TagIcon,
@@ -25,6 +27,7 @@ import type { BulkChange } from '@/lib/board-updates'
 import { swatch } from '@/lib/colors'
 import { PRIORITIES_DESC, PRIORITY_LABELS } from '@/lib/priority'
 import { requiresMergedPullRequest } from '@/lib/workflow'
+import { EffortPicker, ModelPicker } from '@/components/ticket/pickers'
 import { useBoardContext } from './board-context'
 
 interface BulkActionBarProps {
@@ -52,6 +55,13 @@ export function BulkActionBar({ ticketIds, visibleCount, onSelectAll, onClear }:
   }
   // The epic all the selected tickets are in (null: none of them is in one), or undefined when they differ.
   const sharedEpic = tickets.every((ticket) => ticket.epicId === tickets[0]?.epicId) ? tickets[0]?.epicId : undefined
+  // The model and effort all the selected tickets share (null: the board's), or null when they differ.
+  const sharedModel = tickets.every((t) => t.agentModel === tickets[0]?.agentModel)
+    ? (tickets[0]?.agentModel ?? null)
+    : null
+  const sharedEffort = tickets.every((t) => t.agentEffort === tickets[0]?.agentEffort)
+    ? (tickets[0]?.agentEffort ?? null)
+    : null
   const pendingColumn = pendingMove && detail.columns.find((column) => column.id === pendingMove.columnId)
 
   return (
@@ -159,6 +169,22 @@ export function BulkActionBar({ ticketIds, visibleCount, onSelectAll, onClear }:
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
+      {detail.board.agentEnabled && (
+        <>
+          <ModelPicker value={sharedModel} onChange={(agentModel) => change({ agentModel })}>
+            <Button variant="ghost" size="sm" disabled={none} aria-label="Model">
+              <CpuIcon />
+              <span className="hidden sm:inline">Model</span>
+            </Button>
+          </ModelPicker>
+          <EffortPicker value={sharedEffort} onChange={(agentEffort) => change({ agentEffort })}>
+            <Button variant="ghost" size="sm" disabled={none} aria-label="Effort">
+              <GaugeIcon />
+              <span className="hidden sm:inline">Effort</span>
+            </Button>
+          </EffortPicker>
+        </>
+      )}
       <Button
         variant="ghost"
         size="sm"

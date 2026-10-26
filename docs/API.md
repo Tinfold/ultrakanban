@@ -265,6 +265,7 @@ interface AgentRun {
   startedAt: string // its first heartbeat
   seenAt: string // its latest heartbeat
   step: string | null // what it is doing, as its agent last said
+  tokens: number | null // tokens it has used so far (input, output and cache), as its agent last said
   stopRequested: { at: string; by: string } | null // when someone asked it to stop (POST /tickets/:id/stop) and who, until it ends
 }
 
@@ -411,9 +412,10 @@ run is working the ticket; the board offers to move a working column's idle tick
 tickets whose agent stopped or crashed.
 
 Heartbeats also make up the ticket's `run`, which its card shows: a heartbeat starts a run unless one is going on,
-and can say what the run is doing (`step`; a heartbeat without one keeps the run's step). `scripts/agent-loop.sh`
-sends the run's latest tool call as its step (e.g. `Bash: npm test`) when it changes, checked every
-`RUN_STEP_SECONDS`. The run ends with `DELETE /tickets/:ticketId/heartbeat`, or after 10 minutes without a heartbeat.
+and can say what the run is doing (`step`) and how many tokens it has used so far (`tokens`); a heartbeat without them
+keeps the run's. `scripts/agent-loop.sh` sends the run's latest tool call as its step (e.g. `Bash: npm test`) when it
+changes, checked every `RUN_STEP_SECONDS`, and its tokens so far with every heartbeat, so a runaway run shows while
+it goes on. The run ends with `DELETE /tickets/:ticketId/heartbeat`, or after 10 minutes without a heartbeat.
 Cards show a run as stalled after 3 minutes without one.
 
 ### Stopping a run
@@ -442,10 +444,10 @@ and end the run.
 | POST   | `/tickets/:ticketId/move`              | `{ column: ref, position?, ifVersion?, force? }`                                                                                                                                                                                                                                                             | `Ticket` (appended when `position` is omitted)                                                                                                                                                                                                                                                                       |
 | POST   | `/tickets/:ticketId/claim`             | `{ agent, moveTo?: ref, ifVersion? }`                                                                                                                                                                                                                                                                        | `Ticket`, with `routed` on a board whose Jev mode is `on` (see [Routing](#routing)); `409` if claimed by someone else (idempotent for the same agent), `409 blocked` if `claim-next` would skip it, `429 usage_reserve_reached` as for `claim-next`                                                                  |
 | POST   | `/tickets/:ticketId/release`           | `{ agent, moveTo?: ref, force? }`                                                                                                                                                                                                                                                                            | `Ticket`; `409` if claimed by someone else unless `force`                                                                                                                                                                                                                                                            |
-| POST   | `/tickets/:ticketId/heartbeat`         | `{ step? }` (optional)                                                                                                                                                                                                                                                                                       | `204`; says an agent is working on the ticket right now (not a change: nothing is logged)                                                                                                                                                                                                                            |
+| POST   | `/tickets/:ticketId/heartbeat`         | `{ step?, tokens? }` (optional)                                                                                                                                                                                                                                                                              | `204`; says an agent is working on the ticket right now (not a change: nothing is logged)                                                                                                                                                                                                                            |
 | DELETE | `/tickets/:ticketId/heartbeat`         |                                                                                                                                                                                                                                                                                                              | `204`; says the agent's run on the ticket has ended                                                                                                                                                                                                                                                                  |
 | POST   | `/tickets/:ticketId/stop`              |                                                                                                                                                                                                                                                                                                              | `Ticket` with `run.stopRequested` set: asks the run working it to stop (see Stopping a run); `409 no_run` without one                                                                                                                                                                                                |
-| POST   | `/boards/:boardId/tickets/bulk`        | `{ tickets: ref[], moveTo?: ref, force?, priority?, addTags?: ref[], removeTags?: ref[], epic?: ref \| null }` or `{ tickets: ref[], delete: true }`                                                                                                                                                         | `{ tickets: Ticket[] }`: the same change to several tickets, all or nothing (e.g. `409` if one can't enter the done column, unless `force`); moved tickets are appended in the order given; `tickets: []` when deleted                                                                                               |
+| POST   | `/boards/:boardId/tickets/bulk`        | `{ tickets: ref[], moveTo?: ref, force?, priority?, addTags?: ref[], removeTags?: ref[], epic?: ref \| null, agentModel?: string \| null, agentEffort?: string \| null }` or `{ tickets: ref[], delete: true }`                                                                                              | `{ tickets: Ticket[] }`: the same change to several tickets, all or nothing (e.g. `409` if one can't enter the done column, unless `force`); moved tickets are appended in the order given; `tickets: []` when deleted                                                                                               |
 | POST   | `/boards/:boardId/tickets/claim-next`  | `{ agent, column: ref, tags?: ref[], moveTo?: ref }`                                                                                                                                                                                                                                                         | `Ticket` (with `routed` on a board whose Jev mode is `on`, see [Routing](#routing)): highest priority, then earliest due date, then board order, among unassigned, unblocked tickets in `column` having all `tags` (see below)                                                                                       |
 | POST   | `/tickets/:ticketId/plan`              | `{ agent, estimate: 'S' \| 'M' \| 'L', plan: markdown }`                                                                                                                                                                                                                                                     | `Ticket`: posts the plan, sets `estimate`, and holds the ticket for approval (`approval: 'pending'`) when the board's `approvalSize` asks for it; `409` if claimed by someone else                                                                                                                                   |
 | POST   | `/tickets/:ticketId/approve`           | `{ ifVersion? }` (optional)                                                                                                                                                                                                                                                                                  | `Ticket` with `approval: 'approved'`; `409 not_awaiting_approval` if its plan doesn't wait for approval, `409 own_plan` when sent by its assignee                                                                                                                                                                    |
@@ -501,7 +503,7 @@ ticket can be in one epic, sub-tickets included.
 | DELETE | `/epics/:epicId`         |                                    | `204`; its tickets stay, in no epic                     |
 
 - Put a ticket in an epic with `epic` (its id or title) when creating or updating it, or for several at once with
-  `POST /boards/:boardId/tickets/bulk`; `"epic": null` takes it out. An unknown title creates the epic, like tags.
+  `POST /boards/:boardId/tickets/bulk`; `"epic": null` takes it out. The bulk endpoint also sets `agentModel`/`agentEffort` on all the tickets (`null` follows the board's setting). An unknown title creates the epic, like tags.
   New sub-tickets join their parent's epic unless `epic` says otherwise.
 - `progress` counts its finished tickets (in the done column, the board's last column if it has none, or with a
   merged pull request) out of all of them, leaving out those in a column named `Cancelled`. It is `done` once they
@@ -671,6 +673,7 @@ interface RunRecord {
   exitCode: number | null
   durationMs: number | null
   turns: number | null // responses of the model
+  tokens: number | null // input, output and cache tokens it used
   costUsd: number | null
   apiKey: boolean // whether it went on the agents' API key (its cost billed, not estimated)
   message: string // the final message (markdown), or what the run last said or printed; '' when there was nothing
@@ -684,21 +687,29 @@ interface RunRecord {
 
 ### Suggested model and effort
 
-`GET /boards/:boardId/agent-suggestion?title=text&tag=ref&steps=3` suggests a model and effort for a ticket about to be
-created, from how the board's similar tickets went (the new-ticket form shows it). `tag` is repeatable (ids or names;
-ones the board doesn't have are ignored) and `steps` is how many checklist steps its description has (leave it out
-when unknown).
+`GET /boards/:boardId/agent-suggestion?title=text&tag=ref&steps=3&estimate=M` suggests a model and effort for a ticket
+about to be created, from how the board's similar tickets went (the new-ticket form shows it). `tag` is repeatable (ids
+or names; ones the board doesn't have are ignored), `steps` is how many checklist steps its description has and
+`estimate` the size (`S`, `M`, `L`) its agent's plan estimated it at (leave either out when unknown). Routing at claim
+time passes the ticket's own.
 
 - **Past tickets** count once they are decided: finished (in the done column or with a merged pull request), or given
   up on (in the cancelled column, or with their pull request closed unmerged). Each counts at the setting of the
-  `<agent>/<model>/<effort>` name whose runs used the most tokens on it, with the cost of all its runs. Only tickets
+  `<agent>/<model>/<effort>` name whose runs used the most tokens on it (weighted by kind, see below), with the cost
+  of all its runs. Only tickets
   the board's own agent did most of (names starting with its `agentName`, `claude` by default) count: the suggestion
   sets the model and effort it works the ticket at, and another agent's (Codex on GPT, say) aren't any it can run.
-- **Similar** means sharing tags (45%) or title words (45%, stop words left out); a similar number of checklist steps
-  adds up to 10% but isn't enough alone. The 20 most similar count, each weighted by its similarity.
-- **The suggestion** is the cheapest setting (by cost, or by tokens when runs reported no cost) whose weighted success
-  rate is within 0.2 of the best one's, so a cheaper setting that finishes the same kind of work wins and one that
-  keeps failing doesn't. It is `null` when no similar ticket was finished.
+- **Similar** means sharing tags (40%) or title words (40%, stop words left out); a similar number of checklist steps
+  (10%) and a similar plan estimate (10%: the same size counts fully, one size apart half) add to that but aren't
+  enough alone. A size either ticket lacks is left out of the weighting. The 20 most similar count, each weighted by
+  its similarity.
+- **Tokens are weighted by kind** about as Claude prices them, relative to uncached input: output 5, cache writes
+  1.25, cache reads 0.1. Cache reads make up most of a run's raw total.
+- **The suggestion** is the setting that costs least per _finished_ ticket (its average cost over its success rate, so
+  each finished ticket also pays for the ones given up on; by weighted tokens when runs reported no cost) among those
+  whose weighted success rate is within 0.2 of the best one's. Only settings at least 2 similar decided tickets were
+  worked at can be suggested; the others still show in `options`. It is `null` when none of those finished a similar
+  ticket.
 
 ```ts
 interface AgentSuggestion {
@@ -714,7 +725,10 @@ interface AgentSettingStats {
   finished: number // how many of them were finished
   successRate: number // finished share, weighted by similarity (0 to 1)
   costUsd: number | null // average cost per ticket; null when none reported one
+  costPerFinishedUsd: number | null // costUsd / successRate; null without a cost or a finished ticket
   tokens: number // average tokens per ticket
+  weightedTokens: number // average tokens per ticket, weighted by kind
+  weightedTokensPerFinished: number | null // weightedTokens / successRate; null without a finished ticket
   similar: { id; number; title; similarity; finished; costUsd: number | null; tokens }[] // most similar first, at most 5
 }
 ```
@@ -828,6 +842,9 @@ interface Overview {
   tickets: { id; boardId; boardName; number; title; column: string; tags: Tag[]; usage }[]
   recent: (Activity & { ticket: { number; title; boardId; boardName } })[] // latest 30, newest first
   routing: RoutingComparison // routing sources compared on every board, over all time (see Routing)
+  // Every board's decided tickets by the model and effort that did most of their work (any agent), over all time,
+  // most tickets first: the suggestion's figures with every ticket counting fully
+  settings: { model; effort; tickets; finished; successRate: number; costUsd: number | null; tokens: number }[]
 }
 
 // Token usage added up over runs; costUsd sums the runs that reported a cost (null when none did).

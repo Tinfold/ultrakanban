@@ -83,6 +83,7 @@ export function historyPick(ticket: Ticket): { model: string; effort: AgentEffor
     title: ticket.title,
     tag: ticket.tagIds,
     steps: parseChecklist(ticket.description).length,
+    estimate: ticket.estimate ?? undefined,
   })
   return suggestion && suggestion.tickets >= HISTORY_MIN_TICKETS
     ? { model: suggestion.model, effort: suggestion.effort }

@@ -1,16 +1,17 @@
 import { ClipboardCheckIcon } from 'lucide-react'
 import { useState } from 'react'
-import type { Ticket } from '@shared/domain'
+import { AGENT_DEFAULTS, type Ticket } from '@shared/domain'
 import { JevBadge } from '@/components/common/JevBadge'
 import { Markdown } from '@/components/common/Markdown'
 import { Button } from '@/components/ui/button'
 import { useTicketActivity } from '@/hooks/queries'
 import { formatModel } from '@/lib/format'
 import { useBoardContext } from '../board/board-context'
+import { EffortPicker, ModelPicker } from './pickers'
 
 /** The plan a ticket's agent waits on approval for, with the button that approves it. Nothing otherwise. */
 export function PlanApproval({ ticket }: { ticket: Ticket }) {
-  const { actions } = useBoardContext()
+  const { actions, detail } = useBoardContext()
   const { data: activity = [] } = useTicketActivity(ticket.id)
   const [approving, setApproving] = useState(false)
   if (ticket.approval !== 'pending') return null
@@ -47,6 +48,25 @@ export function PlanApproval({ ticket }: { ticket: Ticket }) {
           </span>
         </p>
       )}
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="text-muted-foreground">Runs with</span>
+        <ModelPicker
+          value={ticket.agentModel}
+          onChange={(agentModel) => actions.updateTicket(ticket.id, { agentModel })}
+        >
+          <Button variant="outline" size="sm">
+            {formatModel(ticket.agentModel ?? detail.board.agentModel ?? AGENT_DEFAULTS.model)}
+          </Button>
+        </ModelPicker>
+        <EffortPicker
+          value={ticket.agentEffort}
+          onChange={(agentEffort) => actions.updateTicket(ticket.id, { agentEffort })}
+        >
+          <Button variant="outline" size="sm">
+            {ticket.agentEffort ?? detail.board.agentEffort ?? AGENT_DEFAULTS.effort}
+          </Button>
+        </EffortPicker>
+      </div>
       {plan?.type === 'plan' && <Markdown className="text-sm">{plan.data.body}</Markdown>}
       <p className="text-xs text-muted-foreground">
         To change the plan, comment on the ticket: the agent answers and posts a new one. To drop it, move the ticket
