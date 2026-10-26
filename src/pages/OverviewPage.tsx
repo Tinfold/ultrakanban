@@ -18,6 +18,7 @@ import { ClaudeUsage } from '@/components/overview/ClaudeUsage'
 import { type ChartSeries, ColumnChart } from '@/components/overview/ColumnChart'
 import { NeedsAttention } from '@/components/overview/NeedsAttention'
 import { RecentActivity } from '@/components/overview/RecentActivity'
+import { RoutingTable } from '@/components/overview/RoutingTable'
 import { TicketUsageTable, type UsageGrouping } from '@/components/overview/TicketUsageTable'
 import { Button } from '@/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
@@ -64,6 +65,7 @@ const SECTIONS = {
   agents: 'agents',
   boards: 'boards',
   ticketUsage: 'ticket-usage',
+  routing: 'routing',
   activity: 'activity',
   timeWorked: 'time-worked',
   tokens: 'tokens',
@@ -140,6 +142,7 @@ function JumpBar({ attention }: { attention: number }) {
     [SECTIONS.agents, 'Agents'],
     [SECTIONS.boards, 'Boards'],
     [SECTIONS.ticketUsage, 'Ticket usage'],
+    [SECTIONS.routing, 'Routing'],
     [SECTIONS.recent, 'Recent activity'],
   ]
   return (
@@ -218,6 +221,12 @@ export function OverviewPage() {
     document.title = 'Overview · ultrakanban'
   }, [])
 
+  // A failed refetch keeps the loaded overview: tell the user instead of replacing it.
+  useEffect(() => {
+    if (error && overview)
+      toast.error(`Couldn’t refresh the overview: ${errorMessage(error)}`, { id: 'overview-refetch' })
+  }, [error, overview])
+
   const daily = useMemo(() => (overview ? dailyActivity(overview, now) : []), [overview, now])
   const worked = useMemo(
     () =>
@@ -252,9 +261,7 @@ export function OverviewPage() {
   )
 
   let content: ReactNode = null
-  if (error) {
-    content = <p className="text-sm text-muted-foreground">Couldn’t load the overview: {error.message}</p>
-  } else if (overview) {
+  if (overview) {
     const { totals, agents, hiddenAgents } = overview
     // Idle agents that aren't a board's host agent are usually old or misspelled names.
     const stale = agents.filter((agent) => agent.status === 'idle' && !agent.agentOf.length).map((agent) => agent.name)
@@ -475,6 +482,13 @@ export function OverviewPage() {
               </p>
               <TicketUsageTable tickets={overview.tickets} grouping={usageGrouping} />
             </Section>
+            <Section id={SECTIONS.routing} title="Routing">
+              <p className="-mt-1 text-xs text-muted-foreground">
+                Cost per finished ticket had each source picked every ticket’s model and effort, on all boards since
+                routing was recorded
+              </p>
+              <RoutingTable routing={overview.routing} />
+            </Section>
           </div>
           {/* On wide screens Recent activity takes what's left of the height of the Agents and Boards column
               beside it, and its list scrolls within that. */}
@@ -498,6 +512,8 @@ export function OverviewPage() {
         </div>
       </div>
     )
+  } else if (error) {
+    content = <p className="text-sm text-muted-foreground">Couldn’t load the overview: {error.message}</p>
   }
 
   return (

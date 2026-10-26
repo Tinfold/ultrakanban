@@ -123,6 +123,13 @@ if [[ -z $(env_get GITHUB_TOKEN) ]] && command -v gh >/dev/null && token=$(gh au
   env_set GITHUB_TOKEN "$token"
   echo "Put your GitHub token from gh in .env."
 fi
+# Optional: a TypeSafe AI key to route tickets with Jev (docs/JEV.md). Skipped when empty or not at a terminal; the
+# Setup page takes one later.
+if [[ -z $(env_get TYPESAFE_API_KEY) && -t 0 ]]; then
+  read -r -s -p "TypeSafe AI API key for Jev (optional, Enter to skip): " typesafe_key || true
+  echo
+  [[ -z ${typesafe_key:-} ]] || env_set TYPESAFE_API_KEY "$typesafe_key"
+fi
 port=$(env_get ULTRAKANBAN_PORT)
 port=${port:-4317}
 

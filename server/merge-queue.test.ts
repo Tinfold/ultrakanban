@@ -367,3 +367,30 @@ describe('merging all reviewed pull requests', () => {
     })
   })
 })
+
+describe('auto-merge waits', () => {
+  test('keep since when only failed changes', async () => {
+    const { setAutoMergeWaits } = await import('./store/auto-merge.ts')
+    const { body: board } = await call<{ id: string }>('POST', '/boards', {
+      name: 'Waits',
+      columns: ['Todo', 'Review'],
+      reviewColumn: 'Review',
+      autoMerge: true,
+    })
+    useBoard(board.id)
+    const ticket = await addTicket({
+      title: 'Waiting',
+      column: 'Review',
+      pullRequest: 'https://github.com/acme/app/pull/90',
+    })
+    const wait = async () => (await call<Ticket>('GET', `/tickets/${ticket.id}`)).body.autoMergeWait
+    setAutoMergeWaits(boardId, new Map([[ticket.id, { reason: 'checks', failed: false }]]))
+    const first = await wait()
+    assert.ok(first?.since)
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    setAutoMergeWaits(boardId, new Map([[ticket.id, { reason: 'checks', failed: true }]]))
+    const second = await wait()
+    assert.equal(second?.failed, true)
+    assert.equal(second?.since, first.since)
+  })
+})

@@ -14,13 +14,13 @@ ci_status() {
       | select(.status == "completed")
       | select(.conclusion | IN("failure", "timed_out", "startup_failure", "action_required"))
       | [.id, .name, .conclusion, .app.slug // "", .output.annotations_count // 0,
-         ([.output.title, .output.summary, .output.text] | map(select(.)) | join(" ") | gsub("[\t\n\r]"; " "))]
-      | @tsv') || return 1
+         ([.output.title, .output.summary, .output.text] | map(select(.)) | join(" ") | gsub("[\u001f\t\n\r]"; " "))]
+      | join("\u001f")') || return 1
   statuses=$(gh api "repos/$repo/commits/$sha/status" </dev/null |
     jq -r '.statuses[]? | select(.state == "failure" or .state == "error")
-      | [.context, .state, (.description // "" | gsub("[\t\n\r]"; " "))] | @tsv') || return 1
+      | [.context, .state, (.description // "" | gsub("[\u001f\t\n\r]"; " "))] | join("\u001f")') || return 1
   {
-    while IFS=$'\t' read -r -u 4 id name conclusion app count text; do
+    while IFS=$'\x1f' read -r -u 4 id name conclusion app count text; do
       [[ -n $id ]] || continue
       why=
       if [[ $conclusion != failure ]]; then
@@ -38,7 +38,7 @@ ci_status() {
       fi
       if [[ -n $why ]]; then printf 'infra\t%s\t%s\n' "$name" "$why"; else printf 'code\t%s\n' "$name"; fi
     done 4<<<"$runs"
-    while IFS=$'\t' read -r -u 4 name conclusion text; do
+    while IFS=$'\x1f' read -r -u 4 name conclusion text; do
       [[ -n $name ]] || continue
       if [[ $conclusion == error ]] || grep -qiE "$INFRA_PATTERN" <<<"$text"; then
         printf 'infra\t%s\t%s\n' "$name" "status $conclusion: $text"

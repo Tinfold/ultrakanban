@@ -50,6 +50,7 @@ export function createApp(services: AppServices) {
 
   return new Hono().route('/api', api).onError((error, c) => {
     if (error instanceof HttpError) {
+      if (error.retryAfter !== undefined) c.header('Retry-After', String(error.retryAfter))
       return c.json(errorBody(error.code, error.message, error.details), error.status)
     }
     if (error instanceof z.ZodError) {

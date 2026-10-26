@@ -5,7 +5,7 @@ import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlit
 import { notFound } from './errors.ts'
 import { publish, wake } from './events.ts'
 
-const MIGRATIONS = [
+export const MIGRATIONS = [
   `
   CREATE TABLE boards (
     id TEXT PRIMARY KEY,
@@ -397,6 +397,100 @@ const MIGRATIONS = [
   -- How many more runs the board's agent can make at once that only fix merge conflicts (see BoardSummary). Its
   -- default (AGENT_DEFAULTS.conflictConcurrency) when NULL.
   ALTER TABLE boards ADD COLUMN agent_conflict_concurrency INTEGER;
+  `,
+  `
+  -- The TypeSafe API key set on the Setup page (see docs/JEV.md); the API never sends it back.
+  ALTER TABLE setup ADD COLUMN typesafe_api_key TEXT;
+  `,
+  `
+  -- Routing tickets with Jev (see BoardSummary.jevEnabled and docs/JEV.md): whether it is on, the models it may pick (a
+  -- JSON array, every alias when NULL), the confidence its pick needs (JEV_DEFAULTS when NULL), whether it may only pick
+  -- a cheaper setting than the board's, and its mode ('dry-run' or 'on'; NULL until first switched on).
+  ALTER TABLE boards ADD COLUMN jev_enabled INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE boards ADD COLUMN jev_models TEXT;
+  ALTER TABLE boards ADD COLUMN jev_threshold REAL;
+  ALTER TABLE boards ADD COLUMN jev_only_lower INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE boards ADD COLUMN jev_mode TEXT;
+  `,
+  `
+  -- The most turns a run of the board's agent may take (see BoardSummary.agentMaxTurns); NULL for no limit.
+  ALTER TABLE boards ADD COLUMN agent_max_turns INTEGER;
+  `,
+  `
+  -- How a ticket was routed when it was last claimed (see RoutingSource and docs/JEV.md, item 8): the setting it is
+  -- worked at and where that came from, and what each source picked, so sources can be compared by cost per finished
+  -- ticket. Jev's pick is only there on boards that route with Jev, the history pick when the suggestion was built on
+  -- enough similar tickets.
+  CREATE TABLE ticket_routes (
+    ticket_id TEXT PRIMARY KEY REFERENCES tickets(id) ON DELETE CASCADE,
+    source TEXT NOT NULL,
+    model TEXT NOT NULL,
+    effort TEXT NOT NULL,
+    confidence REAL,
+    default_model TEXT NOT NULL,
+    default_effort TEXT NOT NULL,
+    history_model TEXT,
+    history_effort TEXT,
+    jev_model TEXT,
+    jev_effort TEXT,
+    jev_confidence REAL,
+    created_at TEXT NOT NULL
+  );
+  -- Each run's routing, from its ticket's route when its usage is recorded (see RunRouting).
+  ALTER TABLE token_usage ADD COLUMN routing_source TEXT;
+  ALTER TABLE token_usage ADD COLUMN routing_confidence REAL;
+  ALTER TABLE token_usage ADD COLUMN jev_model TEXT;
+  ALTER TABLE token_usage ADD COLUMN jev_effort TEXT;
+  ALTER TABLE token_usage ADD COLUMN jev_confidence REAL;
+  `,
+  `
+  -- What Jev was told about the ticket when it picked (a hash of its content, see contentKey in server/jev-routing.ts),
+  -- so a ticket whose content hasn't changed since isn't sent to Jev again.
+  ALTER TABLE ticket_routes ADD COLUMN content_key TEXT;
+  `,
+  `
+  -- Deleting a ticket keeps its runs (their ticket becomes NULL), so its spend stays in the board's totals. Dropping
+  -- the old table cascades to token_usage_models (foreign keys are on), so the model split is set aside and put back.
+  CREATE TEMP TABLE token_usage_models_kept AS SELECT * FROM token_usage_models;
+  CREATE TABLE token_usage_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+    ticket_id TEXT REFERENCES tickets(id) ON DELETE SET NULL,
+    agent TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    cache_read_tokens INTEGER NOT NULL,
+    cache_write_tokens INTEGER NOT NULL,
+    cost_usd REAL,
+    duration_ms INTEGER,
+    created_at TEXT NOT NULL,
+    routing_source TEXT,
+    routing_confidence REAL,
+    jev_model TEXT,
+    jev_effort TEXT,
+    jev_confidence REAL
+  );
+  INSERT INTO token_usage_new
+    SELECT id, board_id, ticket_id, agent, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+      cost_usd, duration_ms, created_at, routing_source, routing_confidence, jev_model, jev_effort, jev_confidence
+    FROM token_usage;
+  DROP TABLE token_usage;
+  ALTER TABLE token_usage_new RENAME TO token_usage;
+  CREATE INDEX token_usage_ticket ON token_usage(ticket_id, id);
+  CREATE INDEX token_usage_board ON token_usage(board_id, id);
+  CREATE INDEX token_usage_created ON token_usage(created_at);
+  INSERT INTO token_usage_models SELECT * FROM token_usage_models_kept;
+  DROP TABLE token_usage_models_kept;
+  `,
+  `
+  -- For the overview's queries over recent activity, by time and by actor (see overview.ts).
+  CREATE INDEX activity_created_at ON activity(created_at);
+  CREATE INDEX activity_actor ON activity(actor, id);
+  `,
+  `
+  -- When the Claude usage limits were last read (see ClaudeUsage.limitsAt): a report with only an error keeps them.
+  ALTER TABLE claude_usage ADD COLUMN limits_at TEXT;
+  UPDATE claude_usage SET limits_at = reported_at;
   `,
   `
   -- Whether auto-merge goes ahead when the only failing checks failed because of billing (see BoardSummary).

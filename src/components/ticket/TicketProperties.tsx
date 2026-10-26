@@ -2,6 +2,7 @@ import { CalendarIcon, ContainerIcon, CpuIcon, GaugeIcon, LayersIcon, TagIcon, U
 import type { ReactNode } from 'react'
 import { AGENT_DEFAULTS, type Ticket } from '@shared/domain'
 import { EpicChip } from '@/components/common/EpicChip'
+import { JevBadge } from '@/components/common/JevBadge'
 import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { ColorDot, TagChip } from '@/components/common/TagChip'
 import { UserAvatar } from '@/components/common/UserAvatar'
@@ -18,6 +19,7 @@ import {
 import { PRIORITY_LABELS } from '@/lib/priority'
 import { cn } from '@/lib/utils'
 import { useBoardContext } from '../board/board-context'
+import { JevSuggestionButton } from './JevSuggestionButton'
 import {
   AssigneePicker,
   ColumnPicker,
@@ -136,6 +138,19 @@ export function TicketProperties({ ticket }: { ticket: Ticket }) {
               {ticket.agentModel ?? `Board default (${detail.board.agentModel ?? AGENT_DEFAULTS.model})`}
             </Button>
           </ModelPicker>
+        </Property>
+      )}
+
+      {detail.board.agentEnabled && (
+        <Property label="Jev">
+          <JevSuggestionButton
+            title={ticket.title}
+            description={ticket.description}
+            tagIds={ticket.tagIds}
+            epicId={ticket.epicId}
+            onApply={(agentModel, agentEffort) => actions.updateTicket(ticket.id, { agentModel, agentEffort })}
+          />
+          {ticket.jevPick && <JevBadge pick={ticket.jevPick} className="ml-2 inline-block" />}
         </Property>
       )}
 

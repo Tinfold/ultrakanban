@@ -220,7 +220,8 @@ create one on GitHub with the server's login and link it) and switch on
 ([`scripts/agent-supervisor.sh`](../scripts/agent-supervisor.sh)) checks the boards every 30 seconds and keeps one
 `ultrakanban-agent@<board>` unit running per enabled board. It stops the loop when the board is switched off or
 deleted, and systemd restarts a loop that dies, with backoff up to 15 minutes. Each board gets its own clone,
-made with `gh repo clone`, under `~/.local/share/ultrakanban-agent/boards/<board>/repo`; your own working copies
+made with `gh repo clone`, under `~/.local/share/ultrakanban-agent/boards/<board>/repo` (when the repository is a fork,
+gh there is pointed at it rather than at its parent, so pull requests go to the fork); your own working copies
 are never touched. Before every run the loop fetches and checks out the default branch (detached, so create a branch
 from it) or, for feedback on a pull request, its branch, with no local changes, and goes back to the default branch
 afterwards. Logs: `journalctl --user -u ultrakanban-agent -u 'ultrakanban-agent@*' -f`.
@@ -249,6 +250,10 @@ directory. The directory is removed when the ticket's run finishes, and kept whe
 resumed. Directories no run has used for 3 days are removed too. Every run's processes carry an `ULTRAKANBAN_RUN`
 marker in their environment. When the run ends, the loop stops whatever still has the marker, such as a dev server
 started in the background, so nothing it started keeps holding memory.
+
+**Max turns.** The board's **Max turns per run** setting (`agentMaxTurns`) caps how many turns one `claude -p` run may
+take; the loop passes it as `--max-turns`. Without it a run is limited only by `TICKET_TIMEOUT`. A run that hits the cap
+ends like any other unfinished run and is retried up to `MAX_ATTEMPTS` times.
 
 **Parallel runs.** By default a board's agent runs one `claude -p` at a time. The board's **Parallel runs** setting
 (`agentConcurrency`, up to 8) lets it work that many tickets at once: the unit then runs that many loops, the first in
@@ -306,11 +311,12 @@ answers and posts a revised one, and waits again. Move the ticket back to Backlo
 
 **Names.** The board's **Agent name** (default `claude`) names the loop, which controls the work; its notes on
 tickets come from `<agent>-loop`. The runs it starts claim tickets as `<agent>/<model>/<effort>`, from the board's
-**Model** (default `opus`) and **Effort** (default `medium`) settings, which the loop passes to `claude`. So the board
+**Model** (default `opus`; aliases `fable`, `opus`, `sonnet`, `haiku`) and **Effort** (default `medium`) settings, which the loop passes to `claude`. So the board
 always shows which model and effort did the work, e.g. `claude/claude-opus-5-5/high`; a full model name keeps
 model versions apart. A ticket can ask for its own model and effort (**Agent model** and **Agent effort** in the
 ticket's properties, shown while the board's agent is on), e.g. `sonnet` for copy changes or `high` for a hard bug;
-tickets that don't use the board's. Agents that file tickets pick a model and effort for each one from how hard it
+tickets that don't use the board's, or on a board that routes with Jev in `on` mode, the setting the claim routes them
+to (`routed`, see [docs/API.md](API.md#routing)), which their runs on feedback keep. Agents that file tickets pick a model and effort for each one from how hard it
 looks (the skill's "Creating tickets" section has the guide). When you change the model or effort, the loop
 reassigns each ticket it holds to the new name before its next run on it. Agents you run yourself should follow the same pattern (see the skill).
 
@@ -323,7 +329,9 @@ that ran and failed, merge conflicts, or someone moving the ticket back into In 
 ask for more work). The prompt lists exactly what is new, and every prompt includes the board's description (Board
 settings), so put conventions for all of the board's tickets there. Bots and the agent's own replies
 don't count: the agent posts from the same GitHub account as you, so the skill makes it end every pull request
-comment with `<!-- ultrakanban:<agent> -->`, which the loop ignores. A pull request closed without merging moves
+comment with `<!-- ultrakanban:<agent> -->`, which the loop ignores. Pull request comments and reviews posted while
+one of the agent's runs on the ticket was going don't count either, in case the agent left the marker out (so one you
+post during a run doesn't start a new one: say it on the ticket instead). A pull request closed without merging moves
 its ticket to the `Cancelled` column (`CANCELLED_COLUMN`; add it to the board, the loop won't fall back to Todo)
 and unassigns it, so it is never picked up again. When none of its tickets needs work, it claims a new Todo ticket,
 and when there is nothing to do at all it waits `IDLE_SECONDS` (60 under the supervisor), or until the board wakes it
@@ -386,7 +394,9 @@ name, so re-running CI doesn't start a run. Checks that never ran or failed arou
 `action_required`, `timed_out`, billing or spending-limit messages, jobs where no step failed) never start a run;
 the loop leaves one ticket note per commit saying CI isn't running. Cancelled, skipped and neutral checks are
 ignored. On top of that, after `MAX_CI_RUNS` (default 2) runs in a row started only by CI, it stops starting CI runs
-for the ticket, with a note, until someone comments. And the agent is told not to push anything when a failure
+for the ticket, with a note, until someone comments. Merge conflicts work the same way: a pull request that stays in
+conflict starts a run each time the base branch moves, so after `MAX_CONFLICT_RUNS` (default 2) runs in a row started
+only by conflicts, the loop stops starting them, with a note, until someone comments. And the agent is told not to push anything when a failure
 isn't from the code.
 
 A failed run saves nothing and is retried with backoff (`RETRY_SECONDS`, doubling, up to `MAX_ATTEMPTS` in a row,

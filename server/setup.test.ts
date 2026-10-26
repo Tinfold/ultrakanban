@@ -29,6 +29,42 @@ describe('Setup', () => {
     github.auth = 'env'
   })
 
+  test('takes a TypeSafe key, checked with GET /v1/models and never sent back', async () => {
+    const calls: string[] = []
+    const fetchMock = mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
+      calls.push(`${url} ${(init.headers as Record<string, string>).Authorization}`)
+      return new Response('{}', {
+        status: (init.headers as Record<string, string>).Authorization.endsWith('bad') ? 401 : 200,
+      })
+    })
+    try {
+      delete process.env.TYPESAFE_API_KEY
+      assert.deepEqual((await setup()).typesafe, { source: null })
+
+      assert.equal((await call('PUT', '/system/typesafe-key', { key: 'bad' })).status, 400)
+      assert.deepEqual((await setup()).typesafe, { source: null })
+
+      const set = await call<SetupStatus>('PUT', '/system/typesafe-key', { key: 'ts_good' })
+      assert.equal(set.status, 200)
+      assert.deepEqual(set.body.typesafe, { source: 'board' })
+      assert.ok(!JSON.stringify(await setup()).includes('ts_good'))
+      assert.equal(calls[1], 'https://api.typesafe.ai/v1/models Bearer ts_good')
+
+      process.env.TYPESAFE_API_KEY = 'ts_env'
+      assert.deepEqual((await setup()).typesafe, { source: 'env' })
+      delete process.env.TYPESAFE_API_KEY
+
+      process.env.TYPESAFE_API_BASE = 'http://proxy.test/'
+      await call('PUT', '/system/typesafe-key', { key: 'ts_other' })
+      assert.equal(calls[2], 'http://proxy.test/v1/models Bearer ts_other')
+      delete process.env.TYPESAFE_API_BASE
+
+      assert.deepEqual((await call<SetupStatus>('DELETE', '/system/typesafe-key')).body.typesafe, { source: null })
+    } finally {
+      fetchMock.mock.restore()
+    }
+  })
+
   test('shows what the agent supervisor last reported', async () => {
     assert.equal((await setup()).agents.seenAt, null)
     const reported = await checkIn({

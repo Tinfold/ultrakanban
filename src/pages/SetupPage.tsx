@@ -132,6 +132,57 @@ function GitHubTokenForm({ status, onChange }: { status: SetupStatus; onChange: 
   )
 }
 
+function TypesafeKeyForm({ status, onChange }: { status: SetupStatus; onChange: (status: SetupStatus) => void }) {
+  const [key, setKey] = useState('')
+  const [saving, setSaving] = useState(false)
+  const { source } = status.typesafe
+
+  const save = async (request: Promise<SetupStatus>) => {
+    setSaving(true)
+    try {
+      onChange(await request)
+      setKey('')
+    } catch (error) {
+      toast.error(errorMessage(error))
+    } finally {
+      setSaving(false)
+    }
+  }
+  const submit = (event: FormEvent) => {
+    event.preventDefault()
+    if (key.trim()) void save(api.setTypesafeKey(key.trim()))
+  }
+
+  return (
+    <form onSubmit={submit} className="grid gap-2">
+      <p className="text-xs text-muted-foreground">
+        {source === 'env'
+          ? 'TYPESAFE_API_KEY is set and wins over a key saved here. '
+          : 'Optional: without a key, nothing changes. '}
+        The key is checked with TypeSafe, kept in the board’s database and never shown again.
+      </p>
+      <div className="flex gap-2">
+        <Input
+          type="password"
+          autoComplete="off"
+          placeholder="TypeSafe API key"
+          aria-label="TypeSafe API key"
+          value={key}
+          onChange={(event) => setKey(event.target.value)}
+        />
+        <Button type="submit" disabled={saving || !key.trim()}>
+          Save
+        </Button>
+        {source === 'board' && (
+          <Button type="button" variant="outline" disabled={saving} onClick={() => save(api.removeTypesafeKey())}>
+            Remove
+          </Button>
+        )}
+      </div>
+    </form>
+  )
+}
+
 /** Runs `gh auth login` or `claude auth login` where the agents run, through the agent supervisor. */
 function AgentLogin({
   kind,
@@ -344,6 +395,18 @@ export function SetupPage() {
           }
         >
           <GitHubTokenForm status={status} onChange={setUp} />
+        </Step>
+
+        <Step
+          state={status.typesafe.source ? 'done' : 'later'}
+          title="Add a TypeSafe API key (optional)"
+          status={
+            status.typesafe.source
+              ? `Using ${status.typesafe.source === 'env' ? 'TYPESAFE_API_KEY' : 'the key set here'}.`
+              : 'Jev’s features need a TypeSafe key, and stay hidden without one.'
+          }
+        >
+          <TypesafeKeyForm status={status} onChange={setUp} />
         </Step>
 
         <Step

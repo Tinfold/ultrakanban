@@ -47,15 +47,17 @@ npm run build
 npm start            # http://127.0.0.1:4317 serves the app and the API
 ```
 
-| Variable                  | Default               | Purpose                                                                                                                                                       |
-| ------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PORT`                    | `4317`                | API / app port                                                                                                                                                |
-| `HOST`                    | `127.0.0.1`           | Bind address. Use `0.0.0.0` to reach it from your phone on LAN                                                                                                |
-| `ULTRAKANBAN_DB`          | `data/ultrakanban.db` | SQLite database file (`:memory:` for throwaway)                                                                                                               |
-| `ULTRAKANBAN_ATTACHMENTS` | next to the database  | Directory for uploaded attachment files                                                                                                                       |
-| `GITHUB_TOKEN`            | `gh auth token`       | Token for checking pull requests (private repos need `repo` read access) and creating repositories (`repo` scope). One set on the Setup page takes precedence |
-| `GITHUB_SYNC_INTERVAL`    | `60`                  | Seconds between pull request checks                                                                                                                           |
-| `ULTRAKANBAN_URL`         |                       | Address people open the app at, e.g. `http://kanban.lan:4317`; notifications link to the ticket there                                                         |
+| Variable                  | Default                   | Purpose                                                                                                                                                       |
+| ------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                    | `4317`                    | API / app port                                                                                                                                                |
+| `HOST`                    | `127.0.0.1`               | Bind address. Use `0.0.0.0` to reach it from your phone on LAN                                                                                                |
+| `ULTRAKANBAN_DB`          | `data/ultrakanban.db`     | SQLite database file (`:memory:` for throwaway)                                                                                                               |
+| `ULTRAKANBAN_ATTACHMENTS` | next to the database      | Directory for uploaded attachment files                                                                                                                       |
+| `GITHUB_TOKEN`            | `gh auth token`           | Token for checking pull requests (private repos need `repo` read access) and creating repositories (`repo` scope). One set on the Setup page takes precedence |
+| `TYPESAFE_API_KEY`        |                           | Optional TypeSafe AI key for routing tickets with Jev ([docs/JEV.md](JEV.md)). One set in the environment takes precedence over one on the Setup page.        |
+| `TYPESAFE_API_BASE`       | `https://api.typesafe.ai` | Where TypeSafe is reached; set it to use a LiteLLM or other proxy                                                                                             |
+| `GITHUB_SYNC_INTERVAL`    | `60`                      | Seconds between pull request checks                                                                                                                           |
+| `ULTRAKANBAN_URL`         |                           | Address people open the app at, e.g. `http://kanban.lan:4317`; notifications link to the ticket there                                                         |
 
 There is no authentication: only expose it on networks you trust.
 

@@ -9,6 +9,7 @@ interface WaitRow {
   id: string
   auto_merge_wait: string
   auto_merge_failed: number
+  auto_merge_since: string | null
 }
 
 /**
@@ -21,7 +22,7 @@ export function setAutoMergeWaits(boardId: string, findings: Map<string, AutoMer
   const stored = new Map(
     sql
       .all<WaitRow>(
-        'SELECT id, auto_merge_wait, auto_merge_failed FROM tickets WHERE board_id = ? AND auto_merge_wait IS NOT NULL',
+        'SELECT id, auto_merge_wait, auto_merge_failed, auto_merge_since FROM tickets WHERE board_id = ? AND auto_merge_wait IS NOT NULL',
         boardId,
       )
       .map((row) => [row.id, row]),
@@ -45,7 +46,7 @@ export function setAutoMergeWaits(boardId: string, findings: Map<string, AutoMer
       'UPDATE tickets SET auto_merge_wait = ?, auto_merge_failed = ?, auto_merge_since = ? WHERE id = ? AND board_id = ?',
       finding.reason,
       Number(finding.failed),
-      at,
+      row?.auto_merge_wait === finding.reason ? (row.auto_merge_since ?? at) : at,
       id,
       boardId,
     )

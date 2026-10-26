@@ -197,7 +197,7 @@ function ReserveSelect({
 function UsageReserve({ usage, now }: { usage: ClaudeUsageData; now: number }) {
   const queryClient = useQueryClient()
   const [saving, setSaving] = useState(false)
-  const { reserve, reserveReached, reportedAt, credits } = usage
+  const { reserve, reserveReached, reportedAt, limitsAt, credits } = usage
   const set = reserve.week !== null || reserve.session !== null
   const creditsOn = credits.some((credit) => credit.kind === 'usage' && credit.enabled)
   const reachedPercent = reserveReached && reserveFor(reserveReached, reserve)
@@ -206,7 +206,7 @@ function UsageReserve({ usage, now }: { usage: ClaudeUsageData; now: number }) {
     ...(reserve.session === null ? [] : [`the current session is ${reserve.session}% used`]),
   ]
   // Without any report the card says so already.
-  const stale = reportedAt !== null && now - Date.parse(reportedAt) > CLAUDE_USAGE_FRESH_MINUTES * 60_000
+  const stale = reportedAt !== null && (!limitsAt || now - Date.parse(limitsAt) > CLAUDE_USAGE_FRESH_MINUTES * 60_000)
 
   const change = async (input: SetUsageReserveInput) => {
     setSaving(true)
@@ -275,8 +275,8 @@ function UsageReserve({ usage, now }: { usage: ClaudeUsageData; now: number }) {
       )}
       {set && !reserveReached && stale && (
         <p className="text-xs text-muted-foreground">
-          The reserve only goes by a report from the last {CLAUDE_USAGE_FRESH_MINUTES} minutes, so it doesn’t hold
-          agents back until the supervisor reports again.
+          The reserve only goes by limits read in the last {CLAUDE_USAGE_FRESH_MINUTES} minutes, so it doesn’t hold
+          agents back until the supervisor reads them again.
         </p>
       )}
     </div>
@@ -430,13 +430,14 @@ function ApiKeySetting({ usage }: { usage: ClaudeUsageData }) {
 
 /** How much of the Claude plan's usage limits is used and left, as the agent supervisor last read it. */
 export function ClaudeUsage({ usage, now }: { usage: ClaudeUsageData; now: number }) {
-  const { reportedAt, plan, limits, credits, error } = usage
+  const { reportedAt, limitsAt, plan, limits, credits, error } = usage
   let note: string | null = null
   if (!reportedAt) {
     note =
       'Not reported yet. The agent supervisor reads it on the host with your claude login (scripts/install-services.sh).'
   } else if (error) {
-    note = error
+    // A failed read keeps the last limits, shown above until they go stale.
+    note = limits.length && limitsAt ? `${error} The limits shown were read ${formatRelative(limitsAt, now)}.` : error
   } else if (!limits.length) {
     note = 'Claude reported no usage limits.'
   }

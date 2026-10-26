@@ -413,6 +413,9 @@ run_claude() {
 Put scratch files (clones, builds, test output, screenshots) in \$TMPDIR ($scratch), not in /tmp: /tmp may be held \
 in memory and is never cleaned up. \$TMPDIR is on disk, and the loop empties it once the ticket's run finishes."
   fi
+  # The board's agentMaxTurns, when set, caps how many turns the run may take.
+  max_turns=$(get "/boards/$BOARD" | jq -r '.board.agentMaxTurns // empty' 2>/dev/null)
+  [[ $max_turns =~ ^[0-9]+$ ]] || max_turns=
   run=$(new_session_id)
   started=$(date +%s%3N)
   (
@@ -424,8 +427,8 @@ in memory and is never cleaned up. \$TMPDIR is on disk, and the loop empties it 
     # The agents' API key reaches only a run that goes on it, as claude's own.
     if [[ -n $api_key_budget ]]; then export ANTHROPIC_API_KEY=$AGENT_API_KEY; fi
     unset AGENT_API_KEY
-    exec timeout --foreground "$TICKET_TIMEOUT" ${docker_args[@]+"${docker_args[@]}"} claude -p ${claude_args[@]+"${claude_args[@]}"} \
-      ${skill_args[@]+"${skill_args[@]}"} ${budget_args[@]+"${budget_args[@]}"} --model "$model" --effort "$effort" \
+    exec timeout --foreground -k "${TICKET_KILL_AFTER:-30}" "$TICKET_TIMEOUT" ${docker_args[@]+"${docker_args[@]}"} claude -p ${claude_args[@]+"${claude_args[@]}"} \
+      ${skill_args[@]+"${skill_args[@]}"} ${budget_args[@]+"${budget_args[@]}"} ${max_turns:+--max-turns "$max_turns"} --model "$model" --effort "$effort" \
       --output-format stream-json --verbose "$@"
   ) <<<"$prompt" >"$output" 2>"$errors" &
   running=$!
@@ -434,6 +437,8 @@ in memory and is never cleaned up. \$TMPDIR is on disk, and the loop empties it 
   watcher=$!
   wait "$running"
   code=$?
+  # A signal for the loop interrupts wait while the run is still stopping (see the INT/TERM trap).
+  while kill -0 "$running" 2>/dev/null; do wait "$running"; code=$?; done
   kill "$watcher" 2>/dev/null
   wait "$watcher" 2>/dev/null
   end_run "$id"
@@ -465,6 +470,7 @@ in memory and is never cleaned up. \$TMPDIR is on disk, and the loop empties it 
   fi
   record_run "$id" "$code" "$summary" "$usage" "$(($(date +%s%3N) - started))"
   rm -f "$output" "$errors" "$stopped"
+  if [[ -n $stopping ]]; then exit 0; fi
   return "$code"
 }
 
@@ -528,13 +534,16 @@ from origin with no local changes."
     elif [[ -n $branch ]]; then
       prompt+="
 
-The repository is checked out on $branch, freshly updated from origin$(
-        [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]] && printf '%s' " with no local changes")."
+The repository is checked out on $branch$(
+        [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]] && printf '%s' ", freshly updated from origin with no local changes")."
     fi
-    update_state "$id" '.session = ($v | fromjson) | del(.stopped)' \
+    update_state "$id" '.session = ($v | fromjson) | del(.stopped) | .runStart = (now | floor)' \
       "$(jq -nc --arg id "$session" --arg checkout "$PWD" '{id: $id, checkout: $checkout}')"
     run_claude "$id" "$prompt" "$start" "$session"
     code=$?
+    # When the run started and ended, so that TRIAGE doesn't take the pull request comments it posted (without the
+    # marker) for feedback. The last 20 runs are kept.
+    update_state "$id" '.runs = ((.runs // []) + [[.runStart // (now | floor), (now | ceil)]])[-20:] | del(.runStart)'
     if [[ $code == 0 && ${AGENT_LOOP_CLEAN:-0} == 1 ]]; then rm -f "$(run_file)"; fi
     checkout "" >/dev/null # back to the default branch between runs, keeping the work of a run that didn't finish
   else
@@ -542,7 +551,8 @@ The repository is checked out on $branch, freshly updated from origin$(
     log "can't update the checkout for $id"
   fi
   if [[ $code == 0 ]]; then
-    write_state "$id" "$snapshot"
+    write_state "$id" "$(jq -c --argjson s "$(read_state "$id")" '. + ($s | {runs} | with_entries(select(.value != null)))' \
+      <<<"$snapshot")"
     remove_scratch "$id"
     return 0
   fi

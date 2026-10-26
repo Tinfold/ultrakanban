@@ -16,8 +16,10 @@
 - **Sub-tickets**: agents split a big ticket into sub-tickets that link back to it; its card shows how many are done,
   and the agent comes back to it only once they all are
 - **Epics**: group the tickets of a larger feature, sub-tickets included, in a bar above the columns with each epic's
-  progress; click one to see only its tickets. An epic is done once all its tickets are, and agents filing several
+  progress; click one to see only its tickets (filter by epic), or select several tickets and set their epic in one go. An epic is done once all its tickets are, and agents filing several
   tickets for one feature put them in an epic
+- **Per-ticket model and effort**: each ticket can set its own model (`fable`, `opus`, `sonnet`, `haiku` or a full name) and
+  effort for the agent, with ticket templates and a suggestion of the cheapest setting that finished similar tickets
 - **Plans and approval**: agents post a short plan with a size estimate (S, M or L) when they start a ticket;
   optionally, per board, tickets estimated at a given size or larger wait for you to approve the plan on the ticket
   before the agent spends more tokens on them

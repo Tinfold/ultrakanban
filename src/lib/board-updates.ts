@@ -23,6 +23,7 @@ export type BoardPatch = Partial<
     | 'agentModel'
     | 'agentEffort'
     | 'agentConcurrency'
+    | 'agentMaxTurns'
     | 'agentConflictConcurrency'
     | 'agentBacklog'
     | 'agentAllSkills'
@@ -33,6 +34,11 @@ export type BoardPatch = Partial<
     | 'archiveDoneDays'
     | 'approvalSize'
     | 'notifyUrl'
+    | 'jevEnabled'
+    | 'jevModels'
+    | 'jevThreshold'
+    | 'jevOnlyLower'
+    | 'jevMode'
   >
 >
 export type TicketPatch = Partial<

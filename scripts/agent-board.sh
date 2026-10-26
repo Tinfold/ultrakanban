@@ -71,6 +71,12 @@ if [[ $(git -C "$dir/repo" config --get ultrakanban.repo 2>/dev/null) != "$repo"
   gh repo clone "$repo" "$dir/repo" -- --quiet || { echo "can't clone $repo"; exit 1; }
   git -C "$dir/repo" config ultrakanban.repo "$repo"
 fi
+# gh clones a fork with its parent as the remote "upstream" and makes that gh's default repository, so pull requests
+# would go to the parent. Make origin, the board's repository, the default instead, in the clone and its worktrees.
+for remote in $(git -C "$dir/repo" remote); do
+  [[ $remote == origin ]] || git -C "$dir/repo" config --unset-all "remote.$remote.gh-resolved" 2>/dev/null
+done
+git -C "$dir/repo" config "remote.origin.gh-resolved" base
 
 # One checkout per loop: the clone, then worktrees/2 up to worktrees/<concurrency>, then one per conflict loop. Worktrees
 # beyond that go, after keeping the work of a run that was stopped in them, which the ticket's next run gets back.
@@ -147,9 +153,14 @@ draining=
 while ((${#pids[@]})); do
   wait -n -p pid "${pids[@]}"
   code=$?
-  for n in "${!pids[@]}"; do
-    [[ ${pids[n]} == "$pid" ]] && break
+  n=
+  for i in "${!pids[@]}"; do
+    if [[ ${pids[i]} == "$pid" ]]; then
+      n=$i
+      break
+    fi
   done
+  [[ -n $n ]] || continue
   unset 'pids[n]'
   if ((code == 75)); then
     if [[ $(stat -c '%i %Y %s' "$here/agent-board.sh" 2>/dev/null) != "$board_script" ]] || unit_outdated; then

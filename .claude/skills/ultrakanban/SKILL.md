@@ -74,7 +74,7 @@ curl -s -X POST $KANBAN/api/boards/$BOARD/tickets/claim-next \
 Only one agent can win a ticket. `404 no_ticket_available` means there is nothing to do: stop and report that.
 It skips blocked tickets: tagged `blocked`, waiting for an unfinished ticket (`blocked by #12`, `depends on #12`), or
 with unfinished sub-tickets.
-`404 usage_reserve_reached` means the rest of the week's or the session's Claude usage is kept for people: don't claim
+`429 usage_reserve_reached` means the rest of the week's or the session's Claude usage is kept for people: don't claim
 anything else (not even a specific ticket); stop and report the message.
 To work a specific ticket instead, use `POST /api/tickets/$TICKET/claim` with the same body minus `column`.
 
@@ -210,12 +210,13 @@ stop there. A human has to fix CI.
 | Response                      | Meaning                                                                    |
 | ----------------------------- | -------------------------------------------------------------------------- |
 | `409 already_claimed`         | Another agent got there first. Claim a different ticket.                   |
+| `409 blocked`                 | A direct claim of a ticket `claim-next` would skip. Claim another ticket.  |
 | `409 claimed_by_other`        | The ticket isn't yours; don't touch it.                                    |
 | `409 version_conflict`        | Someone edited it meanwhile. Re-read the ticket and redo your edit.        |
 | `409 pull_request_not_merged` | You tried to move a ticket into the done column. Don't; the merge does it. |
 | `409 awaiting_approval`       | The ticket's plan waits for approval. Stop, and don't work it until then.  |
 | `404 no_ticket_available`     | Nothing to claim right now.                                                |
-| `404 usage_reserve_reached`   | Claude usage is kept for people. Stop and report it.                       |
+| `429 usage_reserve_reached`   | Claude usage is kept for people. Stop and report it.                       |
 | `415 unsupported_media_type`  | Attachments must be PNG, JPEG, GIF, WebP, MP4 or WebM.                     |
 
 ## Creating tickets
@@ -229,8 +230,11 @@ curl -s -X POST $KANBAN/api/boards/$BOARD/tickets \
 ```
 
 Pick `agentModel` and `agentEffort` for each ticket you file: the board's agent works it with them, so the cheapest
-setting that can do the work well saves tokens. Omit both (the board's defaults) when unsure, or when asked to.
+setting that can do the work well saves tokens. Omit both (the board's defaults) when unsure, or when asked to. On a
+board that routes with Jev (`jevEnabled`, `jevMode` `on`), leave them out: the claim picks the model and effort from
+the ticket, and a setting you name overrides that.
 
+- Model aliases: `fable`, `opus`, `sonnet`, `haiku`.
 - `haiku` at `low`: mechanical edits where the change is fully spelled out (a rename, bumping a version, a typo).
 - `sonnet` at `medium`: routine, well-scoped work: copy and docs, small UI changes, a clear bug with a known cause.
 - `opus` at `medium`: changes across several files or areas that need judgment.

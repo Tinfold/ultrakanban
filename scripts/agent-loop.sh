@@ -6,7 +6,7 @@
 # tickets under a name made of the agent, the model and the effort level they run with: AGENT/MODEL/EFFORT, e.g.
 # claude/opus/high. The loop passes that model and effort to claude, so the name always says what did the work.
 # A ticket can ask for its own model and effort level (its agentModel and agentEffort); tickets that don't are worked
-# with MODEL at EFFORT.
+# at the setting the board routes them to, when it routes with Jev (the claim's routed), else with MODEL at EFFORT.
 # Tickets held under another of the agent's names (another model or effort, or the bare agent name) are its own too:
 # before a run on one, the loop reassigns it to the current worker.
 #
@@ -82,6 +82,7 @@
 # and check name (re-running CI on the same commit doesn't start a run), checks that never ran or failed for billing,
 # runner or approval reasons never start a run (the loop notes them on the ticket once per commit), and after
 # MAX_CI_RUNS runs in a row started only by CI, it stops starting CI runs for the ticket until a human comments.
+# MAX_CONFLICT_RUNS does the same for runs started only by merge conflicts.
 #
 # A run that fails because the account is out of Claude usage doesn't count as a failure. The loop says so on the
 # ticket, quoting claude's message, and starts no runs at all until the time the message says the limit resets
@@ -91,7 +92,7 @@
 #
 # The usage reserve (on the overview, one setting for the whole Claude account) stops agents before that, keeping the
 # rest of the week, of the current session or both for people: once a weekly limit or the current session reaches its
-# reserve, claim-next hands out no new tickets (404 usage_reserve_reached), and the loop says so in its log once and
+# reserve, claim-next hands out no new tickets (429 usage_reserve_reached), and the loop says so in its log once and
 # claims nothing until it lifts. Tickets the agent holds still get runs for their feedback, so work in progress and in
 # review isn't left halfway.
 #
@@ -147,6 +148,7 @@
 #                       back before the time claude's limit message gave (default: 60)
 #   MAX_ATTEMPTS        failed runs in a row before waiting for new feedback (default: 3)
 #   MAX_CI_RUNS         runs in a row started only by failing CI, with no human feedback between (default: 2)
+#   MAX_CONFLICT_RUNS   runs in a row started only by merge conflicts, with no human feedback between (default: 2)
 #   CLAIM_LIMIT         most new tickets claimed whose first run hasn't finished yet (it is going, failed or stopped),
 #                       across the loops sharing STATE_DIR: no loop claims another while that many are pending, so
 #                       runs that fail right away don't drag the whole todo column into progress (default: 1;
@@ -216,6 +218,7 @@ RETRY_SECONDS=${RETRY_SECONDS:-600}
 USAGE_CHECK_SECONDS=${USAGE_CHECK_SECONDS:-60}
 MAX_ATTEMPTS=${MAX_ATTEMPTS:-3}
 MAX_CI_RUNS=${MAX_CI_RUNS:-2}
+MAX_CONFLICT_RUNS=${MAX_CONFLICT_RUNS:-2}
 MAX_BUILD_GB=${MAX_BUILD_GB:-20}
 CLAIM_LIMIT=${CLAIM_LIMIT:-1}
 CONFLICTS_ONLY=${CONFLICTS_ONLY:-0}
@@ -266,28 +269,41 @@ pause() {
   sleeper=
 }
 
-# Waits the given number of seconds, or less when someone wakes the board's agent up (a `wake` event on the board's
-# event stream, sent for a person's feedback on a ticket the agent holds, and by buttons such as the review column's
-# "fix conflicts"). Waits them out anyway if the stream can't be read.
-idle() {
-  local line end=$((SECONDS + $1)) events
-  exec {events}< <(exec curl -sfN --max-time "$1" "$KANBAN/api/events?board=$BOARD" 2>/dev/null)
-  listener=$!
-  while IFS= read -r line <&"$events"; do
-    [[ $line == 'event: wake' ]] && break
+# Where wake-ups are recorded: a file that exists when the board woke the loop up since idle last looked. A listener
+# runs for the whole life of the loop, so a wake-up that arrives during triage or a run is kept, not lost.
+WAKE_FILE=$STATE_DIR/wake.$$
+
+# Reads the board's event stream and sets the wake flag on each `wake` event (sent for a person's feedback on a ticket
+# the agent holds, and by buttons such as the review column's "fix conflicts"). Reconnects when the stream ends.
+listen_for_wakes() {
+  local line
+  while true; do
+    while IFS= read -r line; do
+      [[ $line == 'event: wake' ]] && : >"$WAKE_FILE"
+    done < <(exec curl -sfN "$KANBAN/api/events?board=$BOARD" 2>/dev/null)
+    sleep 5
   done
-  exec {events}<&-
-  kill "$listener" 2>/dev/null
-  listener=
-  if [[ $line == 'event: wake' ]]; then
-    log "woken up from the board"
-  elif ((end > SECONDS)); then
-    pause "$((end - SECONDS))"
-  fi
+}
+
+# Waits the given number of seconds, or less when the wake flag is set (or gets set meanwhile); clears the flag, and
+# doesn't wait at all when it was already set. Waits them out anyway if the stream can't be read.
+idle() {
+  local end=$((SECONDS + $1))
+  while ((SECONDS < end)); do
+    if [[ -e $WAKE_FILE ]]; then
+      rm -f "$WAKE_FILE"
+      log "woken up from the board"
+      return
+    fi
+    pause 1
+  done
 }
 
 sleeper=
 listener=
+rm -f "$WAKE_FILE"
+listen_for_wakes &
+listener=$!
 # Set when Claude usage runs out: no run starts before this time (seconds since the epoch). Kept in PAUSE_FILE, so
 # the other loops working the board wait too.
 paused_until=0
@@ -302,7 +318,11 @@ followup=
 # The run in progress and the process watching its ticket (see run_claude), if any.
 running=
 watcher=
-trap 'log "stopped"; kill $sleeper $listener $running $watcher 2>/dev/null; exit 0' INT TERM
+# Set by the trap: a run in progress is stopped, then run_claude ends and records it (end_run, stop_leftovers,
+# record_run) before the loop exits.
+stopping=
+trap 'log "stopped"; pkill -P "$listener" 2>/dev/null; kill $sleeper $listener $watcher 2>/dev/null; rm -f "$WAKE_FILE"
+  if [[ -n $running ]]; then stopping=1; kill $running 2>/dev/null; else exit 0; fi' INT TERM
 
 # `agent-loop.sh save-work` only keeps the work of an unfinished run in the current checkout (see save_work):
 # agent-board.sh does this before it removes a worktree.
