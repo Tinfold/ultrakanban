@@ -399,6 +399,31 @@ export const MIGRATIONS = [
   ALTER TABLE boards ADD COLUMN agent_conflict_concurrency INTEGER;
   `,
   `
+  -- Whether auto-merge goes ahead when the only failing checks failed because of billing (see BoardSummary).
+  ALTER TABLE boards ADD COLUMN ignore_billing_failures INTEGER NOT NULL DEFAULT 0;
+  `,
+  `
+  -- The credits the Claude account can spend on usage besides its plan's limits (see ClaudeUsageCredit), as JSON.
+  ALTER TABLE claude_usage ADD COLUMN credits TEXT NOT NULL DEFAULT '[]';
+  `,
+  `
+  -- Whether agents go on claiming once a Claude usage limit is used up, on usage credits (see ClaudeUsageReserve).
+  ALTER TABLE claude_usage ADD COLUMN usage_credits INTEGER NOT NULL DEFAULT 0;
+  -- Credits now say their kind; the supervisor's next report fills them in again.
+  UPDATE claude_usage SET credits = '[]';
+  `,
+  `
+  -- Agents going on on their API key once Claude usage runs out (see AgentApiKey): whether they may, at most how many
+  -- dollars a run and a calendar month may spend, and whether the agents last reported having a key.
+  ALTER TABLE claude_usage ADD COLUMN api_key_fallback INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE claude_usage ADD COLUMN api_key_run_budget_usd REAL NOT NULL DEFAULT 5;
+  ALTER TABLE claude_usage ADD COLUMN api_key_monthly_budget_usd REAL;
+  ALTER TABLE setup ADD COLUMN agents_api_key INTEGER NOT NULL DEFAULT 0;
+  -- Whether a run went on the agents' API key, so its cost was billed rather than estimated.
+  ALTER TABLE token_usage ADD COLUMN api_key INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE run_records ADD COLUMN api_key INTEGER NOT NULL DEFAULT 0;
+  `,
+  `
   -- The TypeSafe API key set on the Setup page (see docs/JEV.md); the API never sends it back.
   ALTER TABLE setup ADD COLUMN typesafe_api_key TEXT;
   `,
@@ -411,10 +436,6 @@ export const MIGRATIONS = [
   ALTER TABLE boards ADD COLUMN jev_threshold REAL;
   ALTER TABLE boards ADD COLUMN jev_only_lower INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE boards ADD COLUMN jev_mode TEXT;
-  `,
-  `
-  -- The most turns a run of the board's agent may take (see BoardSummary.agentMaxTurns); NULL for no limit.
-  ALTER TABLE boards ADD COLUMN agent_max_turns INTEGER;
   `,
   `
   -- How a ticket was routed when it was last claimed (see RoutingSource and docs/JEV.md, item 8): the setting it is
@@ -449,6 +470,14 @@ export const MIGRATIONS = [
   ALTER TABLE ticket_routes ADD COLUMN content_key TEXT;
   `,
   `
+  -- How Jev's pick and the history suggestion combine (see BoardSummary.jevCombine; JEV_DEFAULTS when NULL).
+  ALTER TABLE boards ADD COLUMN jev_combine TEXT;
+  `,
+  `
+  -- The most turns a run of the board's agent may take (see BoardSummary.agentMaxTurns); NULL for no limit.
+  ALTER TABLE boards ADD COLUMN agent_max_turns INTEGER;
+  `,
+  `
   -- Deleting a ticket keeps its runs (their ticket becomes NULL), so its spend stays in the board's totals. Dropping
   -- the old table cascades to token_usage_models (foreign keys are on), so the model split is set aside and put back.
   CREATE TEMP TABLE token_usage_models_kept AS SELECT * FROM token_usage_models;
@@ -468,11 +497,13 @@ export const MIGRATIONS = [
     routing_confidence REAL,
     jev_model TEXT,
     jev_effort TEXT,
-    jev_confidence REAL
+    jev_confidence REAL,
+    api_key INTEGER NOT NULL DEFAULT 0
   );
   INSERT INTO token_usage_new
     SELECT id, board_id, ticket_id, agent, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-      cost_usd, duration_ms, created_at, routing_source, routing_confidence, jev_model, jev_effort, jev_confidence
+      cost_usd, duration_ms, created_at, routing_source, routing_confidence, jev_model, jev_effort, jev_confidence,
+      api_key
     FROM token_usage;
   DROP TABLE token_usage;
   ALTER TABLE token_usage_new RENAME TO token_usage;
@@ -496,35 +527,6 @@ export const MIGRATIONS = [
   -- Tokens the run working the ticket has used so far, as its heartbeats say, and those a run record's run used.
   ALTER TABLE tickets ADD COLUMN run_tokens INTEGER;
   ALTER TABLE run_records ADD COLUMN tokens INTEGER;
-  `,
-  `
-  -- Whether auto-merge goes ahead when the only failing checks failed because of billing (see BoardSummary).
-  ALTER TABLE boards ADD COLUMN ignore_billing_failures INTEGER NOT NULL DEFAULT 0;
-  `,
-  `
-  -- The credits the Claude account can spend on usage besides its plan's limits (see ClaudeUsageCredit), as JSON.
-  ALTER TABLE claude_usage ADD COLUMN credits TEXT NOT NULL DEFAULT '[]';
-  `,
-  `
-  -- Whether agents go on claiming once a Claude usage limit is used up, on usage credits (see ClaudeUsageReserve).
-  ALTER TABLE claude_usage ADD COLUMN usage_credits INTEGER NOT NULL DEFAULT 0;
-  -- Credits now say their kind; the supervisor's next report fills them in again.
-  UPDATE claude_usage SET credits = '[]';
-  `,
-  `
-  -- Agents going on on their API key once Claude usage runs out (see AgentApiKey): whether they may, at most how many
-  -- dollars a run and a calendar month may spend, and whether the agents last reported having a key.
-  ALTER TABLE claude_usage ADD COLUMN api_key_fallback INTEGER NOT NULL DEFAULT 0;
-  ALTER TABLE claude_usage ADD COLUMN api_key_run_budget_usd REAL NOT NULL DEFAULT 5;
-  ALTER TABLE claude_usage ADD COLUMN api_key_monthly_budget_usd REAL;
-  ALTER TABLE setup ADD COLUMN agents_api_key INTEGER NOT NULL DEFAULT 0;
-  -- Whether a run went on the agents' API key, so its cost was billed rather than estimated.
-  ALTER TABLE token_usage ADD COLUMN api_key INTEGER NOT NULL DEFAULT 0;
-  ALTER TABLE run_records ADD COLUMN api_key INTEGER NOT NULL DEFAULT 0;
-  `,
-  `
-  -- How Jev's pick and the history suggestion combine (see BoardSummary.jevCombine; JEV_DEFAULTS when NULL).
-  ALTER TABLE boards ADD COLUMN jev_combine TEXT;
   `,
   `
   -- Model and effort for the board agent's runs that only fix merge conflicts, and those that only fix failing CI (see

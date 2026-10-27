@@ -10,6 +10,7 @@ import {
   type FailingCheck,
   IN_PROGRESS_COLUMN,
   isWeeklyLimit,
+  JEV_AGENT,
   parsePullRequestUrl,
   PRIORITIES,
   type Priority,
@@ -137,7 +138,7 @@ const SELECT_TICKETS = `
     (SELECT group_concat(tag_id) FROM ticket_tags WHERE ticket_id = t.id) AS tag_ids,
     (SELECT count(*) FROM activity WHERE ticket_id = t.id AND type = 'comment') AS comment_count,
     (SELECT count(*) FROM attachments WHERE ticket_id = t.id) AS attachment_count,
-    (SELECT count(*) FROM token_usage WHERE ticket_id = t.id) AS usage_runs,
+    (SELECT count(*) FROM token_usage WHERE ticket_id = t.id AND agent <> '${JEV_AGENT}') AS usage_runs,
     (SELECT sum(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) FROM token_usage
       WHERE ticket_id = t.id) AS usage_tokens,
     (SELECT sum(cost_usd) FROM token_usage WHERE ticket_id = t.id) AS usage_cost,
@@ -372,12 +373,16 @@ function conflictState(ticket: Pick<Ticket, 'version' | 'assignee' | 'columnId'>
   return { version: ticket.version, assignee: ticket.assignee, columnId: ticket.columnId }
 }
 
-function assertVersion(ticket: Ticket, ifVersion: number | undefined) {
+/**
+ * With `withDescription`, the 409 also carries the description as it is now, so that a description save can tell
+ * whether the description changed meanwhile or only other fields did.
+ */
+function assertVersion(ticket: Ticket, ifVersion: number | undefined, withDescription = false) {
   if (ifVersion !== undefined && ticket.version !== ifVersion) {
     throw conflict(
       'version_conflict',
       `Ticket was modified concurrently (current version ${ticket.version}, expected ${ifVersion})`,
-      conflictState(ticket),
+      withDescription ? { ...conflictState(ticket), description: ticket.description } : conflictState(ticket),
     )
   }
 }
@@ -545,7 +550,7 @@ export function createTicket(boardId: string, input: CreateTicketInput, actor: s
 
 export function updateTicket(id: string, input: UpdateTicketInput, actor: string): Ticket {
   const ticket = getTicket(id)
-  assertVersion(ticket, input.ifVersion)
+  assertVersion(ticket, input.ifVersion, input.description !== undefined)
   touchBoard(ticket.boardId)
 
   const changed: string[] = EDITABLE_FIELDS.filter(

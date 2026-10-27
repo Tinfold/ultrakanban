@@ -15,7 +15,8 @@ JSON over HTTP. Base URL: `http://127.0.0.1:4317/api` (in development the Vite d
   - `409 blocked` - `POST /tickets/:id/claim` on a ticket `claim-next` would skip (tagged `blocked`, waiting for an
     unfinished ticket, or with unfinished sub-tickets). A ticket the agent already holds can still be claimed by it.
   - `409 already_claimed` / `claimed_by_other` - someone else holds the ticket (`details` has its current `version`, `assignee` and `columnId`).
-  - `409 version_conflict` - `ifVersion` did not match (`details` has its current `version`, `assignee` and `columnId`).
+  - `409 version_conflict` - `ifVersion` did not match (`details` has its current `version`, `assignee` and `columnId`,
+    and its `description` too for a `PATCH /tickets/:id` that sets one).
   - `409 tag_exists` - tag names are unique per board (case-insensitive).
   - `409 pull_request_not_merged` - the board's done column only accepts tickets whose pull request is merged.
   - `409 merge_in_progress` - the board's pull requests are already being merged.
@@ -476,7 +477,7 @@ and end the run.
 | GET    | `/boards/:boardId/tickets/:number`     |                                                                                                                                                                                                                                                                                                              | `Ticket`                                                                                                                                                                                                                                                                                                             |
 | POST   | `/boards/:boardId/tickets`             | `{ title, description?, column?: ref, priority?, tags?: ref[], assignee?, dueDate?, agentEffort?, agentModel?, agentDocker?, pullRequest?: url, parent?: ref, epic?: ref, position?, force? }`                                                                                                               | `Ticket` (defaults to the first column, appended)                                                                                                                                                                                                                                                                    |
 | GET    | `/tickets/:ticketId`                   |                                                                                                                                                                                                                                                                                                              | `Ticket`                                                                                                                                                                                                                                                                                                             |
-| GET    | `/tickets/:ticketId/route`             |                                                                                                                                                                                                                                                                                                              | `{ routed: RoutedSetting \| null }`: the setting to work the ticket at on a board whose Jev mode is `on`, for runs on feedback; asks Jev only when the ticket changed since it last picked. `null` on other boards (see [Routing](#routing))                                                                         |
+| POST   | `/tickets/:ticketId/route`             |                                                                                                                                                                                                                                                                                                              | `{ routed: RoutedSetting \| null }`: the setting to work the ticket at on a board whose Jev mode is `on`, for runs on feedback; asks Jev only when the ticket changed since it last picked. `null` on other boards (see [Routing](#routing))                                                                         |
 | PATCH  | `/tickets/:ticketId`                   | `{ title?, description?, priority?, tags?: ref[], assignee?: string \| null, dueDate?, agentEffort?: 'low' \| 'medium' \| 'high' \| 'xhigh' \| 'max' \| null, agentModel?: string \| null, agentDocker?: boolean \| null, pullRequest?: url \| null, parent?: ref \| null, epic?: ref \| null, ifVersion? }` | `Ticket`                                                                                                                                                                                                                                                                                                             |
 | DELETE | `/tickets/:ticketId`                   |                                                                                                                                                                                                                                                                                                              | `204`                                                                                                                                                                                                                                                                                                                |
 | POST   | `/tickets/:ticketId/move`              | `{ column: ref, position?, ifVersion?, force? }`                                                                                                                                                                                                                                                             | `Ticket` (appended when `position` is omitted)                                                                                                                                                                                                                                                                       |
@@ -614,8 +615,9 @@ from (`ticket` when it names its own `agentModel`/`agentEffort`, else the board'
 would have picked: the [similar-tickets suggestion](#suggested-model-and-effort) when it is built on 3 or more similar tickets,
 and, on a board that routes with Jev (`jevEnabled`, see [docs/JEV.md](JEV.md)), Jev's pick and confidence. Jev is asked
 before the claim returns, and in `dry-run` mode its pick is only recorded, never used. A Jev request that fails is
-left out and never fails the claim. Each Jev request is recorded as a run on the ticket (agent `jev`, model
-`jev-1.14.0`, at $0.042 per million input tokens), so its tokens and cost count in the usage too.
+left out and never fails the claim. Each Jev request is recorded in the ticket's usage (agent `jev`, model
+`jev-1.14.0`, at $0.042 per million input tokens), so its tokens and cost count there too, but not as a run, and Jev isn't
+listed among the overview's agents.
 
 In `on` mode the claim also returns the setting to work the ticket at as `routed`, without writing over the ticket's own
 `agentModel`/`agentEffort`, and the agent loop works the ticket at it. The first source that has a pick wins:
@@ -642,7 +644,7 @@ ticket whose run failed or that came back from review with changes keeps or rais
 the ticket (title, description with its checklist unchecked, tags, epic, and the models it may pick from), and Jev isn't
 asked again until one of those changes: claiming the ticket again, checking off steps or reassigning it doesn't. A
 failed or timed-out Jev request (2 s) is never kept: routing goes on to the next source, and the next claim or route
-asks again. Runs on feedback get the same setting from `GET /tickets/:ticketId/route`.
+asks again. Runs on feedback get the same setting from `POST /tickets/:ticketId/route`.
 
 `POST /boards/:boardId/jev-suggestion` with `{ title?, description?, tagIds?: id[], epicId?: id | null }` asks Jev on
 demand which model (among the board's `jevModels`) and effort a ticket as written needs, for the "Suggest with Jev"
@@ -720,8 +722,10 @@ interface RunRecord {
   // finished: exited successfully; failed: exited with an error; timed_out: ran past the loop's TICKET_TIMEOUT;
   // killed: by a signal (exit status 137 is most likely the kernel, out of memory); stopped: the loop stopped it as
   // someone took the ticket away; stop_requested: the loop stopped it as someone asked (POST /tickets/:id/stop; the
-  // run is resumed with new feedback); usage_limit: the account ran out of Claude usage (the run is resumed later)
-  outcome: 'finished' | 'failed' | 'timed_out' | 'killed' | 'stopped' | 'stop_requested' | 'usage_limit'
+  // run is resumed with new feedback); loop_stopped: the loop itself was stopped, e.g. restarted (the run is resumed
+  // by its next run); usage_limit: the account ran out of Claude usage (the run is resumed later)
+  outcome:
+    'finished' | 'failed' | 'timed_out' | 'killed' | 'stopped' | 'stop_requested' | 'loop_stopped' | 'usage_limit'
   exitCode: number | null
   durationMs: number | null
   turns: number | null // responses of the model
@@ -758,10 +762,10 @@ time passes the ticket's own.
 - **Tokens are weighted by kind** about as Claude prices them, relative to uncached input: output 5, cache writes
   1.25, cache reads 0.1. Cache reads make up most of a run's raw total.
 - **The suggestion** is the setting that costs least per _finished_ ticket (its average cost over its success rate, so
-  each finished ticket also pays for the ones given up on; by weighted tokens when runs reported no cost) among those
-  whose weighted success rate is within 0.2 of the best one's. Only settings at least 2 similar decided tickets were
-  worked at can be suggested; the others still show in `options`. It is `null` when none of those finished a similar
-  ticket.
+  each finished ticket also pays for the ones given up on; all by weighted tokens when any of them has no cost) among
+  those whose weighted success rate is within 0.2 of the best one's. Only settings at least 2 similar decided tickets
+  were worked at can be suggested; the others still show in `options`. It is `null` when none of those finished a
+  similar ticket.
 
 ```ts
 interface AgentSuggestion {
@@ -896,7 +900,18 @@ interface Overview {
   routing: RoutingComparison // routing sources compared on every board, over all time (see Routing)
   // Every board's decided tickets by the model and effort that did most of their work (any agent), over all time,
   // most tickets first: the suggestion's figures with every ticket counting fully
-  settings: { model; effort; tickets; finished; successRate: number; costUsd: number | null; tokens: number }[]
+  settings: {
+    model
+    effort
+    tickets
+    finished
+    successRate: number // finished share (0 to 1)
+    costUsd: number | null // average cost per ticket; null when none reported one
+    costPerFinishedUsd: number | null // costUsd / successRate; null without a cost or a finished ticket
+    tokens: number // average tokens per ticket
+    weightedTokens: number // average tokens per ticket, weighted by kind
+    weightedTokensPerFinished: number | null // weightedTokens / successRate; null without a finished ticket
+  }[]
 }
 
 // Token usage added up over runs; costUsd sums the runs that reported a cost (null when none did).

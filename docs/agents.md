@@ -375,14 +375,14 @@ another ticket in the meantime.
 Every run leaves a record on its ticket, so you can see what the agent did and why it's stuck without reading the
 loop's logs. The loop runs claude with `--output-format stream-json --verbose`, which writes each message and tool call
 as the run goes, and once the run ends posts a record of it (`POST /tickets/:id/runs`): how it ended (finished, failed,
-timed out, killed, stopped because the ticket was taken away or because someone asked, or out of Claude usage), its
-exit status, how long it took, its turns and cost, its final message (or what it last said, for a run cut short) and
-each tool call with a short target: a command's first line (less a `cd` to the checkout), a file's path, a search
-pattern. A run of more than 150 tool calls keeps its first and last 75. The ticket's activity shows the records among
-its other events: open one to see the steps, numbered, with failed ones in red; narrow them to one tool, to the failed
-ones or to a text, or show them all at once instead of in a list that scrolls. Runs that time out or are killed are
-recorded too, though they leave no token usage; only a run cut short by the loop itself stopping (a restart) leaves
-none, and the next run resumes it. None of this costs tokens: the loop builds it from claude's output, and the model
+timed out, killed, stopped because the ticket was taken away, because someone asked or along with the loop, or out of
+Claude usage), its exit status, how long it took, its turns and cost, its final message (or what it last said, for a
+run cut short) and each tool call with a short target: a command's first line (less a `cd` to the checkout), a file's
+path, a search pattern. A run of more than 150 tool calls keeps its first and last 75. The ticket's activity shows the
+records among its other events: open one to see the steps, numbered, with failed ones in red; narrow them to one tool,
+to the failed ones or to a text, or show them all at once instead of in a list that scrolls. Runs that time out or are
+killed are recorded too, though they leave no token usage, and so is a run cut short by the loop itself stopping (a
+restart), which the next run resumes. None of this costs tokens: the loop builds it from claude's output, and the model
 is never asked for it.
 
 While a run is going, its card and the ticket show what it does: its latest tool call (`Bash: npm test`, or the

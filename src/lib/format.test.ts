@@ -25,6 +25,7 @@ describe('run records', () => {
     assert.equal(formatRunOutcome({ outcome: 'failed', exitCode: 1 }), 'failed: exit status 1')
     assert.equal(formatRunOutcome({ outcome: 'timed_out', exitCode: 124 }), 'failed: timed out')
     assert.equal(formatRunOutcome({ outcome: 'killed', exitCode: 137 }), 'failed: killed (out of memory?)')
+    assert.equal(formatRunOutcome({ outcome: 'loop_stopped', exitCode: 143 }), 'stopped: the loop stopped')
     assert.equal(formatRunOutcome({ outcome: 'usage_limit', exitCode: 1 }), 'stopped: out of Claude usage')
   })
 })

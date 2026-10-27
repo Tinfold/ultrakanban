@@ -6,6 +6,7 @@ import {
   AGENT_EFFORTS,
   CANCELLED_COLUMN,
   agentWorkerName,
+  JEV_AGENT,
   noUsage,
   type Overview,
   type OverviewActivity,
@@ -233,7 +234,8 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
   const tokensOn = new Map<string, number>()
   const costOn = new Map<string, number>()
   for (const run of usage) {
-    usageBy.set(run.agent, addUsage(usageBy.get(run.agent) ?? noUsage(), run))
+    // Jev isn't an agent: its requests count in the totals, on the boards and tickets they routed.
+    if (run.agent !== JEV_AGENT) usageBy.set(run.agent, addUsage(usageBy.get(run.agent) ?? noUsage(), run))
     tokensOn.set(run.boardId, (tokensOn.get(run.boardId) ?? 0) + totalTokens(run))
     if (run.costUsd !== null) costOn.set(run.boardId, (costOn.get(run.boardId) ?? 0) + run.costUsd)
   }
@@ -250,7 +252,7 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
   }
   const ticketUsage = sql
     .all<{ ticket_id: string; runs: number; tokens: number; cost: number | null }>(
-      `SELECT ticket_id, count(*) AS runs,
+      `SELECT ticket_id, count(*) FILTER (WHERE agent <> '${JEV_AGENT}') AS runs,
          sum(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) AS tokens, sum(cost_usd) AS cost
        FROM token_usage WHERE ticket_id IN (${workedTickets}) GROUP BY ticket_id`,
       since,

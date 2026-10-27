@@ -23,9 +23,11 @@
 read -r -d '' TRIAGE <<'JQ'
 def bot: (.user.type // "") == "Bot" or ((.user.login // "") | endswith("[bot]"));
 def feedback: (bot | not) and ((.body // "") | contains($marker) | not);
-# A short acknowledgement ("thanks", "LGTM", a lone emoji) asks for nothing, so it doesn't start a run.
+# A short acknowledgement ("thanks", "LGTM", a lone emoji) asks for nothing, so it doesn't start a run. One without
+# words is all punctuation and symbols (emoji, with the marks and joiners they are made of): a short comment in another
+# script, such as "Исправь опечатку", is feedback.
 def ack: (.body // "") | gsub("^[\\s[:punct:]]+|[\\s[:punct:]]+$"; "") | ascii_downcase
-  | (length <= 40) and (test("^([^a-z0-9]*|(thanks?|thank you|thx|ty|lgtm|looks good( to me)?|nice|great|perfect|awesome|cool|ok(ay)?|done|"
+  | (length <= 40) and (test("^([\\s\\p{P}\\p{S}\\p{M}\\p{Cf}]*|(thanks?|thank you|thx|ty|lgtm|looks good( to me)?|nice|great|perfect|awesome|cool|ok(ay)?|done|"
     + "good|approved?|\\+1|ship it|merged?|sounds good|great work|good job|nice work)( (you|so much|a lot|everyone|all))?)$"));
 def ours: . == $agent or . == $loop or startswith($agent + "/");
 # Whether a pull request comment or review was created during one of the given runs ([start, end] in epoch seconds).

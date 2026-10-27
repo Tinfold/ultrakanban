@@ -675,7 +675,7 @@ export interface AgentSettingStats {
   costUsd: number | null
   /**
    * Cost per finished ticket: `costUsd` over `successRate`, as each finished ticket also pays for the ones given up on.
-   * Null when none reported a cost or none was finished. Settings are compared by it.
+   * Null when none reported a cost or none was finished. Settings are compared by it when all of them have a `costUsd`.
    */
   costPerFinishedUsd: number | null
   /** Tokens per ticket, averaged by similarity. */
@@ -684,7 +684,7 @@ export interface AgentSettingStats {
   weightedTokens: number
   /**
    * Weighted tokens per finished ticket, `weightedTokens` over `successRate`; null when none was finished. Settings are
-   * compared by it when they don't both have a `costPerFinishedUsd`.
+   * compared by it when any of them has no `costUsd`.
    */
   weightedTokensPerFinished: number | null
   /** Those tickets, most similar first (at most 5). */
@@ -840,7 +840,7 @@ export interface RoutingPick {
  * The model and effort a claimed ticket is worked at on a board that routes with Jev (`jevMode` `on`), and the source
  * that won (docs/JEV.md, item 5): the ticket's own setting, else Jev's pick at or above the board's threshold, else the
  * history suggestion when it is built on `HISTORY_MIN_TICKETS` similar tickets, else the board's default. Returned as
- * `routed` by `claim`, `claim-next` and `GET /tickets/:id/route`; the ticket's own `agentModel`/`agentEffort` stay as
+ * `routed` by `claim`, `claim-next` and `POST /tickets/:id/route`; the ticket's own `agentModel`/`agentEffort` stay as
  * they are.
  */
 export interface RoutedSetting extends RoutingPick {
@@ -949,14 +949,16 @@ export const RUN_OUTCOMES = [
   'killed',
   'stopped',
   'stop_requested',
+  'loop_stopped',
   'usage_limit',
 ] as const
 /**
  * How an agent run ended: `finished` (the agent exited successfully), `failed` (it exited with an error), `timed_out`
  * (it ran longer than the agent loop's TICKET_TIMEOUT), `killed` (by a signal, most likely the kernel's for running out
  * of memory), `stopped` (the loop stopped it because someone took the ticket away from the agent), `stop_requested`
- * (the loop stopped it because someone asked, see `AgentRun.stopRequested`, and resumes it once there is new feedback)
- * or `usage_limit` (the account ran out of Claude usage, so the loop waits for it to reset and then resumes the run).
+ * (the loop stopped it because someone asked, see `AgentRun.stopRequested`, and resumes it once there is new feedback),
+ * `loop_stopped` (the loop itself was stopped, e.g. restarted, and its next run on the ticket resumes it) or
+ * `usage_limit` (the account ran out of Claude usage, so the loop waits for it to reset and then resumes the run).
  */
 export type RunOutcome = (typeof RUN_OUTCOMES)[number]
 
@@ -1052,10 +1054,14 @@ function addCounts(totals: UsageCounts, counts: TokenCounts & { costUsd: number 
   totals.runs += runs
 }
 
-/** Adds a run's usage to `totals` and returns them. */
-export function addUsage(totals: UsageTotals, run: TokenCounts & { costUsd: number | null; models: ModelUsage[] }) {
-  addCounts(totals, run, 1)
-  for (const model of run.models) addCounts((totals.models[model.model] ??= noCounts()), model, 1)
+/** Adds a run's usage to `totals` and returns them. A Jev request (`JEV_AGENT`) adds its tokens and cost, not a run. */
+export function addUsage(
+  totals: UsageTotals,
+  run: TokenCounts & { agent?: string; costUsd: number | null; models: ModelUsage[] },
+) {
+  const runs = run.agent === JEV_AGENT ? 0 : 1
+  addCounts(totals, run, runs)
+  for (const model of run.models) addCounts((totals.models[model.model] ??= noCounts()), model, runs)
   return totals
 }
 

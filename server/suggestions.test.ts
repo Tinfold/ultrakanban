@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { beforeEach, describe, test } from 'node:test'
-import type { AgentSuggestion, BoardDetail, Overview, TokenCounts } from '../shared/domain.ts'
-import { settingReport, similarity, titleWords } from './store/suggestions.ts'
+import type { AgentSettingStats, AgentSuggestion, BoardDetail, Overview, TokenCounts } from '../shared/domain.ts'
+import { cheaperAmong, settingReport, similarity, titleWords } from './store/suggestions.ts'
 import { addTicket, boardId, call, pullRequestStatuses, useBoard } from './test-app.ts'
 
 describe('agent suggestions', () => {
@@ -205,6 +205,38 @@ describe('agent suggestions', () => {
     assert.deepEqual([haiku.costUsd, haiku.costPerFinishedUsd], [null, null])
     assert.deepEqual([haiku.tokens, haiku.weightedTokens, haiku.weightedTokensPerFinished], [155_000, 20_000, 20_000])
     assert.deepEqual([opus.tokens, opus.weightedTokens], [20_000, 100_000])
+  })
+
+  test('compares all by tokens when one has no cost, whatever order they come in', () => {
+    const setting = (model: string, costUsd: number | null, weightedTokens: number): AgentSettingStats => ({
+      model,
+      effort: 'medium',
+      tickets: 2,
+      finished: 2,
+      successRate: 1,
+      costUsd,
+      costPerFinishedUsd: costUsd,
+      tokens: weightedTokens,
+      weightedTokens,
+      weightedTokensPerFinished: weightedTokens,
+      similar: [],
+    })
+    const sorted = (settings: AgentSettingStats[]) =>
+      [...settings].sort(cheaperAmong(settings)).map((setting) => setting.model)
+    // By cost a < b, by tokens b < c and c < a: comparing each pair by what both have would go round in a circle.
+    const [a, b, c] = [setting('a', 1, 100_000), setting('b', 2, 50_000), setting('c', null, 75_000)]
+    for (const order of [
+      [a, b, c],
+      [a, c, b],
+      [b, a, c],
+      [b, c, a],
+      [c, a, b],
+      [c, b, a],
+    ]) {
+      assert.deepEqual(sorted(order), ['b', 'c', 'a'])
+    }
+    // With a cost for every one, by cost.
+    assert.deepEqual(sorted([b, a]), ['a', 'b'])
   })
 
   test('suggests nothing without similar finished tickets', async () => {

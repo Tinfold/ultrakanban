@@ -108,7 +108,7 @@ def clip($n): if length > $n then .[:($n - 1)] + "…" else . end;
 | ($steps | length) as $count
 | {agent: $agent, outcome: $outcome, exitCode: $code, durationMs: $duration,
    turns: (.result.num_turns // .turns // null),
-   tokens: ($usage | objects | .inputTokens + .outputTokens + .cacheReadTokens + .cacheWriteTokens) // null,
+   tokens: (($usage | objects | .inputTokens + .outputTokens + .cacheReadTokens + .cacheWriteTokens) // null),
    costUsd: (($usage | objects | .costUsd) // null), apiKey: $apiKey,
    message: (((.result.result // .text // (.output // [] | join("\n"))) | strings | select(test("\\S"))) // $errors
      | clip(4000)),
@@ -367,8 +367,8 @@ use_docker() {
 container() { printf 'ultrakanban-%s-%s-%s' "$BOARD" "$1" "$$"; }
 
 # How a run that exited with the given status ended, for its record (see RunOutcome in shared/domain.ts), from
-# claude_stop_requested, claude_stopped and claude_result: in the order run_on_ticket looks at them, so the record says
-# what the loop did.
+# claude_stop_requested, claude_stopped, stopping and claude_result: in the order run_on_ticket looks at them, so the
+# record says what the loop did.
 run_outcome() {
   if (($1 == 0)); then
     echo finished
@@ -376,6 +376,8 @@ run_outcome() {
     echo stop_requested
   elif [[ -n $claude_stopped ]]; then
     echo stopped
+  elif [[ -n $stopping ]]; then
+    echo loop_stopped
   elif (($1 == 124)); then
     echo timed_out
   elif (($1 > 128)); then
@@ -404,9 +406,10 @@ record_run() {
 # final message (and keeps it in claude_result, and what it printed to stderr in claude_errors), reports the tokens
 # it used and records what it did on the ticket (record_run). Returns claude's exit status. If someone takes the ticket
 # away from the agent meanwhile, the run is stopped and claude_stopped says why; if someone asks for the run to stop, it
-# is stopped and claude_stop_requested says who asked (both are empty otherwise). A run stopped either way returns a
-# failure, whatever claude exited with. With api_key_budget set (see use_api_key), the run goes on the agents' API key
-# (AGENT_API_KEY, as claude's ANTHROPIC_API_KEY) and may spend at most that many dollars; other runs never see the key.
+# is stopped and claude_stop_requested says who asked (both are empty otherwise). A run stopped either way, or along
+# with the loop (stopping), returns a failure, whatever claude exited with. With api_key_budget set (see use_api_key),
+# the run goes on the agents' API key (AGENT_API_KEY, as claude's ANTHROPIC_API_KEY) and may spend at most that many
+# dollars; other runs never see the key.
 # claude_subtype is the subtype of the run's result, e.g. error_max_budget_usd for one that reached that cap.
 run_claude() {
   local id=$1 prompt=$2 output errors stopped code usage=null response scratch= run started summary kind= reason= \
@@ -472,8 +475,8 @@ in memory and is never cleaned up. \$TMPDIR is on disk, and the loop empties it 
     taken) claude_stopped=$reason ;;
     requested) claude_stop_requested=$reason ;;
   esac
-  # Even if claude exited cleanly on the TERM, the run didn't finish.
-  if [[ -n $kind && $code == 0 ]]; then code=143; fi
+  # Even if claude exited cleanly on the TERM (the watcher's or the loop's), the run didn't finish.
+  if [[ (-n $kind || -n $stopping) && $code == 0 ]]; then code=143; fi
   claude_errors=$(<"$errors")
   [[ -n $claude_errors ]] && printf '%s\n' "$claude_errors" >&2
   summary=$(jq -cnR --arg cwd "$PWD" "$RUN_SUMMARY" "$output" 2>/dev/null) || summary='{}'
@@ -490,7 +493,6 @@ in memory and is never cleaned up. \$TMPDIR is on disk, and the loop empties it 
   fi
   record_run "$id" "$code" "$summary" "$usage" "$(($(date +%s%3N) - started))"
   rm -f "$output" "$errors" "$stopped"
-  if [[ -n $stopping ]]; then exit 0; fi
   return "$code"
 }
 
@@ -586,6 +588,8 @@ $task$( ((steps)) && unchecked_steps "$id")$notes"
       # When the run started and ended, so that TRIAGE doesn't take the pull request comments it posted (without the
       # marker) for feedback. The last 20 runs are kept.
       update_state "$id" '.runs = ((.runs // []) + [[.runStart // (now | floor), (now | ceil)]])[-20:] | del(.runStart)'
+      # The loop is stopping (see the INT/TERM trap): the run keeps its session and its work, for the next one to resume.
+      if [[ -n $stopping ]]; then exit 0; fi
       # The session is gone (e.g. claude's history was cleared): run again at once as a new session, with the whole
       # prompt. A session from another checkout isn't: claude --resume finds a session id in any project directory,
       # and the resumed run works in this one (checked with Claude Code 2.1.304).

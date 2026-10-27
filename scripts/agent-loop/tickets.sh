@@ -47,9 +47,12 @@ worked on again."
 # board routed it to when it routes with Jev (kept from the claim, so Jev isn't asked again while the ticket doesn't
 # change), else MODEL and EFFORT.
 use_ticket_worker() {
-  local id=$1 model=${2#-} effort=${3#-} routed
+  local id=$1 model=${2#-} effort=${3#-} response routed=
   if [[ -z $model && -z $effort ]]; then
-    routed=$(get "/tickets/$id/route" | jq -r '.routed // empty | "\(.model)\t\(.effort)"') || routed=
+    response=$(post "/tickets/$id/route" '{}')
+    if [[ ${response##*$'\n'} == 200 ]]; then
+      routed=$(jq -r '.routed // empty | "\(.model)\t\(.effort)"' <<<"${response%$'\n'*}") || routed=
+    fi
     if [[ -n $routed ]]; then
       model=${routed%%$'\t'*}
       effort=${routed#*$'\t'}
@@ -370,12 +373,16 @@ their first run yet (CLAIM_LIMIT $CLAIM_LIMIT)"
   # Everything on the ticket so far is handed to this run. Until it succeeds, the claim itself counts as feedback,
   # so a failed or interrupted run is retried with backoff.
   snapshot=$(get "/tickets/$id/activity" | jq -c '{activity: (map(.id) | max // 0)}') || snapshot='{}'
-  # A re-claimed ticket may already have a pull request: its comments and reviews so far were handed over before, so
-  # they go into the snapshot too, or they would come back as new feedback.
-  local pr_repo pr_number issue reviews inline
+  # A re-claimed ticket may already have a pull request. Its comments and reviews so far may ask for changes no run was
+  # handed (they came while no one held the ticket, or another agent did), so this run is told to read them (pr_note),
+  # and they go into the snapshot too rather than coming back as new feedback.
+  local pr_repo pr_number issue reviews inline pr_note=
   pr_repo=$(jq -r '.pullRequest.repo // empty' <<<"$ticket")
   pr_number=$(jq -r '.pullRequest.number // empty' <<<"$ticket")
   if [[ -n $pr_repo && -n $pr_number ]]; then
+    pr_note="
+The ticket already has a pull request, $(jq -r .pullRequest.url <<<"$ticket"): read its comments, reviews and inline \
+review comments first (see the skill), and address what they ask for that isn't done yet."
     if issue=$(gh_list "repos/$pr_repo/issues/$pr_number/comments?per_page=100") &&
       reviews=$(gh_list "repos/$pr_repo/pulls/$pr_number/reviews?per_page=100") &&
       inline=$(gh_list "repos/$pr_repo/pulls/$pr_number/comments?per_page=100"); then
@@ -392,7 +399,7 @@ their first run yet (CLAIM_LIMIT $CLAIM_LIMIT)"
   fi
   run_on_ticket "$id" "Ticket $id is already claimed for you and in progress. Work only this ticket; do not claim another.
 Take it through to review and exit after submitting it. If it is tagged question, submit it for review with the answer \
-as the comment and no pull request.
+as the comment and no pull request.$pr_note
 Before you start the work, post your plan with its size estimate (POST $KANBAN/api/tickets/$id/plan, see the skill).$plan_note If \
 the ticket then waits for approval (its \"approval\" is \"pending\"), stop there and exit: the loop starts a new run once \
 someone approves the plan." "$snapshot" "claim"

@@ -107,7 +107,7 @@ export const createBoardSchema = z.object({
   jevThreshold: jevThreshold.optional(),
   jevOnlyLower: z.boolean().optional(),
   jevCombine: z.enum(JEV_COMBINES).nullable().optional(),
-  jevMode: z.enum(JEV_MODES).optional(),
+  jevMode: z.enum(JEV_MODES).nullable().optional(),
 })
 
 export const updateBoardSchema = z.object({
@@ -141,7 +141,7 @@ export const updateBoardSchema = z.object({
   jevThreshold: jevThreshold.optional(),
   jevOnlyLower: z.boolean().optional(),
   jevCombine: z.enum(JEV_COMBINES).nullable().optional(),
-  jevMode: z.enum(JEV_MODES).optional(),
+  jevMode: z.enum(JEV_MODES).nullable().optional(),
 })
 
 /** Creates a repository on GitHub and links it to the board. */

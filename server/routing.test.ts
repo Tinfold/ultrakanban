@@ -142,6 +142,18 @@ describe('routing', () => {
     )
   })
 
+  test('doesn’t count Jev’s requests as runs, nor Jev as an agent', async () => {
+    await routeWithJev()
+    const ticket = await addTicket({ title: 'Only claimed' })
+    await claim(ticket)
+    const { body: claimed } = await call<Ticket>('GET', `/tickets/${ticket.id}`)
+    assert.equal(claimed.usage.runs, 0)
+    assert.equal(claimed.usage.tokens, 1200)
+    const { body: overview } = await call<Overview>('GET', '/overview?days=7')
+    assert.equal(overview.tickets.find((entry) => entry.id === ticket.id)?.usage.runs, 0)
+    assert.ok(!overview.agents.some((agent) => agent.name === JEV_AGENT))
+  })
+
   test('a failing Jev doesn’t fail the claim, and boards without Jev never ask it', async () => {
     await routeWithJev()
     jev.status = 500
@@ -311,7 +323,7 @@ describe('routing', () => {
         })
       ).body
     const route = async (ticket: Ticket) =>
-      (await call<{ routed: RoutedSetting | null }>('GET', `/tickets/${ticket.id}/route`)).body.routed
+      (await call<{ routed: RoutedSetting | null }>('POST', `/tickets/${ticket.id}/route`)).body.routed
     /** Three finished tickets worked at sonnet/low, so the history suggestion picks it for tickets like them. */
     async function history() {
       for (const index of [0, 1, 2]) {
