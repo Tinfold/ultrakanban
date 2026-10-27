@@ -311,7 +311,7 @@ claim_from() {
 # to finish: those are worked (or retried) first, rather than claiming ticket after ticket while runs keep failing.
 # A conflict loop (CONFLICTS_ONLY) never claims one.
 claim_next() {
-  local response status ticket id snapshot pending
+  local response status ticket id snapshot pending plan_note=
   [[ $CONFLICTS_ONLY == 1 ]] && return 1
   paused && return 0
   use_worker "" ""
@@ -385,8 +385,7 @@ their first run yet (CLAIM_LIMIT $CLAIM_LIMIT)"
   write_state "$id" "$(jq -c '. + {claim: true}' <<<"$snapshot")"
   claim_unlock
   run_step="Working the ticket"
-  plan_note=
-  if get "/boards/$BOARD" | jq -e '.board.approvalSize == null' >/dev/null 2>&1; then
+  if board | jq -e '.board.approvalSize == null' >/dev/null 2>&1; then
     plan_note=" No plans wait for approval on this board, so for a small ticket a one-line plan is enough (or skip it)."
   fi
   run_on_ticket "$id" "Ticket $id is already claimed for you and in progress. Work only this ticket; do not claim another.
