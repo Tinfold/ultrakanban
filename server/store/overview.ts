@@ -37,7 +37,7 @@ import { WAITING_SINCE } from './tickets.ts'
 import { queryUsage } from './usage.ts'
 
 const DAY_MS = 24 * 60 * 60 * 1000
-const RECENT_LIMIT = 30
+const RECENT_LIMIT = 200
 
 interface TicketRow {
   id: string

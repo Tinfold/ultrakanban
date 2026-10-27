@@ -25,6 +25,7 @@ import { RoutingTable } from '@/components/overview/RoutingTable'
 import { SettingsTable } from '@/components/overview/SettingsTable'
 import { TicketUsageTable, type UsageGrouping } from '@/components/overview/TicketUsageTable'
 import { Button } from '@/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { queryKeys, useClaudeUsage, useOverview } from '@/hooks/queries'
 import { useNow } from '@/hooks/use-now'
@@ -82,6 +83,12 @@ function overviewTab(tab: string | undefined): OverviewTab {
 }
 
 const tabHref = (tab: OverviewTab) => (tab === 'summary' ? '/overview' : `/overview/${tab}`)
+
+/** How many entries of the activity feed Summary shows; the Activity tab has the rest. */
+const SUMMARY_ACTIVITY = 8
+
+/** The Activity tab's board filter value for every board. */
+const ALL_BOARDS = 'all'
 
 /** Tabs whose numbers don't depend on the 7/14/30-day range, so the range toggle isn't shown on them. */
 const ALL_TIME_TABS: ReadonlySet<OverviewTab> = new Set(['routing'])
@@ -229,6 +236,7 @@ export function OverviewPage({ tab: tabParam }: { tab?: string }) {
   const main = useRef<HTMLElement>(null)
   const [days, setDays] = useStoredState<OverviewRange>(storageKeys.overviewRange, 14)
   const [usageGrouping, setUsageGrouping] = useState<UsageGrouping>('tickets')
+  const [activityBoard, setActivityBoard] = useState(ALL_BOARDS)
   const { data: overview, error, isPlaceholderData } = useOverview(days)
   const { data: claudeUsage } = useClaudeUsage()
   const now = useNow()
@@ -365,8 +373,15 @@ export function OverviewPage({ tab: tabParam }: { tab?: string }) {
             />
           </Section>
           {claudeUsage && <ClaudeUsageSummary usage={claudeUsage} now={now} href={tabHref('usage')} />}
-          <Section title="Recent activity">
-            <RecentActivity activity={overview.recent} />
+          <Section
+            title="Recent activity"
+            actions={
+              <Button variant="ghost" size="sm" asChild>
+                <Link href={tabHref('activity')}>All activity</Link>
+              </Button>
+            }
+          >
+            <RecentActivity activity={overview.recent} limit={SUMMARY_ACTIVITY} />
           </Section>
         </>
       ),
@@ -543,6 +558,32 @@ export function OverviewPage({ tab: tabParam }: { tab?: string }) {
               formatTick={(hours) => `${+hours.toFixed(1)}h`}
             />
           </div>
+          <Section
+            title="Recent activity"
+            actions={
+              <Select value={activityBoard} onValueChange={setActivityBoard}>
+                <SelectTrigger aria-label="Board" size="sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL_BOARDS}>All boards</SelectItem>
+                  {overview.boards.map((board) => (
+                    <SelectItem key={board.id} value={board.id}>
+                      {board.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            }
+          >
+            <RecentActivity
+              activity={
+                activityBoard === ALL_BOARDS
+                  ? overview.recent
+                  : overview.recent.filter((entry) => entry.ticket.boardId === activityBoard)
+              }
+            />
+          </Section>
         </>
       ),
     }
