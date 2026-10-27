@@ -768,6 +768,8 @@ If the ticket's description has a checklist (- [ ] step), check off each step as
 POST $KANBAN/api/tickets/<id>/checklist/<index> (0-based) instead of editing the description. Do it right then, not all
 at once before submitting: people follow the ticket's progress by it. Check off only what you did; leave a step you
 skipped or that doesn't apply unchecked and say why in your review comment.
+Every pull request you open has pictures in its description (the skill says how): screenshots of a visible change, or a
+picture of the evidence that it works (test or command output) when there is nothing to look at.
 End every pull request comment, review and inline reply you post with this exact line, so the loop doesn't mistake
 your own replies for feedback:
 $MARKER"
