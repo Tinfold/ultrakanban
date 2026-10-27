@@ -15,6 +15,7 @@ import type {
   BoardSummary,
   Column,
   Epic,
+  LocalCommit,
   LocalPullRequestDetail,
   LocalPullRequestComment,
   LocalPullRequestDiff,
@@ -171,6 +172,8 @@ export const api = {
     request<LocalPullRequestDetail>('GET', `/boards/${boardId}/pull-requests/${number}`),
   localPullRequestDiff: (boardId: string, number: number) =>
     request<LocalPullRequestDiff>('GET', `/boards/${boardId}/pull-requests/${number}/diff`),
+  localPullRequestCommits: (boardId: string, number: number) =>
+    request<LocalCommit[]>('GET', `/boards/${boardId}/pull-requests/${number}/commits`),
   commentOnLocalPullRequest: (boardId: string, number: number, input: LocalPullRequestCommentInput) =>
     request<LocalPullRequestComment>('POST', `/boards/${boardId}/pull-requests/${number}/comments`, input),
   mergeLocalPullRequest: (boardId: string, number: number) =>

@@ -26,7 +26,11 @@ export const queryKeys = {
   agentServices: ['agent-services'] as const,
   localPullRequests: (boardId: string) => ['local-pull-request', boardId] as const,
   localPullRequest: (boardId: string, number: number) => ['local-pull-request', boardId, number] as const,
-  localPullRequestDiff: (boardId: string, number: number) => ['local-pull-request', boardId, number, 'diff'] as const,
+  localPullRequestCommits: (boardId: string, number: number) =>
+    ['local-pull-request', boardId, number, 'commits'] as const,
+  /** Not under `localPullRequests`, so board changes don't refetch it: it only changes with the commits it compares. */
+  localPullRequestDiff: (boardId: string, number: number, commits: readonly string[] | null) =>
+    ['local-pull-request-diff', boardId, number, commits] as const,
 }
 
 export const useBoards = () => useQuery({ queryKey: queryKeys.boards, queryFn: api.listBoards })
@@ -54,13 +58,28 @@ export const useLocalPullRequest = (boardId: string, number: number) =>
     retry: false,
   })
 
-/** What a local pull request changes, read from the board's local repository. */
-export const useLocalPullRequestDiff = (boardId: string, number: number) =>
-  useQuery({
-    queryKey: queryKeys.localPullRequestDiff(boardId, number),
-    queryFn: () => api.localPullRequestDiff(boardId, number),
+/**
+ * What a local pull request changes, read from the board's local repository. Its commits are cheap to read, so they are
+ * refetched on every board change, and the diff only when they change: a push to its branch, a rebase, or its commits
+ * reaching the base.
+ */
+export const useLocalPullRequestDiff = (boardId: string, number: number) => {
+  const commits = useQuery({
+    queryKey: queryKeys.localPullRequestCommits(boardId, number),
+    queryFn: () => api.localPullRequestCommits(boardId, number),
     retry: false,
   })
+  // Unreadable commits make the diff unreadable too, and its request says why.
+  const shas = commits.isError ? null : (commits.data?.map((commit) => commit.sha) ?? null)
+  return useQuery({
+    queryKey: queryKeys.localPullRequestDiff(boardId, number, shas),
+    queryFn: () => api.localPullRequestDiff(boardId, number),
+    enabled: !commits.isPending,
+    placeholderData: keepPreviousData,
+    staleTime: Infinity,
+    retry: false,
+  })
+}
 
 export const useGitHubStatus = () =>
   useQuery({ queryKey: queryKeys.github, queryFn: api.githubStatus, staleTime: 5 * 60_000 })
