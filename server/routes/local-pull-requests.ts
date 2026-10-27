@@ -35,21 +35,42 @@ async function commitsOf(boardId: string, number: number) {
 }
 
 /**
+ * Merging and closing are one at a time per local pull request, so a close can't land while a merge is under way and
+ * leave the merge commit on the base with the pull request closed: it waits, then finds it merged.
+ */
+const finishing = git.oneAtATime()
+
+/**
  * Merges a local pull request in the board's local repository (see `git.merge`), then marks it merged, which moves its
  * ticket to the done column.
  */
-export async function mergeLocalPullRequest(boardId: string, number: number, actor: string) {
-  const pullRequest = getLocalPullRequest(boardId, number)
-  if (pullRequest.state !== 'open') {
-    throw conflict('pull_request_not_open', `Local pull request #${number} is ${pullRequest.state}`)
-  }
-  const repo = await repositoryOf(boardId)
-  const merged = await git.merge(repo, {
-    base: pullRequest.base,
-    head: pullRequest.head,
-    message: `Merge pull request #${number} from ${pullRequest.head}\n\n${pullRequest.title}`,
+export function mergeLocalPullRequest(boardId: string, number: number, actor: string) {
+  return finishing(`${boardId}#${number}`, async () => {
+    const pullRequest = getLocalPullRequest(boardId, number)
+    if (pullRequest.state !== 'open') {
+      throw conflict('pull_request_not_open', `Local pull request #${number} is ${pullRequest.state}`)
+    }
+    const repo = await repositoryOf(boardId)
+    const merged = await git.merge(repo, {
+      base: pullRequest.base,
+      head: pullRequest.head,
+      message: `Merge pull request #${number} from ${pullRequest.head}\n\n${pullRequest.title}`,
+    })
+    return transaction(() => finishLocalPullRequest(boardId, number, { state: 'merged', ...merged }, actor))
   })
-  return transaction(() => finishLocalPullRequest(boardId, number, { state: 'merged', ...merged }, actor))
+}
+
+/** Closes a local pull request without merging it. */
+function closeLocalPullRequest(boardId: string, number: number, actor: string) {
+  return finishing(`${boardId}#${number}`, async () => {
+    const pullRequest = getLocalPullRequest(boardId, number)
+    // Its branches' commits are kept, so its diff stays readable; neither is needed to close it.
+    const repo = pullRequest.state === 'open' ? await repositoryOf(boardId).catch(() => null) : null
+    const [headSha, baseSha] = repo
+      ? [await git.branchSha(repo, pullRequest.head), await git.branchSha(repo, pullRequest.base)]
+      : [null, null]
+    return transaction(() => finishLocalPullRequest(boardId, number, { state: 'closed', headSha, baseSha }, actor))
+  })
 }
 
 /** Local pull requests: on the board itself rather than on GitHub, for boards with a local repository. */
@@ -112,14 +133,5 @@ export const localPullRequestRoutes = new Hono()
   })
   .post('/boards/:boardId/pull-requests/:number/close', async (c) => {
     const boardId = c.req.param('boardId')
-    const number = numberOf(boardId, c.req.param('number'))
-    const pullRequest = getLocalPullRequest(boardId, number)
-    // Its branches' commits are kept, so its diff stays readable; neither is needed to close it.
-    const repo = pullRequest.state === 'open' ? await repositoryOf(boardId).catch(() => null) : null
-    const [headSha, baseSha] = repo
-      ? [await git.branchSha(repo, pullRequest.head), await git.branchSha(repo, pullRequest.base)]
-      : [null, null]
-    return c.json(
-      transaction(() => finishLocalPullRequest(boardId, number, { state: 'closed', headSha, baseSha }, actorOf(c))),
-    )
+    return c.json(await closeLocalPullRequest(boardId, numberOf(boardId, c.req.param('number')), actorOf(c)))
   })

@@ -241,16 +241,20 @@ async function commitEnv(repo: string) {
   return code === 0 ? gitEnv() : { ...gitEnv(), ...FALLBACK_IDENTITY }
 }
 
-/** Merges are one at a time per repository, so two can't both move a branch from the same commit. */
-const merging = new Map<string, Promise<unknown>>()
-
-function exclusive<T>(repo: string, fn: () => Promise<T>): Promise<T> {
-  const previous = merging.get(repo) ?? Promise.resolve()
-  const next = previous.catch(() => {}).then(fn)
-  merging.set(repo, next)
-  void next.finally(() => merging.get(repo) === next && merging.delete(repo)).catch(() => {})
-  return next
+/** Runs what it is given under the same key one at a time, each once the ones before it are done, failed or not. */
+export function oneAtATime() {
+  const queued = new Map<string, Promise<unknown>>()
+  return <T>(key: string, fn: () => Promise<T>): Promise<T> => {
+    const previous = queued.get(key) ?? Promise.resolve()
+    const next = previous.catch(() => {}).then(fn)
+    queued.set(key, next)
+    void next.finally(() => queued.get(key) === next && queued.delete(key)).catch(() => {})
+    return next
+  }
 }
+
+/** Merges are one at a time per repository, so two can't both move a branch from the same commit. */
+const exclusive = oneAtATime()
 
 /**
  * Merges `head` into `base` with a merge commit, as `git merge --no-ff` does. In the worktree that has `base` checked

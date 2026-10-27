@@ -15,7 +15,7 @@ import type {
   Ticket,
 } from '../shared/domain.ts'
 import { subscribeWake } from './events.ts'
-import { addTicket, boardId, call, useBoard } from './test-app.ts'
+import { addTicket, boardId, call, ticketsIn, useBoard } from './test-app.ts'
 
 const IDENTITY = {
   GIT_AUTHOR_NAME: 'Tester',
@@ -408,6 +408,23 @@ describe('local pull requests', () => {
 
     // A new one can be opened for the same branch once it is closed.
     assert.equal((await open({ head: 'feature' })).status, 201)
+  })
+
+  test('closing while a merge is under way waits for it, then finds it merged', async () => {
+    const headSha = pushBranch('feature', { 'a.txt': 'a\n' })
+    await open({ head: 'feature' })
+    const [merge, close] = await Promise.all([
+      call<LocalPullRequestDetail>('POST', pr('/1/merge')),
+      call<ApiErrorBody>('POST', pr('/1/close')),
+    ])
+    assert.deepEqual([merge.status, merge.body.state], [200, 'merged'])
+    assert.deepEqual([close.status, close.body.error.code], [409, 'pull_request_not_open'])
+    assert.equal(git(repo, 'rev-parse', 'main^2'), headSha)
+    assert.equal((await call<LocalPullRequestDetail>('GET', pr('/1'))).body.state, 'merged')
+    assert.deepEqual(
+      (await ticketsIn('Done')).map((done) => [done.id, done.pullRequest?.state]),
+      [[ticket.id, 'merged']],
+    )
   })
 
   test('a repository in the home directory, without a git identity of its own', async () => {
