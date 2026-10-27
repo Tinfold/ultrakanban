@@ -17,7 +17,7 @@ import { AppHeader } from '@/components/app/AppHeader'
 import { SideTabs } from '@/components/common/SideTabs'
 import { AgentList } from '@/components/overview/AgentList'
 import { BoardTable } from '@/components/overview/BoardTable'
-import { ClaudeUsage } from '@/components/overview/ClaudeUsage'
+import { ClaudeUsage, ClaudeUsageSummary } from '@/components/overview/ClaudeUsage'
 import { type ChartSeries, ColumnChart } from '@/components/overview/ColumnChart'
 import { NeedsAttention } from '@/components/overview/NeedsAttention'
 import { RecentActivity } from '@/components/overview/RecentActivity'
@@ -364,7 +364,7 @@ export function OverviewPage({ tab: tabParam }: { tab?: string }) {
               now={now}
             />
           </Section>
-          {claudeUsage && <ClaudeUsage usage={claudeUsage} now={now} />}
+          {claudeUsage && <ClaudeUsageSummary usage={claudeUsage} now={now} href={tabHref('usage')} />}
           <Section title="Recent activity">
             <RecentActivity activity={overview.recent} />
           </Section>
@@ -421,6 +421,7 @@ export function OverviewPage({ tab: tabParam }: { tab?: string }) {
       ),
       usage: (
         <>
+          {claudeUsage && <ClaudeUsage usage={claudeUsage} now={now} />}
           <StatRow>
             <Stat
               label="Tokens used"
