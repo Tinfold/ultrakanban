@@ -120,6 +120,25 @@ export function needsAttention(agents: OverviewAgent[], now: number) {
   }
 }
 
+const STATUS_ORDER: Record<OverviewAgent['status'], number> = { working: 0, review: 1, idle: 2 }
+
+/**
+ * The agents to list: working ones first, then those waiting for review, then idle ones, each by when they were last
+ * active, most recent first. Busy agents get a card, idle ones a compact row in a group of their own.
+ */
+export function groupAgents(agents: OverviewAgent[]) {
+  const sorted = [...agents].sort(
+    (a, b) =>
+      STATUS_ORDER[a.status] - STATUS_ORDER[b.status] ||
+      (b.lastActiveAt ?? '').localeCompare(a.lastActiveAt ?? '') ||
+      a.name.localeCompare(b.name),
+  )
+  return {
+    busy: sorted.filter((agent) => agent.status !== 'idle'),
+    idle: sorted.filter((agent) => agent.status === 'idle'),
+  }
+}
+
 /** The most colors a chart shows models in; beyond that the rest share one. */
 const MODEL_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)']
 
