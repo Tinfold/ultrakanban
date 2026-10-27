@@ -100,9 +100,11 @@
 #
 # A ticket's runs carry on one claude session (claude --resume), so each keeps everything the earlier ones knew and
 # did: the run after a plan approval and each run for review feedback continue the conversation of the run before,
-# and get only the new feedback rather than the whole prompt again. Runs that don't finish are resumed, not started
-# over: a run cut short by the usage limit or by the loop stopping (a restart of the service or the machine, a crash)
-# is continued in that same session. A run that failed starts a new one, and so does a run whose session can't be
+# and get only the new feedback rather than the whole prompt again. Runs only to fix merge conflicts or failing CI
+# start a session of their own instead, so that the fix model doesn't read the ticket's whole conversation again, and
+# the runs after them go back to the ticket's session. Runs that don't finish are resumed, not started over: a run cut
+# short by the usage limit or by the loop stopping (a restart of the service or the machine, a crash) is continued in
+# that same session. A run that failed starts a new one, and so does a run whose session can't be
 # resumed (see run_on_ticket in agent-loop/run.sh). With AGENT_LOOP_CLEAN=1, the work such a
 # run (or a failed one) left in the checkout isn't discarded either: the loop keeps its commits and uncommitted
 # changes under refs/ultrakanban/work/<ticket> and puts them back before the ticket's next run, in whichever checkout.

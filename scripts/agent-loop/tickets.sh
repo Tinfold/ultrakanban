@@ -123,7 +123,7 @@ read_pr_feedback() {
 handle_feedback() {
   local board review cancelled idle tickets file id number column holder version ticket_model ticket_effort pr_url repo pr_number \
     queued approval conflicts pr branch listed open_prs list after ci issue reviews inline activity state triage items \
-    ci_note next fix_runs
+    ci_note next fix_runs fix
   claim_lock -s
   board=$(board) || { claim_unlock; log "can't read board $BOARD"; return 1; }
   review=$(jq -r '.board.reviewColumnId // ""' <<<"$board")
@@ -241,8 +241,10 @@ so the loop stopped starting runs for conflicts on this ticket. Comment on the t
     fi
     [[ $(jq -r .run <<<"$triage") == true ]] || continue
 
+    # A run only to fix merge conflicts or failing CI also starts a session of its own (see run_on_ticket).
+    fix=1
     use_fix_worker "$(jq -r '.trigger // ""' <<<"$triage")" "$fix_runs" ||
-      use_ticket_worker "$id" "$ticket_model" "$ticket_effort"
+      { fix=0; use_ticket_worker "$id" "$ticket_model" "$ticket_effort"; }
     adopt "$id" "$number" "$holder" "$version" || continue
     items=$(jq -r '.items | map(.text) | join("\n\n---\n\n")' <<<"$triage")
     run_step=$(jq -r '.items | map(.text | split("\n")[0] | rtrimstr(":")) | join("; ")' <<<"$triage")
@@ -272,7 +274,7 @@ doesn't (billing or spending limits, runners or infrastructure, a flaky test unr
 secrets), don't push anything: explain what you found in the ticket comment and exit.")
 Finish with a ticket comment summarising what you did, then exit." \
       "$(jq -c .snapshot <<<"$triage")" "$(jq -r .fingerprint <<<"$triage")" "$(jq -r .ciRuns <<<"$triage")" "$branch" \
-      "$([[ $approval == pending ]] && echo 0 || echo 1)"
+      "$([[ $approval == pending ]] && echo 0 || echo 1)" "$fix"
     unlock_ticket
     return 0
   done 3<<<"$tickets"

@@ -437,12 +437,18 @@ when another of the board's loops picks it up:
   stopped.
 - **A run that failed or timed out** drops its session, so the retry starts a new one, since resuming it would likely
   fail the same way. So does a run whose ticket was taken away.
+- **Runs only to fix merge conflicts or failing CI** start a session of their own rather than resume the ticket's.
+  That is often a long conversation with the ticket's model, which the cheaper fix model would read all over again
+  with no prompt cache, likely for more than a new session's prompt costs. The loop keeps the ticket's session aside
+  meanwhile: once the fix run finishes or fails, the ticket's next run resumes it again, told that runs in other
+  sessions fixed conflicts or CI since, so the branch may have changed. A fix run that doesn't finish is resumed like
+  any other.
 
 Only a new session gets the whole prompt: the loop's instructions, the board's description, the task and the ticket's
 unchecked checklist steps. A resumed run already has those earlier in its conversation, so it gets only what is new:
 a line saying what it continues, then the feedback the loop started it for (or, for a run that didn't finish, its task
-again). If another model or effort runs it this time (e.g. the board's cheaper setting for merge conflicts or failing
-CI), it is told its name for this run; if it runs in another checkout than before, it is told to work only there. When
+again). If another model or effort runs it this time (e.g. the ticket's model was changed since), it is told its name
+for this run; if it runs in another checkout than before, it is told to work only there. When
 the session can't be resumed (claude answers "No conversation found", e.g. because its history was cleared or it ran
 in a checkout claude doesn't look in), the loop starts the run again at once as a new session with the whole prompt.
 

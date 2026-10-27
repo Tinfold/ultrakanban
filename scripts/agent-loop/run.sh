@@ -508,6 +508,12 @@ new_session_id() { { uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid; } 
 #   (without `done`), with why it stopped, and the next run picks up where it left off.
 # - A run that failed or timed out drops it, so the retry starts a new session, as resuming it would likely fail the
 #   same way. So does a run whose ticket was taken away.
+# - A run only to fix merge conflicts or failing CI (the eighth argument is 1) starts a session of its own rather than
+#   resume the ticket's finished one: that is often a long conversation with the ticket's model, which the fix model
+#   would read all over again with no prompt cache, likely for more than a new session's prompt costs. The ticket's
+#   session waits in `mainSession` meanwhile, and comes back once the fix run finishes or fails (dropping the fix
+#   run's), marked `fixedElsewhere` so that its next run is told (resumed_prompt). A fix run that didn't end is
+#   resumed like any other, whatever the next run is for, and stays a fix run (its session's `fix`).
 # A new session gets the whole prompt: the intro, the board's description, the task and the ticket's checklist steps
 # that aren't checked yet (unless the seventh argument is 0). A resumed one already has all that but the task, so it
 # gets only the task, after a line saying what it continues (resumed_prompt). If the session can't be resumed (claude
@@ -519,8 +525,8 @@ new_session_id() { { uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid; } 
 # at once: its state's `stopped` holds the stopped run's snapshot, which TRIAGE compares the feedback with. The next
 # run resumes the session with that feedback, and drops `stopped`.
 run_on_ticket() {
-  local id=$1 task=$2 snapshot=$3 fingerprint=$4 ci_runs=${5:-0} branch=${6:-} steps=${7:-1} code limit why state \
-    session start prompt notes= work= until
+  local id=$1 task=$2 snapshot=$3 fingerprint=$4 ci_runs=${5:-0} branch=${6:-} steps=${7:-1} fix=${8:-0} code limit \
+    why state session start prompt notes= work= until
   # Whether this run goes on the API key, Claude usage having run out (see use_api_key), which turns into a pause if
   # the board no longer allows that.
   use_api_key
@@ -528,6 +534,14 @@ run_on_ticket() {
   paused && return 0
   state=$(read_state "$id")
   session=$(jq -r '.session.id // ""' <<<"$state")
+  # A session that didn't finish is resumed whatever this run is for, and stays a fix run's or the ticket's own; a
+  # finished one isn't resumed by a fix run (see above).
+  if [[ -n $session && $(jq -r '.session.done // false' <<<"$state") != true ]]; then
+    fix=$(jq -r 'if .session.fix then 1 else 0 end' <<<"$state")
+  elif ((fix)); then
+    [[ -z $session ]] || update_state "$id" '.mainSession = .session + {fixedElsewhere: true}'
+    session=
+  fi
   claude_stopped= claude_stop_requested= claude_subtype=
   if branch=$(checkout "$branch"); then
     if [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]]; then
@@ -565,8 +579,8 @@ $task$notes"
 $task$( ((steps)) && unchecked_steps "$id")$notes"
       fi
       update_state "$id" '.session = ($v | fromjson) | del(.stopped) | .runStart = (now | floor)' \
-        "$(jq -nc --arg id "$session" --arg checkout "$PWD" --arg worker "$worker" \
-          '{id: $id, checkout: $checkout, worker: $worker}')"
+        "$(jq -nc --arg id "$session" --arg checkout "$PWD" --arg worker "$worker" --argjson fix "$fix" \
+          '{id: $id, checkout: $checkout, worker: $worker} + if $fix == 1 then {fix: true} else {} end')"
       run_claude "$id" "$prompt" "$start" "$session"
       code=$?
       # When the run started and ended, so that TRIAGE doesn't take the pull request comments it posted (without the
@@ -590,11 +604,12 @@ $task$( ((steps)) && unchecked_steps "$id")$notes"
     log "can't update the checkout for $id"
   fi
   if [[ $code == 0 ]]; then
-    # The snapshot replaces the state, but the session stays for the next run to resume, and the run times stay for
-    # TRIAGE.
+    # The snapshot replaces the state, but the session stays for the next run to resume (the ticket's own again after
+    # a fix run), and the run times stay for TRIAGE.
     write_state "$id" "$(read_state "$id" | jq -c --argjson snapshot "$snapshot" \
       '$snapshot + (. | {runs} | with_entries(select(.value != null))) +
-        if .session then {session: (.session | del(.why) + {done: true})} else {} end')"
+        if .session.fix then (. | {session: .mainSession} | with_entries(select(.value != null)))
+        elif .session then {session: (.session | del(.why) + {done: true})} else {} end')"
     remove_scratch "$id"
     return 0
   fi
@@ -616,7 +631,7 @@ there is new feedback, such as a comment."
   if [[ -n $claude_stopped ]]; then
     # Someone took the ticket away from the agent, so this isn't a failure. The next round puts it back in the queue
     # (see requeue) or forgets it.
-    update_state "$id" 'del(.session)'
+    update_state "$id" 'del(.session, .mainSession)'
     remove_scratch "$id"
     note "$id" "Stopped the agent's run on this ticket: $claude_stopped."
     return 0
@@ -678,16 +693,18 @@ the agents may use together (app-ultrakanban.slice, see docs/agents.md)"
   fi
   write_state "$id" "$(read_state "$id" | jq -c --arg fp "$fingerprint" --argjson now "$(date +%s)" \
     --argjson ci "$ci_runs" '. + {failures: (if .failedFor == $fp then (.failures // 0) + 1 else 1 end),
-      failedAt: $now, failedFor: $fp, ciRuns: $ci} | del(.session) | if $ci == 0 then del(.capNoted) else . end')"
+      failedAt: $now, failedFor: $fp, ciRuns: $ci}
+      | if .mainSession then .session = .mainSession else del(.session) end | del(.mainSession)
+      | if $ci == 0 then del(.capNoted) else . end')"
   remove_scratch "$id"
   note "$id" "Agent run failed: $why. It is retried with backoff, up to $MAX_ATTEMPTS runs in a row; after that, \
 new feedback such as a ticket comment retries it."
 }
 
 # What a run that resumes the ticket's session (the given state's `session`) is told before its task: what it
-# continues, its name if another worker ran the session before (e.g. a cheaper one fixing a merge conflict), and the
-# checkout to work in if the session ran in another one. The intro, the board's description and the checklist are
-# earlier in the conversation, so they aren't sent again.
+# continues, that runs in other sessions fixed merge conflicts or failing CI meanwhile, its name if another worker ran
+# the session before (e.g. the ticket's model changed since), and the checkout to work in if the session ran in another
+# one. The intro, the board's description and the checklist are earlier in the conversation, so they aren't sent again.
 resumed_prompt() {
   local id=$1 state=$2 previous was
   previous=$(jq -r '.session.checkout // ""' <<<"$state")
@@ -703,6 +720,10 @@ only for what you need."
 you left off rather than starting over, and check what is already done (on the ticket, the branch and the pull \
 request) before doing it again."
   fi
+  [[ $(jq -r '.session.fixedElsewhere // false' <<<"$state") != true ]] || printf '%s' "
+Since your previous run, the loop ran others on this ticket in sessions of their own, to fix merge conflicts or \
+failing CI: the pull request's branch may have changed or been rebased since you last saw it, and their ticket \
+comments say what they did."
   [[ -z $was || $was == "$worker" ]] || printf '%s' "
 Your name for this run (agent field and X-Actor header) is $worker, not $was: the loop runs it with $model at $effort \
 effort."
