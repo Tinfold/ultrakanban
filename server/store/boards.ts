@@ -229,10 +229,11 @@ export function updateBoard(id: string, input: UpdateBoardInput): BoardSummary {
     jev_threshold: input.jevThreshold,
     jev_only_lower: input.jevOnlyLower === undefined ? undefined : Number(input.jevOnlyLower),
     jev_combine: input.jevCombine,
-    jev_mode: input.jevMode,
+    // null is what a board that has never had Jev on reads back, so sending its settings back leaves the mode alone.
+    jev_mode: input.jevMode ?? undefined,
   })
   // A board that switches Jev on for the first time starts in dry run: it records Jev's picks without using them.
-  if (input.jevEnabled && input.jevMode === undefined) {
+  if (input.jevEnabled && !input.jevMode) {
     sql.run('UPDATE boards SET jev_mode = ? WHERE id = ? AND jev_mode IS NULL', JEV_DEFAULTS.mode, id)
   }
   const board = getBoard(id)

@@ -111,6 +111,22 @@ describe('Route with Jev board setting', () => {
     assert.equal((await patch({ jevEnabled: true, jevMode: 'on' })).body.jevMode, 'on')
   })
 
+  test("takes the board's own Jev settings back, as Board settings sends them with every save", async () => {
+    const { jevEnabled, jevModels, jevThreshold, jevOnlyLower, jevCombine, jevMode } = await board()
+    const saved = await patch({
+      name: 'Renamed',
+      jevEnabled,
+      jevModels,
+      jevThreshold,
+      jevOnlyLower,
+      jevCombine,
+      jevMode,
+    })
+    assert.equal(saved.status, 200)
+    assert.equal(saved.body.jevMode, null)
+    assert.equal((await patch({ jevEnabled: true, jevMode: null })).body.jevMode, 'dry-run')
+  })
+
   test('saves the models, threshold, "may only lower" switch and combining, and clears them back to the defaults', async () => {
     const saved = (
       await patch({ jevModels: ['haiku', 'sonnet'], jevThreshold: 0.85, jevOnlyLower: true, jevCombine: 'lower' })
