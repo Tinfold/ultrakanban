@@ -5,7 +5,7 @@ import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlit
 import { notFound } from './errors.ts'
 import { publish, wake } from './events.ts'
 
-const MIGRATIONS = [
+export const MIGRATIONS = [
   `
   CREATE TABLE boards (
     id TEXT PRIMARY KEY,
@@ -399,6 +399,31 @@ const MIGRATIONS = [
   ALTER TABLE boards ADD COLUMN agent_conflict_concurrency INTEGER;
   `,
   `
+  -- Whether auto-merge goes ahead when the only failing checks failed because of billing (see BoardSummary).
+  ALTER TABLE boards ADD COLUMN ignore_billing_failures INTEGER NOT NULL DEFAULT 0;
+  `,
+  `
+  -- The credits the Claude account can spend on usage besides its plan's limits (see ClaudeUsageCredit), as JSON.
+  ALTER TABLE claude_usage ADD COLUMN credits TEXT NOT NULL DEFAULT '[]';
+  `,
+  `
+  -- Whether agents go on claiming once a Claude usage limit is used up, on usage credits (see ClaudeUsageReserve).
+  ALTER TABLE claude_usage ADD COLUMN usage_credits INTEGER NOT NULL DEFAULT 0;
+  -- Credits now say their kind; the supervisor's next report fills them in again.
+  UPDATE claude_usage SET credits = '[]';
+  `,
+  `
+  -- Agents going on on their API key once Claude usage runs out (see AgentApiKey): whether they may, at most how many
+  -- dollars a run and a calendar month may spend, and whether the agents last reported having a key.
+  ALTER TABLE claude_usage ADD COLUMN api_key_fallback INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE claude_usage ADD COLUMN api_key_run_budget_usd REAL NOT NULL DEFAULT 5;
+  ALTER TABLE claude_usage ADD COLUMN api_key_monthly_budget_usd REAL;
+  ALTER TABLE setup ADD COLUMN agents_api_key INTEGER NOT NULL DEFAULT 0;
+  -- Whether a run went on the agents' API key, so its cost was billed rather than estimated.
+  ALTER TABLE token_usage ADD COLUMN api_key INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE run_records ADD COLUMN api_key INTEGER NOT NULL DEFAULT 0;
+  `,
+  `
   -- The TypeSafe API key set on the Setup page (see docs/JEV.md); the API never sends it back.
   ALTER TABLE setup ADD COLUMN typesafe_api_key TEXT;
   `,
@@ -443,31 +468,6 @@ const MIGRATIONS = [
   -- What Jev was told about the ticket when it picked (a hash of its content, see contentKey in server/jev-routing.ts),
   -- so a ticket whose content hasn't changed since isn't sent to Jev again.
   ALTER TABLE ticket_routes ADD COLUMN content_key TEXT;
-  `,
-  `
-  -- Whether auto-merge goes ahead when the only failing checks failed because of billing (see BoardSummary).
-  ALTER TABLE boards ADD COLUMN ignore_billing_failures INTEGER NOT NULL DEFAULT 0;
-  `,
-  `
-  -- The credits the Claude account can spend on usage besides its plan's limits (see ClaudeUsageCredit), as JSON.
-  ALTER TABLE claude_usage ADD COLUMN credits TEXT NOT NULL DEFAULT '[]';
-  `,
-  `
-  -- Whether agents go on claiming once a Claude usage limit is used up, on usage credits (see ClaudeUsageReserve).
-  ALTER TABLE claude_usage ADD COLUMN usage_credits INTEGER NOT NULL DEFAULT 0;
-  -- Credits now say their kind; the supervisor's next report fills them in again.
-  UPDATE claude_usage SET credits = '[]';
-  `,
-  `
-  -- Agents going on on their API key once Claude usage runs out (see AgentApiKey): whether they may, at most how many
-  -- dollars a run and a calendar month may spend, and whether the agents last reported having a key.
-  ALTER TABLE claude_usage ADD COLUMN api_key_fallback INTEGER NOT NULL DEFAULT 0;
-  ALTER TABLE claude_usage ADD COLUMN api_key_run_budget_usd REAL NOT NULL DEFAULT 5;
-  ALTER TABLE claude_usage ADD COLUMN api_key_monthly_budget_usd REAL;
-  ALTER TABLE setup ADD COLUMN agents_api_key INTEGER NOT NULL DEFAULT 0;
-  -- Whether a run went on the agents' API key, so its cost was billed rather than estimated.
-  ALTER TABLE token_usage ADD COLUMN api_key INTEGER NOT NULL DEFAULT 0;
-  ALTER TABLE run_records ADD COLUMN api_key INTEGER NOT NULL DEFAULT 0;
   `,
   `
   -- How Jev's pick and the history suggestion combine (see BoardSummary.jevCombine; JEV_DEFAULTS when NULL).
