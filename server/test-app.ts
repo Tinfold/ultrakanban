@@ -78,7 +78,12 @@ setJevFetch(async (input, init) => {
   const headers = new Headers(init?.headers)
   jev.calls.push({ url: String(input), auth: headers.get('authorization'), body: JSON.parse(String(init?.body)) })
   if (jev.hang) {
-    await new Promise((_, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal!.reason)))
+    // Kept open until Jev's timeout aborts the request: on Node 22, AbortSignal.timeout's own timer doesn't keep the
+    // test process alive, and node:test would cancel the test.
+    const open = setInterval(() => {}, 1000)
+    await new Promise((_, reject) =>
+      init?.signal?.addEventListener('abort', () => reject(init.signal!.reason)),
+    ).finally(() => clearInterval(open))
   }
   if (jev.status !== 200) return new Response('{}', { status: jev.status })
   const questions = Object.entries(jev.calls.at(-1)!.body.questions ?? {}) as [string, { criteria?: string[] }][]
