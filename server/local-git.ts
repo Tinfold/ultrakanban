@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { DiffFile, DiffHunk, LocalCommit, LocalPullRequestDiff } from '../shared/domain.ts'
@@ -50,15 +51,23 @@ async function git(
 
 const heads = (branch: string) => `refs/heads/${branch}`
 
+/** Where `~/` points: the host's home directory when the board runs in Docker (see docker-compose.yml), else its own. */
+const home = () => process.env.ULTRAKANBAN_HOME || homedir()
+
 /** The board's local repository, `~` expanded; fails clearly when it isn't a git repository. */
 export async function openRepository(localRepoPath: string | null) {
   if (!localRepoPath) throw badRequest('This board has no local repository; set one in the board settings')
-  const path = localRepoPath.startsWith('~/') ? join(homedir(), localRepoPath.slice(2)) : localRepoPath
-  const result = await run(path, ['rev-parse', '--git-dir']).catch((error: Error) => ({
-    code: -1,
-    stdout: '',
-    stderr: error.message,
-  }))
+  const path = localRepoPath.startsWith('~/') ? join(home(), localRepoPath.slice(2)) : localRepoPath
+  const result = await run(path, ['rev-parse', '--git-dir']).catch((error: NodeJS.ErrnoException) => {
+    // A missing directory and a missing git both fail to spawn with ENOENT.
+    if (error.code === 'ENOENT' && !existsSync(path)) {
+      throw badRequest(
+        `The board's local repository ${localRepoPath} isn't there: the board sees no ${path}. A board running in Docker sees only ULTRAKANBAN_HOME (see docs/agents.md).`,
+      )
+    }
+    if (error.code === 'ENOENT') throw badRequest("git isn't installed where the board runs")
+    return { code: -1, stdout: '', stderr: error.message }
+  })
   if (result.code !== 0) {
     throw badRequest(`The board's local repository ${localRepoPath} isn't a git repository: ${result.stderr.trim()}`)
   }

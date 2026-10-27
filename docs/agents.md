@@ -498,6 +498,12 @@ can't push its fixes.
 The agents need git and the repository, nothing else: no GitHub login. In the agents container, the repository has to be
 in the container too: mount it in `docker-compose.yml`'s `agents` service at the path the board names.
 
+The board itself opens, shows and merges the pull requests with git in the repository, so it has to see it too. Run in
+Docker, it sees your home directory: its container mounts `ULTRAKANBAN_HOME` from `.env` at the same path, and `~/` in
+a board's path stands for it. `scripts/setup.sh` sets it to your home directory on Linux and macOS (rerun it, or set it
+yourself, then `docker compose up -d --build`); a repository outside it needs a mount of its own in the `app` service.
+The container runs as uid 1000, so git there can only write to a repository owned by that uid.
+
 ### Other models
 
 The board's agent runs Claude Code, and Claude Code can run a local model or another provider's through an endpoint

@@ -10,6 +10,8 @@ RUN npm run build
 FROM node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=4317
+# git, for boards with a local repository (server/local-git.ts)
+RUN apk add --no-cache git
 COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY server ./server

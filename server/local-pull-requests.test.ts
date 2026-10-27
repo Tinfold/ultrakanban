@@ -159,6 +159,8 @@ describe('local pull requests', () => {
     assert.match((await open({ head: 'feature' }, elsewhere.id)).body.error.message, /no local repository/)
 
     await call('PATCH', `/boards/${other.body.id}`, { localRepoPath: join(root, 'nowhere') })
+    assert.match((await open({ head: 'feature' }, elsewhere.id)).body.error.message, /isn't there/)
+    await call('PATCH', `/boards/${other.body.id}`, { localRepoPath: root })
     assert.match((await open({ head: 'feature' }, elsewhere.id)).body.error.message, /isn't a git repository/)
   })
 
@@ -424,6 +426,17 @@ describe('local pull requests', () => {
       )
     } finally {
       process.env.HOME = home
+    }
+  })
+
+  test('~/ is ULTRAKANBAN_HOME when it is set: the host home directory a board in Docker sees', async () => {
+    process.env.ULTRAKANBAN_HOME = root
+    try {
+      await call('PATCH', `/boards/${boardId}`, { localRepoPath: `~/${basename(repo)}` })
+      pushBranch('feature', { 'a.txt': 'a\n' })
+      assert.equal((await open({ head: 'feature' })).status, 201)
+    } finally {
+      delete process.env.ULTRAKANBAN_HOME
     }
   })
 })

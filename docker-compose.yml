@@ -11,9 +11,16 @@ services:
       # Checks pull requests on GitHub. Optional: the Setup page (/setup) takes a token too. Get one with: gh auth token
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_SYNC_INTERVAL: ${GITHUB_SYNC_INTERVAL:-60}
+      # Optional: the address people open the board at, so notifications link to the ticket there
+      ULTRAKANBAN_URL: ${ULTRAKANBAN_URL:-}
+      # Your home directory, which ~/ in a board's local repository path stands for
+      ULTRAKANBAN_HOME: ${ULTRAKANBAN_HOME:-}
     volumes:
       # Database and attachments. See README for importing an existing board and for backups.
       - ultrakanban-data:/app/data
+      # Your home directory at the same path (ULTRAKANBAN_HOME in .env, which scripts/setup.sh sets), so boards can have
+      # local repositories in it. Without it, an empty volume.
+      - ${ULTRAKANBAN_HOME:-ultrakanban-no-home}:${ULTRAKANBAN_HOME:-/home/node/no-home}
     expose:
       - '4317'
 
@@ -73,4 +80,5 @@ services:
 
 volumes:
   ultrakanban-data:
+  ultrakanban-no-home:
   ultrakanban-agent-home:
