@@ -129,6 +129,9 @@ handle_feedback() {
     state triage items ci_note next fix_runs fix local_repo \
     local_pr='^(https?://[^/]+)?/b/([[:alnum:]_-]+)/pr/([0-9]+)([/?#].*)?$'
   claim_lock -s
+  # Read again under the claim lock: the round's board may be from before another loop claimed a ticket, which would
+  # look as if the agent didn't hold it (see claim_lock), and the rest of the round reads this fresher copy.
+  refresh_board
   board=$(board) || { claim_unlock; log "can't read board $BOARD"; return 1; }
   # A board with a local repository has nothing on GitHub to read: its pull requests are local ones, on the board.
   local_repo=$(jq -r '.board.localRepoPath // ""' <<<"$board")
