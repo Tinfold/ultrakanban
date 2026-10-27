@@ -38,6 +38,8 @@ export function subscribeStorage(listener: () => void) {
 
 export const storageKeys = {
   actor: 'ultrakanban:actor',
+  /** Labels of the series a chart's legend turned off. */
+  chartHidden: (chart: string) => `ultrakanban:chart-hidden:${chart}`,
   lastBoard: 'ultrakanban:last-board',
   mergeMethod: 'ultrakanban:merge-method',
   overviewIdleAgents: 'ultrakanban:overview-idle-agents',

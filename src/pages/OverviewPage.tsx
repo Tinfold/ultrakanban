@@ -462,6 +462,8 @@ export function OverviewPage({ tab: tabParam }: { tab?: string }) {
               formatValue={(value) => value.toLocaleString()}
               formatTick={formatTokens}
               minStep={1}
+              storageKey="token-usage"
+              hiddenByDefault={['Cache reads']}
             />
             <ColumnChart
               title="Tokens by model"
@@ -475,6 +477,7 @@ export function OverviewPage({ tab: tabParam }: { tab?: string }) {
               formatTick={formatTokens}
               minStep={1}
               footer={models.length > 0 && <ModelTotals usage={usage} />}
+              storageKey="tokens-by-model"
             />
           </div>
           <Section
@@ -548,6 +551,8 @@ export function OverviewPage({ tab: tabParam }: { tab?: string }) {
               }))}
               formatValue={(value) => value.toLocaleString()}
               minStep={1}
+              storageKey="activity"
+              hiddenByDefault={['Other updates']}
             />
             <ColumnChart
               title="Time worked"
@@ -556,6 +561,7 @@ export function OverviewPage({ tab: tabParam }: { tab?: string }) {
               columns={daily.map((day, i) => ({ ...columns[i], values: [day.workedMs / HOUR_MS] }))}
               formatValue={(hours) => formatDuration(hours * HOUR_MS)}
               formatTick={(hours) => `${+hours.toFixed(1)}h`}
+              storageKey="time-worked"
             />
           </div>
           <Section
