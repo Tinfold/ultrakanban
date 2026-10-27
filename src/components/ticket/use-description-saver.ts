@@ -3,13 +3,21 @@ import { toast } from 'sonner'
 import type { Ticket } from '@shared/domain'
 import type { BoardActions } from '@/hooks/use-board-actions'
 import { useDebouncedCallback } from '@/hooks/use-debounced-callback'
+import { copyText } from '@/lib/clipboard'
 
 /** Retries after conflicts that only changed other fields (priority, tags…), before giving up. */
 const MAX_RETRIES = 3
 
-const copyText = async (text: string) => {
-  await navigator.clipboard.writeText(text)
+/** Copies the person's text, saying whether that worked. */
+const copyMine = async (text: string) => {
+  try {
+    await copyText(text)
+  } catch {
+    toast.error('Couldn’t copy your text to the clipboard')
+    return false
+  }
   toast.success('Your text is copied')
+  return true
 }
 
 /**
@@ -29,6 +37,8 @@ export function useDescriptionSaver(ticket: Ticket, actions: BoardActions) {
   const saving = useRef(false)
   const conflicted = useRef(false)
   const [conflict, setConflict] = useState<string | null>(null)
+  // Their text couldn't be copied, so loading the latest description would lose it.
+  const [copyFailed, setCopyFailed] = useState(false)
   // Bumped to make the editor show the ticket's description again.
   const [editorKey, setEditorKey] = useState(0)
 
@@ -52,7 +62,7 @@ export function useDescriptionSaver(ticket: Ticket, actions: BoardActions) {
           setConflict(unsaved.current)
           const kept = unsaved.current ?? text
           toast.error('Someone changed the description while you were editing it, so your edit wasn’t saved', {
-            action: { label: 'Copy my text', onClick: () => void copyText(kept) },
+            action: { label: 'Copy my text', onClick: () => void copyMine(kept) },
             duration: 10_000,
           })
           return
@@ -82,17 +92,31 @@ export function useDescriptionSaver(ticket: Ticket, actions: BoardActions) {
     base.current = { version: latest.current.version, description: markdown }
   }, [])
 
-  const resolve = (keepMine: boolean) => {
+  const copy = async (text: string) => {
+    const copied = await copyMine(text)
+    if (!copied) setCopyFailed(true)
+    return copied
+  }
+
+  const endConflict = () => {
     conflicted.current = false
     setConflict(null)
+    setCopyFailed(false)
     base.current = { version: latest.current.version, description: latest.current.description }
-    if (keepMine) {
-      void save()
-    } else {
-      if (unsaved.current !== null) void copyText(unsaved.current)
-      unsaved.current = null
-      setEditorKey((key) => key + 1)
-    }
+  }
+
+  /**
+   * Copies their text, then shows the latest description instead. If their text can't be copied it stays, and only a
+   * second try (see `copyFailed`) drops it.
+   */
+  const loadLatest = async () => {
+    const text = unsaved.current
+    if (text !== null && !copyFailed && !(await copy(text))) return
+    // Resolved meanwhile (a second click, or saving theirs).
+    if (!conflicted.current) return
+    endConflict()
+    unsaved.current = null
+    setEditorKey((key) => key + 1)
   }
 
   return {
@@ -102,10 +126,15 @@ export function useDescriptionSaver(ticket: Ticket, actions: BoardActions) {
     editorKey,
     /** The person's text that couldn't be saved because the description changed meanwhile. */
     conflict,
-    copyConflict: () => conflict !== null && void copyText(conflict),
-    /** Copies their text and shows the latest description instead. */
-    loadLatest: () => resolve(false),
+    /** Their text couldn't be copied, so `loadLatest` would drop it. */
+    copyFailed,
+    copyConflict: () => conflict !== null && void copy(conflict),
+    /** Copies their text and shows the latest description instead; keeps their text if it can't be copied. */
+    loadLatest: () => void loadLatest(),
     /** Saves their text over the latest description. */
-    saveMine: () => resolve(true),
+    saveMine: () => {
+      endConflict()
+      void save()
+    },
   }
 }

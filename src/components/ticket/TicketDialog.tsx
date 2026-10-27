@@ -191,9 +191,13 @@ function TicketDetail({ ticket, onClose }: { ticket: Ticket; onClose: () => void
                       size="sm"
                       variant="outline"
                       onClick={description.loadLatest}
-                      title="Copies your text, then shows the description as it is now"
+                      title={
+                        description.copyFailed
+                          ? 'Drops your text, which couldn’t be copied, and shows the description as it is now'
+                          : 'Copies your text, then shows the description as it is now'
+                      }
                     >
-                      Load the latest
+                      {description.copyFailed ? 'Load the latest anyway' : 'Load the latest'}
                     </Button>
                     <Button size="sm" variant="ghost" onClick={description.saveMine}>
                       Save mine anyway
