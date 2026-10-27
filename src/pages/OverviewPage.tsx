@@ -1,6 +1,14 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { format } from 'date-fns'
-import { ActivityIcon, BotIcon, CoinsIcon, LayoutDashboardIcon, RouteIcon, SquareKanbanIcon } from 'lucide-react'
+import {
+  ActivityIcon,
+  BotIcon,
+  CoinsIcon,
+  LayoutDashboardIcon,
+  PiggyBankIcon,
+  RouteIcon,
+  SquareKanbanIcon,
+} from 'lucide-react'
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Link, useLocation } from 'wouter'
@@ -22,6 +30,7 @@ import { type ChartSeries, ColumnChart } from '@/components/overview/ColumnChart
 import { NeedsAttention } from '@/components/overview/NeedsAttention'
 import { RecentActivity } from '@/components/overview/RecentActivity'
 import { RoutingTable } from '@/components/overview/RoutingTable'
+import { SavingsTable } from '@/components/overview/SavingsTable'
 import { SettingsTable } from '@/components/overview/SettingsTable'
 import { TicketUsageTable, type UsageGrouping } from '@/components/overview/TicketUsageTable'
 import { Button } from '@/components/ui/button'
@@ -40,6 +49,9 @@ import {
   modelSeries,
   modelsByTokens,
   needsAttention,
+  saved,
+  savedShare,
+  savings,
   seriesTokens,
   workedByAgent,
 } from '@/lib/overview'
@@ -63,6 +75,11 @@ const TOKEN_SERIES = [
   { key: 'cacheReadTokens', label: 'Cache reads', color: 'var(--chart-4)' },
 ] as const
 
+const SAVINGS_SERIES: ChartSeries[] = [
+  { label: 'Spent', color: 'var(--chart-2)' },
+  { label: 'Saved', color: 'var(--chart-1)' },
+]
+
 const HOUR_MS = 60 * 60 * 1000
 
 /** The overview's tabs, in the order the side nav lists them; each has its own URL, `/overview/<id>`. */
@@ -71,6 +88,7 @@ const TABS = [
   { id: 'agents', label: 'Agents', icon: BotIcon },
   { id: 'boards', label: 'Boards', icon: SquareKanbanIcon },
   { id: 'usage', label: 'Usage', icon: CoinsIcon },
+  { id: 'savings', label: 'Savings', icon: PiggyBankIcon },
   { id: 'routing', label: 'Routing', icon: RouteIcon },
   { id: 'activity', label: 'Activity', icon: ActivityIcon },
 ] as const
@@ -259,6 +277,7 @@ export function OverviewPage({ tab: tabParam }: { tab?: string }) {
   }, [error, overview])
 
   const daily = useMemo(() => (overview ? dailyActivity(overview, now) : []), [overview, now])
+  const saving = useMemo(() => (overview ? savings(overview.usage, daily) : null), [overview, daily])
   const worked = useMemo(
     () =>
       overview && daily.length ? workedByAgent(overview.sessions, daily[0].start, now) : new Map<string, number>(),
@@ -504,6 +523,56 @@ export function OverviewPage({ tab: tabParam }: { tab?: string }) {
               Tickets agents ran on in the last {days} days, with all their runs
             </p>
             <TicketUsageTable tickets={overview.tickets} grouping={usageGrouping} />
+          </Section>
+        </>
+      ),
+      savings: saving && (
+        <>
+          <StatRow>
+            <Stat
+              label="On Opus"
+              value={formatCost(saving.total.opusUsd)}
+              detail={`The same tokens, ${runs(saving.total.runs)}`}
+            />
+            <Stat
+              label="Spent"
+              value={formatCost(saving.total.actualUsd)}
+              detail="Estimated"
+              more={saving.total.jevUsd > 0 && `${formatCost(saving.total.jevUsd)} on Jev`}
+            />
+            <Stat
+              label="Saved"
+              value={formatCost(saved(saving.total))}
+              detail={`${savedShare(saving.total)} of the Opus cost`}
+            />
+            <Stat
+              label="Saved by Jev"
+              value={formatCost(saved(saving.bySource.jev))}
+              detail={`${runs(saving.bySource.jev.runs)}, its requests taken off`}
+            />
+          </StatRow>
+          <ColumnChart
+            title="Spent and saved"
+            storageKey="spent-and-saved"
+            description="What runs cost per day, and what they saved against the same tokens on Opus"
+            series={SAVINGS_SERIES}
+            columns={saving.daily.map((day, i) => ({
+              ...columns[i],
+              values: [day.actualUsd, Math.max(0, saved(day))],
+            }))}
+            formatValue={formatCost}
+          />
+          <Section title="By routing">
+            <SavingsTable savings={saving} />
+            <p className="text-xs text-muted-foreground">
+              Every run’s tokens priced at Opus rates stand for working every ticket with Opus at high effort, at{' '}
+              {formatCost(saving.opusRate.usdPerMillion)} per million input tokens
+              {saving.opusRate.measured ? ', what the range’s Opus runs cost' : ', Opus’s list price'}. Effort changes
+              how many tokens a run uses, not what they cost, and lower efforts use fewer, so the real savings are
+              likely bigger.
+              {saving.unpriced > 0 &&
+                ` ${runs(saving.unpriced)} that reported no cost ${saving.unpriced === 1 ? 'is' : 'are'} left out.`}
+            </p>
           </Section>
         </>
       ),

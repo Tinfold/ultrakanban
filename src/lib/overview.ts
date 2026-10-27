@@ -2,16 +2,20 @@ import { addDays, differenceInCalendarDays, startOfDay } from 'date-fns'
 import {
   addUsage,
   type BoardDiskUsage,
+  JEV_AGENT,
   noUsage,
+  OPUS_INPUT_USD_PER_MILLION,
   type Overview,
   type OverviewActivity,
   type OverviewAgent,
   type OverviewCompletion,
   type OverviewEventKind,
   type OverviewTicketUsage,
+  type OverviewUsage,
   type Tag,
   totalTokens,
   type UsageTotals,
+  weightedTokens,
   type WorkSession,
 } from '@shared/domain'
 
@@ -343,4 +347,88 @@ export function mergeActivity(activity: OverviewActivity[], windowMs = MERGE_ACT
     createdAt: newest.createdAt,
     events,
   }))
+}
+
+/** Who picked the model and effort runs worked at: ultrakanban's own routing, or Jev (docs/JEV.md). */
+export type SavingsSource = 'ultrakanban' | 'jev'
+
+export interface SavingsTotals {
+  /** Runs that reported a cost; the rest can't be compared and are left out. */
+  runs: number
+  /** What they cost, Jev's own requests included. */
+  actualUsd: number
+  /** What the same tokens would have cost at Opus rates (see `Savings.opusRate`). */
+  opusUsd: number
+  /** Of `actualUsd`, what Jev's requests cost. */
+  jevUsd: number
+}
+
+export interface Savings {
+  total: SavingsTotals
+  bySource: Record<SavingsSource, SavingsTotals>
+  /** Runs that reported no cost. */
+  unpriced: number
+  /**
+   * What tokens cost on Opus, per million uncached input tokens (see `TOKEN_WEIGHTS`): measured from what the range's
+   * Opus runs reported, else Opus's list price (`OPUS_INPUT_USD_PER_MILLION`).
+   */
+  opusRate: { usdPerMillion: number; measured: boolean }
+  /** One entry per day of `days`. */
+  daily: SavingsTotals[]
+}
+
+const noSavings = (): SavingsTotals => ({ runs: 0, actualUsd: 0, opusUsd: 0, jevUsd: 0 })
+
+/** What runs saved over running them all on Opus: `opusUsd - actualUsd`. */
+export const saved = (totals: SavingsTotals) => totals.opusUsd - totals.actualUsd
+
+/** What runs saved, as a share of what they'd have cost on Opus, e.g. `40%`. */
+export const savedShare = (totals: SavingsTotals) =>
+  totals.opusUsd > 0 ? `${Math.round((saved(totals) / totals.opusUsd) * 100)}%` : '—'
+
+/**
+ * What the runs on `days` cost against the same tokens at Opus rates, split by who routed them: runs Jev routed and
+ * Jev's own requests count for Jev, the rest (the board's default, the history suggestion, a ticket's own setting)
+ * for ultrakanban.
+ */
+export function savings(usage: OverviewUsage[], days: Pick<Day, 'start'>[]): Savings {
+  const first = days[0]?.start
+  const inRange = usage.flatMap((run) => {
+    const index = first ? differenceInCalendarDays(Date.parse(run.at), first) : -1
+    return index >= 0 && index < days.length ? [{ run, index }] : []
+  })
+  // Claude's prices change with each model version, so Opus's is taken from what its runs reported.
+  let opusCost = 0
+  let opusTokens = 0
+  for (const { run } of inRange)
+    for (const model of run.models)
+      if (model.costUsd !== null && /opus/i.test(model.model)) {
+        opusCost += model.costUsd
+        opusTokens += weightedTokens(model)
+      }
+  const measured = opusCost > 0 && opusTokens > 0
+  const usdPerMillion = measured ? (opusCost / opusTokens) * 1_000_000 : OPUS_INPUT_USD_PER_MILLION
+  const result: Savings = {
+    total: noSavings(),
+    bySource: { ultrakanban: noSavings(), jev: noSavings() },
+    unpriced: 0,
+    daily: days.map(noSavings),
+    opusRate: { usdPerMillion, measured },
+  }
+  for (const { run, index } of inRange) {
+    if (run.costUsd === null) {
+      result.unpriced++
+      continue
+    }
+    const jevRequest = run.agent === JEV_AGENT
+    const source: SavingsSource = jevRequest || run.routingSource === 'jev' ? 'jev' : 'ultrakanban'
+    const opusUsd = jevRequest ? 0 : (weightedTokens(run) * usdPerMillion) / 1_000_000
+    for (const totals of [result.total, result.bySource[source], result.daily[index]]) {
+      if (!jevRequest) totals.runs++
+      totals.actualUsd += run.costUsd
+      totals.opusUsd += opusUsd
+      if (jevRequest) totals.jevUsd += run.costUsd
+    }
+  }
+  return result
 }
