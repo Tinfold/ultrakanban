@@ -238,7 +238,7 @@ state as it does a GitHub pull request's: merging it moves the ticket to the don
 - **Merging** runs `git merge --no-ff` of the head into the base, with the message `Merge pull request #<number> from
   <head>`, in the worktree that has the base checked out, so its files follow. In a bare repository, or when nobody
   has the base checked out, the same merge commit is made without a worktree. It is refused, changing nothing, with
-  `409 merge_conflicts` when they conflict (`details.files` lists the files; merge the base into the head and resolve
+  `409 merge_conflicts` when they conflict (`details.files` lists the files; rebase the head onto the base and resolve
   them first), `409 merge_failed` when git refuses (e.g. uncommitted changes in the worktree that the merge would
   overwrite), `409 branch_missing` and `409 pull_request_not_open`. Merge commits are by the repository's git identity,
   or `ultrakanban <ultrakanban@localhost>` when it has none. `POST /tickets/:ticketId/merge` merges a ticket's local

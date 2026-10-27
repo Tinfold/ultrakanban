@@ -241,7 +241,8 @@ curl -s -X POST $KANBAN/api/boards/$BOARD/pull-requests/$NUMBER/comments \
 
 Reply to a comment on the whole pull request without `path`, `line` and `side`, and to an inline one with the ones it
 has. End every reply with the marker line, as on GitHub. Push fixes to the pull request's branch on `origin`; it follows
-the branch, so it needs nothing else. Merge conflicts make merging it fail: merge the base branch into yours and push.
+the branch, so it needs nothing else. Merge conflicts make merging it fail: rebase yours onto the base branch, as for
+a GitHub pull request, and push with `git push --force-with-lease`.
 
 ## Handling errors
 

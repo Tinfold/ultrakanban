@@ -70,8 +70,9 @@ submit it with the answer as the comment and no `pullRequest`.
 
 Check ticket comments, `gh pr view $PR_URL --comments`, `gh api repos/$OWNER/$REPO/pulls/$NUMBER/comments` and
 `gh pr checks $PR_URL`. Address every point, push fixes, reply on the pull request, and summarise in a ticket comment.
-Resolve merge conflicts by merging the base branch into the pull request's branch. If the pull request is closed
-without merging, comment why and release into Cancelled (`{"agent":"$ME","moveTo":"Cancelled"}`).
+Resolve merge conflicts by rebasing the pull request's branch onto the base branch (`git fetch origin && git rebase
+origin/<base>`), not by merging it in, keeping both sides' changes; then `git push --force-with-lease`. If the pull
+request is closed without merging, comment why and release into Cancelled (`{"agent":"$ME","moveTo":"Cancelled"}`).
 
 If failing CI doesn't come from the code (billing limits, lost runners, missing secrets, unrelated flaky tests), push
 nothing: explain in a ticket comment and stop.

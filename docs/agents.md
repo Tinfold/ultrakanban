@@ -325,7 +325,7 @@ to (`routed`, see [docs/API.md](API.md#routing)), which their runs on feedback k
 looks (the skill's "Creating tickets" section has the guide). Runs the loop starts only to fix merge conflicts, or only
 to fix failing CI (and any conflicts with it), use the board's **Conflict fix model**/**effort**
 (`agentConflictModel`/`agentConflictEffort`) or **CI fix model**/**effort** (`agentCiModel`/`agentCiEffort`) instead,
-`sonnet` at `medium` by default, whatever the ticket's: merging the base branch or fixing a check rarely needs the
+`sonnet` at `medium` by default, whatever the ticket's: rebasing onto the base branch or fixing a check rarely needs the
 model the ticket was worked with. A run that also hands over someone's comment, review or move, or carries on a run
 that didn't finish, keeps the ticket's setting. When you change the model or effort, the loop
 lets the runs in progress finish, starts again with the new setting and reassigns each ticket it holds to the new name before its next run on it. Agents you run yourself should follow the same pattern (see the skill).
@@ -536,7 +536,7 @@ prompt tells the agent not to use `gh` and how to work local pull requests inste
    replies never start runs.
 3. **Merging.** **Merge** on the pull request's page merges the branch into the base in the local repository and moves
    the ticket to the done column. If they conflict, merging fails and changes nothing: say so in a comment, and the
-   agent merges the base into its branch and resolves the conflicts. Local pull requests have no CI checks, and the
+   agent rebases its branch onto the base and resolves the conflicts. Local pull requests have no CI checks, and the
    loop doesn't look for conflicts by itself.
 4. **Closing.** A local pull request closed without merging moves its ticket from the review column to `Cancelled`, as
    a GitHub one does.
