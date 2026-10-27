@@ -87,6 +87,7 @@ const tabHref = (tab: OverviewTab) => (tab === 'summary' ? '/overview' : `/overv
 const ALL_TIME_TABS: ReadonlySet<OverviewTab> = new Set(['routing'])
 
 const ID_PREFIX = 'overview'
+const NEEDS_ATTENTION_ID = `${ID_PREFIX}-needs-attention`
 
 function CountBadge({ count }: { count: number }) {
   if (!count) return null
@@ -103,28 +104,48 @@ interface StatProps {
   detail: ReactNode
   /** A second line of detail, if any. */
   more?: ReactNode
-  /** The tab that breaks the number down. */
-  target?: OverviewTab
+  /** The tab that breaks the number down, or an element on this tab, by `#id`. */
+  target?: OverviewTab | `#${string}`
 }
 
+const STAT_CLASS = 'rounded-xl border bg-card p-4'
+const STAT_LINK_CLASS = cn(
+  STAT_CLASS,
+  'transition-colors hover:bg-muted/50 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none',
+)
+
+/** A headline number; its detail wraps rather than being cut off, so keep it short. */
 function Stat({ label, value, detail, more, target }: StatProps) {
   const body = (
     <>
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="mt-1 text-2xl font-semibold tracking-tight">{value}</p>
-      <p className="mt-0.5 truncate text-xs text-muted-foreground">{detail}</p>
-      {more && <p className="truncate text-xs text-muted-foreground">{more}</p>}
+      <p className="mt-0.5 text-xs text-muted-foreground">{detail}</p>
+      {more && <p className="text-xs text-muted-foreground">{more}</p>}
     </>
   )
-  if (!target) return <div className="rounded-xl border bg-card p-4">{body}</div>
+  if (!target) return <div className={STAT_CLASS}>{body}</div>
+  if (target.startsWith('#'))
+    return (
+      <a href={target} className={STAT_LINK_CLASS}>
+        {body}
+      </a>
+    )
   return (
-    <Link
-      href={tabHref(target)}
-      className="rounded-xl border bg-card p-4 transition-colors hover:bg-muted/50 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
-    >
+    <Link href={tabHref(target as OverviewTab)} className={STAT_LINK_CLASS}>
       {body}
     </Link>
   )
+}
+
+/** A word in a stat's value, set smaller than its numbers. */
+function Unit({ children }: { children: ReactNode }) {
+  return <span className="text-sm font-normal text-muted-foreground">{children}</span>
+}
+
+/** A tab's headline numbers: one row of four, two to a row on narrow screens. */
+function StatRow({ children }: { children: ReactNode }) {
+  return <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{children}</div>
 }
 
 const runs = (count: number) => `${count} ${count === 1 ? 'run' : 'runs'}`
@@ -165,15 +186,16 @@ function formatMedian(values: number[]) {
 
 interface SectionProps {
   title: string
+  id?: string
   /** Controls shown next to the title. */
   actions?: ReactNode
   children: ReactNode
   className?: string
 }
 
-function Section({ title, actions, children, className }: SectionProps) {
+function Section({ title, id, actions, children, className }: SectionProps) {
   return (
-    <section className={cn('grid grid-cols-1 content-start gap-3', className)}>
+    <section id={id} className={cn('grid scroll-mt-6 grid-cols-1 content-start gap-3', className)}>
       <div className="flex min-h-7 flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-medium">{title}</h2>
         {actions && <div className="flex items-center gap-1">{actions}</div>}
@@ -267,7 +289,6 @@ export function OverviewPage({ tab: tabParam }: { tab?: string }) {
     const { totals, agents, hiddenAgents } = overview
     // Idle agents that aren't a board's host agent are usually old or misspelled names.
     const stale = agents.filter((agent) => agent.status === 'idle' && !agent.agentOf.length).map((agent) => agent.name)
-    const waiting = agents.filter((agent) => agent.status === 'review').length
     const completed = daily.reduce((total, day) => total + day.events.completed, 0)
     const workedMs = daily.reduce((total, day) => total + day.workedMs, 0)
     const created = daily.reduce((total, day) => total + day.events.created, 0)
@@ -278,6 +299,8 @@ export function OverviewPage({ tab: tabParam }: { tab?: string }) {
     const models = modelSeries(usage, formatModel)
     const attention = needsAttention(agents, now)
     const unclaimed = totals.open - totals.working - totals.review
+    const attentionCount = attention.waiting.length + attention.review.length + attention.stalled.length
+    const backlog = created === completed ? '±0' : `${created > completed ? '+' : '−'}${Math.abs(created - completed)}`
     const completions = overview.completions.filter(
       (completion) => Date.parse(completion.at) >= daily[0].start.getTime(),
     )
@@ -289,74 +312,51 @@ export function OverviewPage({ tab: tabParam }: { tab?: string }) {
       title: format(day.start, 'EEEE, MMM d'),
     }))
 
-    const statCards = (
-      <>
-        <div className="grid grid-cols-2 gap-3 *:last:col-span-2 md:grid-cols-3 md:*:last:col-span-1 xl:grid-cols-5">
-          <Stat
-            label="Agents working"
-            value={totals.activeAgents}
-            detail={`${agents.length} ${agents.length === 1 ? 'agent' : 'agents'} listed${waiting ? `, ${waiting} waiting for review` : ''}`}
-            target="agents"
-          />
-          <Stat
-            label="Tickets being worked"
-            value={totals.working}
-            detail={`${totals.open} open tickets`}
-            target="agents"
-          />
-          <Stat label="In review" value={totals.review} detail="Waiting on a pull request" />
-          <Stat label="Completed" value={completed} detail={`Last ${days} days`} target="activity" />
-          <Stat
-            label="Time worked"
-            value={formatDuration(workedMs)}
-            detail={`Last ${days} days, all agents`}
-            target="activity"
-          />
-        </div>
-
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-          <Stat
-            label="Median cycle time"
-            value={formatMedian(cycleTimes)}
-            detail={`Start to done, ${tickets(cycleTimes.length)}`}
-          />
-          <Stat
-            label="Median review wait"
-            value={formatMedian(reviewTimes)}
-            detail={`Until done, ${tickets(reviewTimes.length)}`}
-          />
-          <Stat
-            label="Backlog"
-            value={created === completed ? '±0' : `${created > completed ? '+' : '−'}${Math.abs(created - completed)}`}
-            detail={`${created} created, ${completed} completed`}
-            target="activity"
-          />
-          <Stat label="Unclaimed" value={unclaimed} detail="Open and unassigned" target="boards" />
-          <Stat
-            label="Tokens used"
-            value={formatTokens(totalTokens(usage))}
-            detail={planCost === null ? runs(usage.runs) : `${formatCost(planCost)} estimated, ${runs(usage.runs)}`}
-            more={apiKeyCost > 0 && `${formatCost(apiKeyCost)} billed to the API key`}
-            target="usage"
-          />
-          <Stat
-            label="Cost per completed ticket"
-            value={completedCost ? formatCost(completedCost.costUsd) : '—'}
-            detail={
-              completedCost
-                ? `Estimated, all runs of ${tickets(completedCost.tickets)}`
-                : 'No completed ticket reported a cost'
-            }
-            target="usage"
-          />
-        </div>
-      </>
-    )
-
     const panels: Record<OverviewTab, ReactNode> = {
       summary: (
         <>
-          <Section title="Needs attention">
+          <StatRow>
+            <Stat
+              label="Working"
+              value={
+                <>
+                  <span className="whitespace-nowrap">
+                    {totals.activeAgents} <Unit>{totals.activeAgents === 1 ? 'agent' : 'agents'} on</Unit>
+                  </span>{' '}
+                  <span className="whitespace-nowrap">
+                    {totals.working} <Unit>{totals.working === 1 ? 'ticket' : 'tickets'}</Unit>
+                  </span>
+                </>
+              }
+              detail={`${totals.open} open, ${totals.review} in review`}
+              target="agents"
+            />
+            <Stat
+              label="Needs you"
+              value={attentionCount}
+              detail={
+                attentionCount
+                  ? [
+                      attention.waiting.length && `${attention.waiting.length} to answer`,
+                      attention.review.length && `${attention.review.length} to review`,
+                      attention.stalled.length && `${attention.stalled.length} stalled`,
+                    ]
+                      .filter(Boolean)
+                      .join(', ')
+                  : 'Nothing waiting'
+              }
+              target={`#${NEEDS_ATTENTION_ID}`}
+            />
+            <Stat label="Completed" value={completed} detail={`Backlog ${backlog}`} target="activity" />
+            <Stat
+              label="Spent"
+              value={usage.costUsd === null ? '—' : formatCost(usage.costUsd)}
+              detail={`Estimated, ${runs(usage.runs)}`}
+              more={apiKeyCost > 0 && `${formatCost(apiKeyCost)} on the API key`}
+              target="usage"
+            />
+          </StatRow>
+          <Section title="Needs attention" id={NEEDS_ATTENTION_ID}>
             <NeedsAttention
               waiting={attention.waiting}
               review={attention.review}
@@ -364,7 +364,6 @@ export function OverviewPage({ tab: tabParam }: { tab?: string }) {
               now={now}
             />
           </Section>
-          {statCards}
           {claudeUsage && <ClaudeUsage usage={claudeUsage} now={now} />}
           <Section title="Recent activity">
             <RecentActivity activity={overview.recent} />
@@ -411,12 +410,30 @@ export function OverviewPage({ tab: tabParam }: { tab?: string }) {
         </Section>
       ),
       boards: (
-        <Section title="Boards" actions={<DiskTotal overview={overview} />}>
-          <BoardTable boards={overview.boards} />
-        </Section>
+        <>
+          <StatRow>
+            <Stat label="Unclaimed" value={unclaimed} detail="Open, unassigned" />
+          </StatRow>
+          <Section title="Boards" actions={<DiskTotal overview={overview} />}>
+            <BoardTable boards={overview.boards} />
+          </Section>
+        </>
       ),
       usage: (
         <>
+          <StatRow>
+            <Stat
+              label="Tokens used"
+              value={formatTokens(totalTokens(usage))}
+              detail={planCost === null ? runs(usage.runs) : `${formatCost(planCost)} est., ${runs(usage.runs)}`}
+              more={apiKeyCost > 0 && `${formatCost(apiKeyCost)} on the API key`}
+            />
+            <Stat
+              label="Per completed ticket"
+              value={completedCost ? formatCost(completedCost.costUsd) : '—'}
+              detail={completedCost ? `Est., ${tickets(completedCost.tickets)}` : 'None reported a cost'}
+            />
+          </StatRow>
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             <ColumnChart
               title="Token usage"
@@ -489,32 +506,48 @@ export function OverviewPage({ tab: tabParam }: { tab?: string }) {
         </>
       ),
       activity: (
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          <ColumnChart
-            title="Activity"
-            description={`Board events per day, across ${totals.boards} ${totals.boards === 1 ? 'board' : 'boards'}`}
-            series={[...ACTIVITY_SERIES]}
-            columns={daily.map((day, i) => ({
-              ...columns[i],
-              values: ACTIVITY_SERIES.map((series) => day.events[series.kind]),
-            }))}
-            formatValue={(value) => value.toLocaleString()}
-            minStep={1}
-          />
-          <ColumnChart
-            title="Time worked"
-            description="Hours agents spent on claimed tickets per day, until review"
-            series={WORK_SERIES}
-            columns={daily.map((day, i) => ({ ...columns[i], values: [day.workedMs / HOUR_MS] }))}
-            formatValue={(hours) => formatDuration(hours * HOUR_MS)}
-            formatTick={(hours) => `${+hours.toFixed(1)}h`}
-          />
-        </div>
+        <>
+          <StatRow>
+            <Stat label="Time worked" value={formatDuration(workedMs)} detail="All agents" />
+            <Stat
+              label="Median cycle time"
+              value={formatMedian(cycleTimes)}
+              detail={`Over ${tickets(cycleTimes.length)}`}
+            />
+            <Stat
+              label="Median review wait"
+              value={formatMedian(reviewTimes)}
+              detail={`Over ${tickets(reviewTimes.length)}`}
+            />
+            <Stat label="Backlog" value={backlog} detail={`${created} new, ${completed} done`} />
+          </StatRow>
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <ColumnChart
+              title="Activity"
+              description={`Board events per day, across ${totals.boards} ${totals.boards === 1 ? 'board' : 'boards'}`}
+              series={[...ACTIVITY_SERIES]}
+              columns={daily.map((day, i) => ({
+                ...columns[i],
+                values: ACTIVITY_SERIES.map((series) => day.events[series.kind]),
+              }))}
+              formatValue={(value) => value.toLocaleString()}
+              minStep={1}
+            />
+            <ColumnChart
+              title="Time worked"
+              description="Hours agents spent on claimed tickets per day, until review"
+              series={WORK_SERIES}
+              columns={daily.map((day, i) => ({ ...columns[i], values: [day.workedMs / HOUR_MS] }))}
+              formatValue={(hours) => formatDuration(hours * HOUR_MS)}
+              formatTick={(hours) => `${+hours.toFixed(1)}h`}
+            />
+          </div>
+        </>
       ),
     }
 
     badges = {
-      summary: <CountBadge count={attention.waiting.length + attention.review.length + attention.stalled.length} />,
+      summary: <CountBadge count={attentionCount} />,
       agents: <CountBadge count={totals.activeAgents} />,
     }
     content = (
