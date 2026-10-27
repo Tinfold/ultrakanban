@@ -502,7 +502,10 @@ The board itself opens, shows and merges the pull requests with git in the repos
 Docker, it sees your home directory: its container mounts `ULTRAKANBAN_HOME` from `.env` at the same path, and `~/` in
 a board's path stands for it. `scripts/setup.sh` sets it to your home directory on Linux and macOS (rerun it, or set it
 yourself, then `docker compose up -d --build`); a repository outside it needs a mount of its own in the `app` service.
-The container runs as uid 1000, so git there can only write to a repository owned by that uid.
+Git in the container trusts the repository whoever owns it (`safe.directory`), so the board shows its pull requests
+even when your uid on the host isn't the container's. The container runs as uid 1000, though, so merging, which writes
+to the repository, needs it to be writable by uid 1000: on Linux, if `id -u` isn't 1000, give uid 1000 write access to
+it, or run the board [without Docker](running.md#without-docker).
 
 ### Other models
 
