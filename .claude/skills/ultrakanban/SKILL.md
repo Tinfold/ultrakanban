@@ -254,6 +254,7 @@ a GitHub pull request, and push with `git push --force-with-lease`.
 | `409 version_conflict`        | Someone edited it meanwhile. Re-read the ticket and redo your edit.        |
 | `409 pull_request_not_merged` | You tried to move a ticket into the done column. Don't; the merge does it. |
 | `409 awaiting_approval`       | The ticket's plan waits for approval. Stop, and don't work it until then.  |
+| `409 pull_request_exists`     | The branch or ticket has an open local pull request: push to its branch.   |
 | `404 no_ticket_available`     | Nothing to claim right now.                                                |
 | `429 usage_reserve_reached`   | Claude usage is kept for people. Stop and report it.                       |
 | `415 unsupported_media_type`  | Attachments must be PNG, JPEG, GIF, WebP, MP4 or WebM.                     |

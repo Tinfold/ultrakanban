@@ -227,8 +227,8 @@ state as it does a GitHub pull request's: merging it moves the ticket to the don
 - **Opening:** `head` is the branch to merge and `base` the one to merge it into, the repository's default branch (its
   `HEAD`) when left out; `title` is the ticket's when left out. Both branches must be in the local repository, and
   `head` must have commits `base` doesn't (`400` otherwise, and when the board has no local repository or it isn't a
-  git repository). A branch has one open pull request at a time: `409 pull_request_exists` (its `details.pullRequest`
-  is the open one). The author is the request's `X-Actor`. A ticket can also link a local pull request opened for it
+  git repository). A branch has one open pull request at a time, and so does a ticket (push to its branch, or close
+  it first): `409 pull_request_exists` (its `details.pullRequest` is the open one). The author is the request's `X-Actor`. A ticket can also link a local pull request opened for it
   through `pullRequest` (on `PATCH /tickets/:ticketId` or `review`); one opened for another ticket is a `400`.
 - **Comments:** without `path` and `line` a comment is on the whole pull request; with them it is inline, on that line
   of that file's diff, numbered as on its `side`: `right` (the default) the head's version of the file, `left` the
@@ -240,9 +240,10 @@ state as it does a GitHub pull request's: merging it moves the ticket to the don
   has the base checked out, the same merge commit is made without a worktree. It is refused, changing nothing, with
   `409 merge_conflicts` when they conflict (`details.files` lists the files; rebase the head onto the base and resolve
   them first), `409 merge_failed` when git refuses (e.g. uncommitted changes in the worktree that the merge would
-  overwrite), `409 branch_missing` and `409 pull_request_not_open`. Merge commits are by the repository's git identity,
+  overwrite) or can't run, or when the worktree that has the base checked out isn't there (`git worktree prune` forgets
+  one that was deleted), `409 branch_missing` and `409 pull_request_not_open`. Merge commits are by the repository's git identity,
   or `ultrakanban <ultrakanban@localhost>` when it has none. `POST /tickets/:ticketId/merge` merges a ticket's local
-  pull request the same way; "merge all" skips them.
+  pull request the same way; "merge all" skips them, and auto-merge and the `ready` notification leave them out.
 - **Closing** leaves the branches as they are and the ticket where it is (its `pullRequest.state` is `closed`).
 - Once merged or closed, its diff and commits are read from the commits it had then (`headSha`, `baseSha`), so they
   stay readable when its branches move on or are deleted, until git prunes them (`409 commit_missing`).
