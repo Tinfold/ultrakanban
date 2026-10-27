@@ -13,7 +13,7 @@ import {
   type Ticket,
 } from '../shared/domain.ts'
 import { subscribe, subscribeWake } from './events.ts'
-import { addTicket, boardId, call, ticketsIn, useBoard } from './test-app.ts'
+import { addTicket, boardId, call, pullRequestStatuses, ticketsIn, useBoard } from './test-app.ts'
 
 /** The boards `fn` wakes the agent of (`wake` events), in order. */
 async function wakes(fn: () => Promise<unknown>) {
@@ -280,20 +280,42 @@ describe('lean responses', () => {
     assert.equal((await call<Ticket[]>('GET', `/boards/${boardId}/tickets`)).body[0].description, 'Long text')
   })
 
-  test("keeps what the agent loop reads of a ticket's feedback in the compact board", async () => {
-    await addTicket({
-      title: 'A',
-      agentModel: 'sonnet',
-      agentEffort: 'high',
-      pullRequest: 'https://github.com/acme/app/pull/7',
-    })
+  test('keeps every field of a ticket the agent loop reads in the compact board', async () => {
+    // What scripts/agent-loop reads of each ticket on the board it fetches once per round with ?compact=true
+    // (handle_feedback and backlog_on in tickets.sh). Add to it when the loop reads more.
+    const read = [
+      'id',
+      'number',
+      'columnId',
+      'assignee',
+      'version',
+      'approval',
+      'agentModel',
+      'agentEffort',
+      'pullRequest.url',
+      'pullRequest.repo',
+      'pullRequest.number',
+      'pullRequest.conflicts',
+    ]
+    const url = 'https://github.com/acme/app/pull/7'
+    const agent = 'claude/sonnet/high'
+    await call('PATCH', `/boards/${boardId}`, { approvalSize: 'M' })
+    pullRequestStatuses.set(url, { state: 'open', title: 'Some PR', conflicts: true })
+    const created = await addTicket({ title: 'A', agentModel: 'sonnet', agentEffort: 'high', pullRequest: url })
+    await call('POST', `/tickets/${created.id}/pull-request/sync`)
+    pullRequestStatuses.clear()
+    await call('POST', `/tickets/${created.id}/claim`, { agent, moveTo: 'Doing' }, agent)
+    await call('POST', `/tickets/${created.id}/plan`, { agent, estimate: 'L', plan: 'Do it' }, agent)
+    const { body: ticket } = await call<Ticket>('GET', `/tickets/${created.id}`)
     const { body: board } = await call<BoardDetail>('GET', `/boards/${boardId}?compact=1`)
     const [compact] = board.tickets as unknown as CompactTicket[]
+    const at = (value: unknown, path: string) =>
+      path.split('.').reduce((object, key) => (object as Record<string, unknown> | null)?.[key], value)
 
-    assert.equal(compact.agentModel, 'sonnet')
-    assert.equal(compact.agentEffort, 'high')
-    assert.equal(compact.pullRequest?.repo, 'acme/app')
-    assert.equal(compact.pullRequest?.number, 7)
+    for (const path of read) {
+      assert.ok(at(ticket, path) != null, `the ticket has no ${path} to check`)
+      assert.deepEqual(at(compact, path), at(ticket, path), path)
+    }
   })
 
   test('filters the tickets list by column and assignee', async () => {
