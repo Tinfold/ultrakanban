@@ -61,14 +61,39 @@ describe('tickets', () => {
   test('rejects stale writes with ifVersion', async () => {
     const ticket = await addTicket({ title: 'A' })
     const ok = await call<Ticket>('PATCH', `/tickets/${ticket.id}`, { title: 'B', ifVersion: 1 })
-    const stale = await call<{ error: { code: string } }>('PATCH', `/tickets/${ticket.id}`, {
-      title: 'C',
-      ifVersion: 1,
-    })
+    const stale = await call<{ error: { code: string; details: Record<string, unknown> } }>(
+      'PATCH',
+      `/tickets/${ticket.id}`,
+      {
+        title: 'C',
+        ifVersion: 1,
+      },
+    )
 
     assert.equal(ok.body.version, 2)
     assert.equal(stale.status, 409)
     assert.equal(stale.body.error.code, 'version_conflict')
+    assert.deepEqual(Object.keys(stale.body.error.details).sort(), ['assignee', 'columnId', 'version'])
+    assert.equal(stale.body.error.details.version, 2)
+  })
+
+  test('a stale description save says what the description is now', async () => {
+    const ticket = await addTicket({ title: 'A', description: 'one' })
+    await call('PATCH', `/tickets/${ticket.id}`, { description: 'two', ifVersion: 1 })
+    const stale = await call<{ error: { code: string; details: Record<string, unknown> } }>(
+      'PATCH',
+      `/tickets/${ticket.id}`,
+      { description: 'three', ifVersion: 1 },
+    )
+
+    assert.equal(stale.status, 409)
+    assert.equal(stale.body.error.code, 'version_conflict')
+    assert.deepEqual(stale.body.error.details, {
+      version: 2,
+      assignee: null,
+      columnId: ticket.columnId,
+      description: 'two',
+    })
   })
 
   test('validates input', async () => {
@@ -137,7 +162,11 @@ describe('agent claiming', () => {
 
     const claimed = await call<Ticket>('POST', `/tickets/${ticket.id}/claim`, { agent: 'alpha', moveTo: 'Doing' })
     const again = await call<Ticket>('POST', `/tickets/${ticket.id}/claim`, { agent: 'alpha' })
-    const stolen = await call<{ error: { code: string } }>('POST', `/tickets/${ticket.id}/claim`, { agent: 'beta' })
+    const stolen = await call<{ error: { code: string; details: Record<string, unknown> } }>(
+      'POST',
+      `/tickets/${ticket.id}/claim`,
+      { agent: 'beta' },
+    )
     const badRelease = await call('POST', `/tickets/${ticket.id}/release`, { agent: 'beta' })
     const released = await call<Ticket>('POST', `/tickets/${ticket.id}/release`, { agent: 'alpha' })
     const reclaimed = await call<Ticket>('POST', `/tickets/${ticket.id}/claim`, { agent: 'beta' })
@@ -147,6 +176,8 @@ describe('agent claiming', () => {
     assert.equal(again.status, 200)
     assert.equal(stolen.status, 409)
     assert.equal(stolen.body.error.code, 'already_claimed')
+    assert.deepEqual(Object.keys(stolen.body.error.details).sort(), ['assignee', 'columnId', 'version'])
+    assert.equal(stolen.body.error.details.assignee, 'alpha')
     assert.equal(badRelease.status, 409)
     assert.equal(released.body.assignee, null)
     assert.equal(reclaimed.body.assignee, 'beta')

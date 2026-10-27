@@ -78,10 +78,26 @@ setJevFetch(async (input, init) => {
   const headers = new Headers(init?.headers)
   jev.calls.push({ url: String(input), auth: headers.get('authorization'), body: JSON.parse(String(init?.body)) })
   if (jev.hang) {
-    await new Promise((_, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal!.reason)))
+    // Kept open until Jev's timeout aborts the request: on Node 22, AbortSignal.timeout's own timer doesn't keep the
+    // test process alive, and node:test would cancel the test.
+    const open = setInterval(() => {}, 1000)
+    await new Promise((_, reject) =>
+      init?.signal?.addEventListener('abort', () => reject(init.signal!.reason)),
+    ).finally(() => clearInterval(open))
   }
   if (jev.status !== 200) return new Response('{}', { status: jev.status })
-  return Response.json({ answers: jev.answers, usage: { input_tokens: 1200, output_tokens: 0 } })
+  const questions = Object.entries(jev.calls.at(-1)!.body.questions ?? {}) as [string, { criteria?: string[] }][]
+  const levels = (id: string) => (questions.find(([key]) => key === id)?.[1].criteria ?? []).map((c) => c.split(':')[0])
+  const answers = Object.fromEntries(
+    jev.answers.map((a) => {
+      if (a.type === 'choice') return [a.id, a]
+      if (a.type === 'noul') return [a.id, { type: 'noul', noul: a.probability }]
+      const names = levels(a.id)
+      const probabilities = Object.fromEntries(Object.entries(a.probabilities).map(([n, p]) => [names.indexOf(n), p]))
+      return [a.id, { type: 'score', score: names.indexOf(a.score), confidence: a.confidence, probabilities }]
+    }),
+  )
+  return Response.json({ answers, usage: { input_tokens: 1200, output_tokens: 0 } })
 })
 export const attachmentDir = mkdtempSync(join(tmpdir(), 'ultrakanban-attachments-'))
 const pullRequests = createPullRequestSync({

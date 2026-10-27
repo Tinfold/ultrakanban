@@ -10,6 +10,7 @@ import {
   type FailingCheck,
   IN_PROGRESS_COLUMN,
   isWeeklyLimit,
+  JEV_AGENT,
   parsePullRequestUrl,
   PRIORITIES,
   type Priority,
@@ -136,7 +137,7 @@ const SELECT_TICKETS = `
     (SELECT group_concat(tag_id) FROM ticket_tags WHERE ticket_id = t.id) AS tag_ids,
     (SELECT count(*) FROM activity WHERE ticket_id = t.id AND type = 'comment') AS comment_count,
     (SELECT count(*) FROM attachments WHERE ticket_id = t.id) AS attachment_count,
-    (SELECT count(*) FROM token_usage WHERE ticket_id = t.id) AS usage_runs,
+    (SELECT count(*) FROM token_usage WHERE ticket_id = t.id AND agent <> '${JEV_AGENT}') AS usage_runs,
     (SELECT sum(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) FROM token_usage
       WHERE ticket_id = t.id) AS usage_tokens,
     (SELECT sum(cost_usd) FROM token_usage WHERE ticket_id = t.id) AS usage_cost,
@@ -336,12 +337,21 @@ export function listTickets(boardId: string, query: ListTicketsQuery = {}): Tick
   return sql.all<TicketRow>(`${SELECT_TICKETS} WHERE ${where.join(' AND ')} ${BOARD_ORDER}`, ...params).map(toTicket)
 }
 
-function assertVersion(ticket: Ticket, ifVersion: number | undefined) {
+/** What a 409 says about the ticket: enough to retry, without the whole ticket. */
+function conflictState(ticket: Pick<Ticket, 'version' | 'assignee' | 'columnId'>) {
+  return { version: ticket.version, assignee: ticket.assignee, columnId: ticket.columnId }
+}
+
+/**
+ * With `withDescription`, the 409 also carries the description as it is now, so that a description save can tell
+ * whether the description changed meanwhile or only other fields did.
+ */
+function assertVersion(ticket: Ticket, ifVersion: number | undefined, withDescription = false) {
   if (ifVersion !== undefined && ticket.version !== ifVersion) {
     throw conflict(
       'version_conflict',
       `Ticket was modified concurrently (current version ${ticket.version}, expected ${ifVersion})`,
-      { ticket },
+      withDescription ? { ...conflictState(ticket), description: ticket.description } : conflictState(ticket),
     )
   }
 }
@@ -419,7 +429,6 @@ function assertCanEnter(
     ticket.pullRequest
       ? `Tickets enter "${target.name}" when their pull request is merged; ${ticket.pullRequest.url} is ${ticket.pullRequest.state}. It will move automatically once merged.`
       : `Tickets enter "${target.name}" only with a merged pull request, or without one as questions (tagged "${QUESTION_TAG}") or once all their sub-tickets are finished. Link one with POST /api/tickets/:id/review.`,
-    { ticket },
   )
 }
 
@@ -510,7 +519,7 @@ export function createTicket(boardId: string, input: CreateTicketInput, actor: s
 
 export function updateTicket(id: string, input: UpdateTicketInput, actor: string): Ticket {
   const ticket = getTicket(id)
-  assertVersion(ticket, input.ifVersion)
+  assertVersion(ticket, input.ifVersion, input.description !== undefined)
   touchBoard(ticket.boardId)
 
   const changed: string[] = EDITABLE_FIELDS.filter(
@@ -630,7 +639,7 @@ export function claimTicket(id: string, input: ClaimTicketInput): Ticket {
   const ticket = getTicket(id)
   assertVersion(ticket, input.ifVersion)
   if (ticket.assignee && ticket.assignee !== input.agent) {
-    throw conflict('already_claimed', `Ticket is already claimed by "${ticket.assignee}"`, { ticket })
+    throw conflict('already_claimed', `Ticket is already claimed by "${ticket.assignee}"`, conflictState(ticket))
   }
   // A ticket the agent already holds stays its own, whatever has come up since.
   if (ticket.assignee !== input.agent) assertClaimable(ticket)
@@ -664,13 +673,17 @@ function assertClaimable(ticket: Ticket) {
       : unfinishedSubtickets
         ? 'its sub-tickets are not all finished yet'
         : null
-  if (reason) throw conflict('blocked', `Ticket is blocked: ${reason}`, { ticket })
+  if (reason) throw conflict('blocked', `Ticket is blocked: ${reason}`, conflictState(ticket))
 }
 
 export function releaseTicket(id: string, input: ReleaseTicketInput): Ticket {
   const ticket = getTicket(id)
   if (ticket.assignee && ticket.assignee !== input.agent && !input.force) {
-    throw conflict('claimed_by_other', `Ticket is claimed by "${ticket.assignee}", not "${input.agent}"`, { ticket })
+    throw conflict(
+      'claimed_by_other',
+      `Ticket is claimed by "${ticket.assignee}", not "${input.agent}"`,
+      conflictState(ticket),
+    )
   }
   touchBoard(ticket.boardId)
   assign(ticket, null, input.agent)
@@ -873,7 +886,11 @@ export function submitForReview(id: string, input: SubmitForReviewInput): Ticket
   const ticket = getTicket(id)
   assertVersion(ticket, input.ifVersion)
   if (ticket.assignee && ticket.assignee !== input.agent) {
-    throw conflict('claimed_by_other', `Ticket is claimed by "${ticket.assignee}", not "${input.agent}"`, { ticket })
+    throw conflict(
+      'claimed_by_other',
+      `Ticket is claimed by "${ticket.assignee}", not "${input.agent}"`,
+      conflictState(ticket),
+    )
   }
   assertNotHeld(ticket)
   const { review } = workflowColumns(ticket.boardId)
@@ -902,7 +919,7 @@ function assertNotHeld(ticket: Ticket) {
     throw conflict(
       'awaiting_approval',
       "The ticket's plan waits for approval; don't work it until someone approves it (POST /tickets/:id/approve)",
-      { ticket },
+      conflictState(ticket),
     )
   }
 }
@@ -915,7 +932,11 @@ function assertNotHeld(ticket: Ticket) {
 export function postPlan(id: string, input: PostPlanInput): Ticket {
   const ticket = getTicket(id)
   if (ticket.assignee && ticket.assignee !== input.agent) {
-    throw conflict('claimed_by_other', `Ticket is claimed by "${ticket.assignee}", not "${input.agent}"`, { ticket })
+    throw conflict(
+      'claimed_by_other',
+      `Ticket is claimed by "${ticket.assignee}", not "${input.agent}"`,
+      conflictState(ticket),
+    )
   }
   const { approval_size: approvalSize } = sql.get<{ approval_size: TicketSize | null }>(
     'SELECT approval_size FROM boards WHERE id = ?',
@@ -936,10 +957,10 @@ export function approvePlan(id: string, input: ApprovePlanInput, actor: string):
   const ticket = getTicket(id)
   assertVersion(ticket, input.ifVersion)
   if (ticket.approval !== 'pending') {
-    throw conflict('not_awaiting_approval', "The ticket's plan doesn't wait for approval", { ticket })
+    throw conflict('not_awaiting_approval', "The ticket's plan doesn't wait for approval", conflictState(ticket))
   }
   if (ticket.assignee && isAgentOf(ticket.assignee, actor)) {
-    throw conflict('own_plan', "The ticket's agent can't approve its own plan; a person has to", { ticket })
+    throw conflict('own_plan', "The ticket's agent can't approve its own plan; a person has to", conflictState(ticket))
   }
   touchBoard(ticket.boardId)
   updateRow('tickets', id, { approval: 'approved' })

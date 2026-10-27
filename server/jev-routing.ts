@@ -226,11 +226,31 @@ const risky = (pick: Setting, fallback: Setting) =>
   (pick.effort === 'low' && fallback.effort !== 'low')
 
 /**
+ * Of Jev's route and the history suggestion's, the more capable model and effort (`higher`) or the less capable ones,
+ * each compared on its own. It comes from the source whose model it takes (from Jev when they pick the same model and
+ * the same effort), so cost comparisons count it by that source. A model that can't be ranked gives way to Jev's.
+ */
+export function combineRoutes(jev: RoutedSetting, history: RoutedSetting, higher: boolean): RoutedSetting {
+  const jevRank = modelRank(jev.model)
+  const historyRank = modelRank(history.model)
+  const better = (a: number, b: number) => (higher ? a > b : a < b)
+  const historyModel =
+    jev.model !== history.model && jevRank !== null && historyRank !== null && better(historyRank, jevRank)
+  const historyEffort = better(AGENT_EFFORTS.indexOf(history.effort), AGENT_EFFORTS.indexOf(jev.effort))
+  const model = historyModel ? history.model : jev.model
+  const effort = historyEffort ? history.effort : jev.effort
+  const fromHistory = model === jev.model ? model === history.model && historyEffort : true
+  return fromHistory ? { ...history, model, effort } : { ...jev, model, effort }
+}
+
+/**
  * Picks the setting a ticket is worked at on a board that routes with Jev, in order: the ticket's own setting (the
  * board's default for the half it leaves out), Jev's pick at or above the board's threshold (or `riskyThreshold` when
  * it drops to `haiku` or `low`), the history suggestion when it is built on enough similar tickets, then the board's
- * default. Jev's and the history suggestion's picks must be among the board's models for Jev, and are held to the
- * board's default when Jev may only lower the setting. Whichever of them routes, the ticket never goes below the
+ * default. The board's `jevCombine` changes the middle of that: `jev-only` never uses the history suggestion, and
+ * `higher` / `lower` take the more or the less capable of Jev's pick and the history suggestion's when both have one
+ * (see `combineRoutes`). Jev's and the history suggestion's picks must be among the board's models for Jev, and are held
+ * to the board's default when Jev may only lower the setting. Whichever of them routes, the ticket never goes below the
  * setting its last run worked at (`lastRunSetting`): a run that failed or came back with changes requested isn't
  * followed by a cheaper one.
  */
@@ -247,13 +267,21 @@ export function pickRoute(ticket: Ticket, board: BoardSummary, jev: RoutingPick 
   const last = lastRunSetting(ticket)
   const floored = (pick: Setting) => (last ? raiseSetting(pick, last) : pick)
   const threshold = board.jevThreshold ?? JEV_DEFAULTS.threshold
+  const combine = board.jevCombine ?? JEV_DEFAULTS.combine
+  let jevRoute: RoutedSetting | null = null
   if (jev && allowed(jev)) {
     const pick = held(jev)
     const needed = risky(pick, fallback) ? riskyThreshold(threshold) : threshold
-    if ((jev.confidence ?? 0) >= needed) return { ...floored(pick), source: 'jev', confidence: jev.confidence }
+    if ((jev.confidence ?? 0) >= needed) jevRoute = { ...pick, source: 'jev', confidence: jev.confidence }
   }
-  const history = historyPick(ticket)
-  if (history && allowed(history)) return { ...floored(held(history)), source: 'history', confidence: null }
+  const history = combine === 'jev-only' || (combine === 'jev-first' && jevRoute) ? null : historyPick(ticket)
+  const historyRoute: RoutedSetting | null =
+    history && allowed(history) ? { ...held(history), source: 'history', confidence: null } : null
+  const routed =
+    jevRoute && historyRoute && (combine === 'higher' || combine === 'lower')
+      ? combineRoutes(jevRoute, historyRoute, combine === 'higher')
+      : (jevRoute ?? historyRoute)
+  if (routed) return { ...routed, ...floored(routed) }
   return { ...floored(fallback), source: 'default', confidence: null }
 }
 
@@ -287,7 +315,7 @@ export async function routeClaim(ticket: Ticket): Promise<RoutedSetting | null> 
 }
 
 /**
- * The setting to work an already claimed ticket at, for runs on feedback (`GET /tickets/:id/route`): as `routeClaim`,
+ * The setting to work an already claimed ticket at, for runs on feedback (`POST /tickets/:id/route`): as `routeClaim`,
  * but only on a board whose Jev mode is `on`, so it asks Jev only when the ticket changed since Jev last picked. Null
  * on other boards, without recording anything.
  */

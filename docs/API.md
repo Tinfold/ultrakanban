@@ -14,8 +14,9 @@ JSON over HTTP. Base URL: `http://127.0.0.1:4317/api` (in development the Vite d
     [Claude usage](#claude-usage)); `details` has the `limit` and its `reservePercent`. The `Retry-After` header says how many seconds until the limit resets (300 if that is unknown).
   - `409 blocked` - `POST /tickets/:id/claim` on a ticket `claim-next` would skip (tagged `blocked`, waiting for an
     unfinished ticket, or with unfinished sub-tickets). A ticket the agent already holds can still be claimed by it.
-  - `409 already_claimed` / `claimed_by_other` - someone else holds the ticket (`details.ticket` has its current state).
-  - `409 version_conflict` - `ifVersion` did not match (`details.ticket` has its current state).
+  - `409 already_claimed` / `claimed_by_other` - someone else holds the ticket (`details` has its current `version`, `assignee` and `columnId`).
+  - `409 version_conflict` - `ifVersion` did not match (`details` has its current `version`, `assignee` and `columnId`,
+    and its `description` too for a `PATCH /tickets/:id` that sets one).
   - `409 tag_exists` - tag names are unique per board (case-insensitive).
   - `409 pull_request_not_merged` - the board's done column only accepts tickets whose pull request is merged.
   - `409 merge_in_progress` - the board's pull requests are already being merged.
@@ -321,6 +322,7 @@ interface BoardSummary {
   jevModels: string[] | null // models Jev may pick from; all when null
   jevThreshold: number | null // smallest confidence at which Jev's pick is used (0.7 when null)
   jevOnlyLower: boolean // Jev may only pick a cheaper setting than the board's default
+  jevCombine: 'jev-only' | 'jev-first' | 'higher' | 'lower' | null // how Jev and the similar-tickets suggestion combine (jev-first when null)
   jevMode: 'dry-run' | 'on' | null // dry-run records Jev's pick only; set to dry-run when Jev is first switched on
   ticketCount: number // open tickets: all but those in the done column or the one named Cancelled (any case)
   waitingCount: number // open tickets whose agent waits for a person: approval of its plan, or an answer to its comment
@@ -438,7 +440,7 @@ and end the run.
 | GET    | `/boards/:boardId/tickets/:number`     |                                                                                                                                                                                                                                                                                                              | `Ticket`                                                                                                                                                                                                                                                                                                             |
 | POST   | `/boards/:boardId/tickets`             | `{ title, description?, column?: ref, priority?, tags?: ref[], assignee?, dueDate?, agentEffort?, agentModel?, agentDocker?, pullRequest?: url, parent?: ref, epic?: ref, position?, force? }`                                                                                                               | `Ticket` (defaults to the first column, appended)                                                                                                                                                                                                                                                                    |
 | GET    | `/tickets/:ticketId`                   |                                                                                                                                                                                                                                                                                                              | `Ticket`                                                                                                                                                                                                                                                                                                             |
-| GET    | `/tickets/:ticketId/route`             |                                                                                                                                                                                                                                                                                                              | `{ routed: RoutedSetting \| null }`: the setting to work the ticket at on a board whose Jev mode is `on`, for runs on feedback; asks Jev only when the ticket changed since it last picked. `null` on other boards (see [Routing](#routing))                                                                         |
+| POST   | `/tickets/:ticketId/route`             |                                                                                                                                                                                                                                                                                                              | `{ routed: RoutedSetting \| null }`: the setting to work the ticket at on a board whose Jev mode is `on`, for runs on feedback; asks Jev only when the ticket changed since it last picked. `null` on other boards (see [Routing](#routing))                                                                         |
 | PATCH  | `/tickets/:ticketId`                   | `{ title?, description?, priority?, tags?: ref[], assignee?: string \| null, dueDate?, agentEffort?: 'low' \| 'medium' \| 'high' \| 'xhigh' \| 'max' \| null, agentModel?: string \| null, agentDocker?: boolean \| null, pullRequest?: url \| null, parent?: ref \| null, epic?: ref \| null, ifVersion? }` | `Ticket`                                                                                                                                                                                                                                                                                                             |
 | DELETE | `/tickets/:ticketId`                   |                                                                                                                                                                                                                                                                                                              | `204`                                                                                                                                                                                                                                                                                                                |
 | POST   | `/tickets/:ticketId/move`              | `{ column: ref, position?, ifVersion?, force? }`                                                                                                                                                                                                                                                             | `Ticket` (appended when `position` is omitted)                                                                                                                                                                                                                                                                       |
@@ -567,11 +569,12 @@ interface RunRouting {
 
 Each claim (`claim` and `claim-next`) records how the ticket is routed: the setting it is worked at and where that came
 from (`ticket` when it names its own `agentModel`/`agentEffort`, else the board's `default`), and what the other sources
-would have picked: the [history suggestion](#suggested-model-and-effort) when it is built on 3 or more similar tickets,
+would have picked: the [similar-tickets suggestion](#suggested-model-and-effort) when it is built on 3 or more similar tickets,
 and, on a board that routes with Jev (`jevEnabled`, see [docs/JEV.md](JEV.md)), Jev's pick and confidence. Jev is asked
 before the claim returns, and in `dry-run` mode its pick is only recorded, never used. A Jev request that fails is
-left out and never fails the claim. Each Jev request is recorded as a run on the ticket (agent `jev`, model
-`jev-1.14.0`, at $0.042 per million input tokens), so its tokens and cost count in the usage too.
+left out and never fails the claim. Each Jev request is recorded in the ticket's usage (agent `jev`, model
+`jev-1.14.0`, at $0.042 per million input tokens), so its tokens and cost count there too, but not as a run, and Jev isn't
+listed among the overview's agents.
 
 In `on` mode the claim also returns the setting to work the ticket at as `routed`, without writing over the ticket's own
 `agentModel`/`agentEffort`, and the agent loop works the ticket at it. The first source that has a pick wins:
@@ -581,17 +584,24 @@ In `on` mode the claim also returns the setting to work the ticket at as `routed
    board's default to `haiku` or to `low` effort needs more: halfway from the threshold to 1 (0.85 at 0.7). When
    Jev's effort probability is spread over two efforts (within 0.1 of each other), the higher one is taken, or the
    lower one when Jev thinks the ticket is fully specified.
-3. `history`: the history suggestion, when it is built on 3 or more similar tickets.
+3. `history`: the similar-tickets suggestion, when it is built on 3 or more similar tickets.
 4. `default`: the board's `agentModel` and `agentEffort`.
 
-Jev's and the history suggestion's picks must be among the board's `jevModels`, and with `jevOnlyLower` each is held to
+The board's `jevCombine` changes steps 2 and 3: `jev-first` (the default) is the order above; `jev-only` skips the
+similar-tickets suggestion, so below the threshold the ticket gets the board's default; `higher` and `lower` take, when both
+Jev (above its threshold) and the similar-tickets suggestion have a pick, the more or the less capable model and effort of the
+two, each compared on its own by its order in `AGENT_MODELS` and `AGENT_EFFORTS` (with only one pick, that one). The
+route's `source` is the one whose model was taken, or whose effort was on the same model (`jev` on a full tie), and its
+`confidence` is Jev's only when the source is `jev`.
+
+Jev's and the similar-tickets suggestion's picks must be among the board's `jevModels`, and with `jevOnlyLower` each is held to
 the board's default (its model and its effort each no dearer). Whichever of `jev`, `history` and `default` routes, the
 ticket never goes below the setting the board agent's newest run on it worked at, its model and its effort each: a
 ticket whose run failed or that came back from review with changes keeps or raises its setting. Jev's pick is kept with a hash of what it was told about
 the ticket (title, description with its checklist unchecked, tags, epic, and the models it may pick from), and Jev isn't
 asked again until one of those changes: claiming the ticket again, checking off steps or reassigning it doesn't. A
 failed or timed-out Jev request (2 s) is never kept: routing goes on to the next source, and the next claim or route
-asks again. Runs on feedback get the same setting from `GET /tickets/:ticketId/route`.
+asks again. Runs on feedback get the same setting from `POST /tickets/:ticketId/route`.
 
 `POST /boards/:boardId/jev-suggestion` with `{ title?, description?, tagIds?: id[], epicId?: id | null }` asks Jev on
 demand which model (among the board's `jevModels`) and effort a ticket as written needs, for the "Suggest with Jev"
@@ -613,7 +623,8 @@ matches. The [suggestion](#suggested-model-and-effort) and the [overview](#overv
 _finished_ ticket (cost divided by success rate), on the tickets decided since routing was recorded:
 
 - Each source is counted as if it had picked every ticket's setting: Jev when its confidence is at least the board's
-  `jevThreshold` (else it falls back to the history suggestion, then the default, as routing would), the history
+  `jevThreshold` (else it falls back to the similar-tickets suggestion, unless `jevCombine` is `jev-only`, then the default, as
+  routing would), the similar-tickets
   suggestion (else the default), and the default.
 - A ticket worked at the setting a source picked counts as it went. One worked at another setting counts at the
   board's average for the pick (its cost per decided ticket and its success rate), once the board has decided 3 or
@@ -668,8 +679,10 @@ interface RunRecord {
   // finished: exited successfully; failed: exited with an error; timed_out: ran past the loop's TICKET_TIMEOUT;
   // killed: by a signal (exit status 137 is most likely the kernel, out of memory); stopped: the loop stopped it as
   // someone took the ticket away; stop_requested: the loop stopped it as someone asked (POST /tickets/:id/stop; the
-  // run is resumed with new feedback); usage_limit: the account ran out of Claude usage (the run is resumed later)
-  outcome: 'finished' | 'failed' | 'timed_out' | 'killed' | 'stopped' | 'stop_requested' | 'usage_limit'
+  // run is resumed with new feedback); loop_stopped: the loop itself was stopped, e.g. restarted (the run is resumed
+  // by its next run); usage_limit: the account ran out of Claude usage (the run is resumed later)
+  outcome:
+    'finished' | 'failed' | 'timed_out' | 'killed' | 'stopped' | 'stop_requested' | 'loop_stopped' | 'usage_limit'
   exitCode: number | null
   durationMs: number | null
   turns: number | null // responses of the model

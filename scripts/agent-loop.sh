@@ -299,11 +299,17 @@ idle() {
   done
 }
 
+# Stops the wake listener, if it runs: its curl first, which would otherwise go on reading the stream.
+stop_listener() {
+  [[ -n $listener ]] || return 0
+  pkill -P "$listener" 2>/dev/null
+  kill "$listener" 2>/dev/null
+  listener=
+  rm -f "$WAKE_FILE"
+}
+
 sleeper=
 listener=
-rm -f "$WAKE_FILE"
-listen_for_wakes &
-listener=$!
 # Set when Claude usage runs out: no run starts before this time (seconds since the epoch). Kept in PAUSE_FILE, so
 # the other loops working the board wait too.
 paused_until=0
@@ -318,11 +324,13 @@ followup=
 # The run in progress and the process watching its ticket (see run_claude), if any.
 running=
 watcher=
-# Set by the trap: a run in progress is stopped, then run_claude ends and records it (end_run, stop_leftovers,
-# record_run) before the loop exits.
+# Set by the trap: a run in progress is stopped, then run_claude ends and records it as loop_stopped (end_run,
+# stop_leftovers, record_run), and run_on_ticket keeps when it ran (the state's runs) before the loop exits.
 stopping=
-trap 'log "stopped"; pkill -P "$listener" 2>/dev/null; kill $sleeper $listener $watcher 2>/dev/null; rm -f "$WAKE_FILE"
+trap 'log "stopped"; stop_listener; kill $sleeper $watcher 2>/dev/null
   if [[ -n $running ]]; then stopping=1; kill $running 2>/dev/null; else exit 0; fi' INT TERM
+# However the loop exits (a signal, its scripts being updated, an error), the listener goes with it.
+trap stop_listener EXIT
 
 # `agent-loop.sh save-work` only keeps the work of an unfinished run in the current checkout (see save_work):
 # agent-board.sh does this before it removes a worktree.
@@ -330,6 +338,10 @@ if [[ ${1:-} == save-work ]]; then
   save_work
   exit
 fi
+
+rm -f "$WAKE_FILE"
+listen_for_wakes &
+listener=$!
 
 # The files in WATCH_FILES as they are now, to tell when one of them is replaced or changed.
 watched() {

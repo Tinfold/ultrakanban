@@ -1,10 +1,10 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useMemo } from 'react'
 import { toast } from 'sonner'
-import type { BoardDetail, MergeMethod } from '@shared/domain'
+import type { BoardDetail, MergeMethod, Ticket } from '@shared/domain'
 import type { CreateColumnInput, CreateEpicInput, CreateTagInput, CreateTicketInput } from '@shared/schemas'
 import { readActor } from '@/lib/actor'
-import { api, errorMessage } from '@/lib/api'
+import { ApiError, api, errorMessage } from '@/lib/api'
 import * as updates from '@/lib/board-updates'
 import { ticketRef } from '@/lib/format'
 import { pendingDeletes, UNDO_DELAY } from '@/lib/pending-deletes'
@@ -39,11 +39,13 @@ export function useBoardActions(boardId: string) {
     /**
      * @param optimistic applied to the cache before the request is sent
      * @param reconcile applied to the cache with the server response (e.g. to add a created entity right away)
+     * @param handled returns true for errors the caller reports itself, so no toast is shown for them
      */
     async function run<R>(
       request: () => Promise<R>,
       optimistic?: (detail: BoardDetail) => BoardDetail,
       reconcile?: (detail: BoardDetail, result: R) => BoardDetail,
+      handled?: (error: unknown) => boolean,
     ) {
       const previous = queryClient.getQueryData<BoardDetail>(boardKey)
       if (optimistic && previous) {
@@ -56,7 +58,7 @@ export function useBoardActions(boardId: string) {
         return result
       } catch (error) {
         if (optimistic && previous) queryClient.setQueryData(boardKey, previous)
-        toast.error(errorMessage(error))
+        if (!handled?.(error)) toast.error(errorMessage(error))
         return undefined
       } finally {
         void queryClient.invalidateQueries({ queryKey: boardKey })
@@ -163,6 +165,30 @@ export function useBoardActions(boardId: string) {
           () => api.updateTicket(ticketId, { ...fields, tags: tagIds, epic: epicId }),
           (d) => updates.patchTicket(d, ticketId, patch),
         )
+      },
+      /**
+       * Saves the description only if the ticket is still at `ifVersion`, so it can't overwrite changes made meanwhile
+       * (such as checklist steps an agent ticks). On a version conflict it returns the ticket's version and description
+       * as they are now instead.
+       */
+      saveDescription: async (
+        ticketId: string,
+        description: string,
+        ifVersion: number,
+      ): Promise<{ ticket: Ticket } | { conflict: Pick<Ticket, 'version' | 'description'> } | undefined> => {
+        let conflict: Pick<Ticket, 'version' | 'description'> | undefined
+        const ticket = await run(
+          () => api.updateTicket(ticketId, { description, ifVersion }),
+          (d) => updates.patchTicket(d, ticketId, { description }),
+          updates.addTicket,
+          (error) => {
+            if (!(error instanceof ApiError) || error.code !== 'version_conflict') return false
+            conflict = error.details as Pick<Ticket, 'version' | 'description'> | undefined
+            return !!conflict
+          },
+        )
+        if (conflict) return { conflict }
+        return ticket && { ticket }
       },
       /**
        * `force` skips the done column's merged pull request requirement. Offers to undo the move, since drags misfire
