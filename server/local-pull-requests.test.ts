@@ -433,6 +433,32 @@ describe('local pull requests', () => {
     assert.equal(git(repo, 'show', 'release:b.txt'), 'b')
   })
 
+  test('merging into a branch checked out in a worktree that is gone is refused, changing nothing', async () => {
+    git(repo, 'branch', '-q', 'release')
+    const gone = join(root, 'gone')
+    git(repo, 'worktree', 'add', '-q', gone, 'release')
+    rmSync(gone, { recursive: true })
+    pushBranch('feature', { 'a.txt': 'a\n' })
+    await open({ head: 'feature', base: 'release' })
+    const before = git(repo, 'rev-parse', 'release')
+
+    const { status, body } = await call<ApiErrorBody>('POST', pr('/1/merge'))
+    assert.deepEqual([status, body.error.code], [409, 'merge_failed'])
+    assert.match(body.error.message, /gone, where "release" is checked out, isn't there.*git worktree prune/)
+    // Git that can't run there at all, as when it is a file now, fails the same way.
+    writeFileSync(gone, '')
+    const file = await call<ApiErrorBody>('POST', pr('/1/merge'))
+    assert.deepEqual([file.status, file.body.error.code], [409, 'merge_failed'])
+    assert.equal(git(repo, 'rev-parse', 'release'), before)
+    assert.equal((await call<LocalPullRequestDetail>('GET', pr('/1'))).body.state, 'open')
+
+    // Once git forgets the worktree, the merge is made without one.
+    rmSync(gone)
+    git(repo, 'worktree', 'prune')
+    assert.equal((await call('POST', pr('/1/merge'))).status, 200)
+    assert.equal(git(repo, 'rev-parse', 'release^1'), before)
+  })
+
   test('closing keeps it unmerged, and the ticket where it is', async () => {
     const headSha = pushBranch('feature', { 'a.txt': 'a\n' })
     await open({ head: 'feature' })

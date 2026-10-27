@@ -300,10 +300,11 @@ const exclusive = oneAtATime()
  * Merges `head` into `base` with a merge commit, as `git merge --no-ff` does. In the worktree that has `base` checked
  * out, if there is one, that is what runs, so its files follow; otherwise (a bare repository, or `base` not checked
  * out) the same merge is made without a worktree. Refuses with `merge_conflicts`, changing nothing, when they
- * conflict. When `head`'s commits are in `base` already there is nothing to merge: `mergeSha` is null.
+ * conflict, and with `merge_failed` when git refuses or can't run. When `head`'s commits are in `base` already there
+ * is nothing to merge: `mergeSha` is null.
  */
 export function merge(repo: string, { base, head, message }: { base: string; head: string; message: string }) {
-  return exclusive(repo, async () => {
+  const merging = exclusive(repo, async () => {
     const [baseSha, headSha] = [await branchSha(repo, base), await branchSha(repo, head)]
     if (!baseSha) throw conflict('branch_missing', `The local repository has no branch "${base}"`)
     if (!headSha) throw conflict('branch_missing', `The local repository has no branch "${head}"`)
@@ -324,6 +325,14 @@ export function merge(repo: string, { base, head, message }: { base: string; hea
     const env = await commitEnv(repo)
     const worktree = await worktreeWith(repo, base)
     if (worktree) {
+      // Git counts a worktree deleted without pruning as having `base` checked out still, so the board does too, as
+      // it does one it can't see (outside what its Docker container mounts): `base` isn't moved behind its back.
+      if (!existsSync(worktree)) {
+        throw conflict(
+          'merge_failed',
+          `${worktree}, where "${base}" is checked out, isn't there: if it was deleted, run git worktree prune in the local repository`,
+        )
+      }
       const midMerge = async () => (await run(worktree, ['rev-parse', '--verify', '--quiet', 'MERGE_HEAD'])).code === 0
       if (await midMerge()) {
         throw conflict('merge_failed', `${worktree}, where "${base}" is checked out, is in the middle of a merge`)
@@ -347,5 +356,10 @@ export function merge(repo: string, { base, head, message }: { base: string; hea
       throw conflict('base_moved', `"${base}" moved while merging; try again`)
     }
     return { baseSha, headSha, mergeSha }
+  })
+  return merging.catch((error: unknown) => {
+    // Git that couldn't run at all, in a worktree that is a file now say, rather than one that refused.
+    if (error instanceof HttpError) throw error
+    throw conflict('merge_failed', `Merging "${head}" into "${base}" failed: ${(error as Error).message}`)
   })
 }
