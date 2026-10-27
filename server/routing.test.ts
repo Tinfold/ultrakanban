@@ -109,6 +109,19 @@ describe('routing', () => {
     assert.equal((await run(ticket, 'claude/opus/medium')).routing?.source, 'default')
   })
 
+  test('the overview tells each run’s routing source, for its savings', async () => {
+    const ticket = await addTicket({ title: 'Assigned by hand', agentEffort: 'high' })
+    await call('PATCH', `/tickets/${ticket.id}`, { assignee: 'claude/opus/high' })
+    await run(ticket, 'claude/opus/high')
+    await call('POST', `/boards/${boardId}/usage`, { agent: 'claude/opus/medium', inputTokens: 10, outputTokens: 0 })
+    const { body: overview } = await call<Overview>('GET', '/overview?days=7')
+    const runs = overview.usage.filter((entry) => entry.boardId === boardId)
+    assert.deepEqual(
+      runs.map((entry) => entry.routingSource),
+      ['ticket', null],
+    )
+  })
+
   test('dry run: asks Jev at claim time and records its pick on the runs without using it', async () => {
     await routeWithJev()
     const ticket = await addTicket({ title: 'Fix a typo in the README' })

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import type { OverviewActivity } from '@shared/domain'
-import { groupAgents, mergeActivity, usageByTag } from './overview.ts'
+import { groupAgents, mergeActivity, saved, savings, usageByTag } from './overview.ts'
 
 const t = (costUsd: number | null) =>
   ({ tags: [{ name: 'bug', color: 'red' }], usage: { runs: 1, tokens: 10, costUsd } }) as never
@@ -84,4 +84,59 @@ describe('mergeActivity', () => {
       ['ann', 'commented on and posted a plan for', 'Review', 3],
     ])
   })
+})
+
+test('savings reprice each run at Opus rates and split them by who routed them', () => {
+  const day = (date: number) => ({ start: new Date(2026, 0, date) })
+  const run = (date: number, fields: object) =>
+    ({
+      at: new Date(2026, 0, date, 12).toISOString(),
+      agent: 'claude/sonnet/high',
+      inputTokens: 1_000_000,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costUsd: 3,
+      routingSource: 'default',
+      models: [],
+      ...fields,
+    }) as never
+  const result = savings(
+    [
+      run(1, {}),
+      run(2, { routingSource: 'jev', costUsd: 1, outputTokens: 1_000_000 }),
+      run(2, { agent: 'jev', costUsd: 0.25 }),
+      run(2, { costUsd: null }),
+      run(9, {}),
+    ],
+    [day(1), day(2)],
+  )
+  assert.deepEqual(result.bySource.ultrakanban, { runs: 1, actualUsd: 3, opusUsd: 5, jevUsd: 0 })
+  // Jev's own request costs it what it charged, and isn't repriced.
+  assert.deepEqual(result.bySource.jev, { runs: 1, actualUsd: 1.25, opusUsd: 30, jevUsd: 0.25 })
+  assert.equal(saved(result.total), 35 - 4.25)
+  assert.equal(result.unpriced, 1)
+  // No Opus run reported a cost, so tokens are priced at Opus's list price.
+  assert.deepEqual(result.opusRate, { usdPerMillion: 5, measured: false })
+  assert.deepEqual(
+    result.daily.map((totals) => totals.runs),
+    [1, 1],
+  )
+})
+
+test('savings price tokens at what Opus runs reported they cost', () => {
+  const tokens = { inputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
+  const run = (model: string, costUsd: number) =>
+    ({
+      at: new Date(2026, 0, 1, 12).toISOString(),
+      agent: 'claude/opus/high',
+      ...tokens,
+      costUsd,
+      routingSource: 'default',
+      models: [{ model, ...tokens, costUsd }],
+    }) as never
+  const result = savings([run('claude-opus-5-5', 3), run('claude-haiku-5-5', 0.5)], [{ start: new Date(2026, 0, 1) }])
+  assert.deepEqual(result.opusRate, { usdPerMillion: 3, measured: true })
+  assert.equal(result.total.opusUsd, 6)
+  assert.equal(saved(result.total), 2.5)
 })
