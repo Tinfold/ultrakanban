@@ -1,7 +1,9 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { format } from 'date-fns'
-import { type ReactNode, useEffect, useMemo, useState } from 'react'
+import { ActivityIcon, BotIcon, CoinsIcon, LayoutDashboardIcon, RouteIcon, SquareKanbanIcon } from 'lucide-react'
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import { Link, useLocation } from 'wouter'
 import {
   mergeUsage,
   noUsage,
@@ -12,6 +14,7 @@ import {
   type UsageTotals,
 } from '@shared/domain'
 import { AppHeader } from '@/components/app/AppHeader'
+import { SideTabs } from '@/components/common/SideTabs'
 import { AgentList } from '@/components/overview/AgentList'
 import { BoardTable } from '@/components/overview/BoardTable'
 import { ClaudeUsage } from '@/components/overview/ClaudeUsage'
@@ -39,6 +42,7 @@ import {
   seriesTokens,
   workedByAgent,
 } from '@/lib/overview'
+import { sideTabIds } from '@/lib/side-tabs'
 import { storageKeys } from '@/lib/storage'
 import { cn } from '@/lib/utils'
 
@@ -60,22 +64,38 @@ const TOKEN_SERIES = [
 
 const HOUR_MS = 60 * 60 * 1000
 
-/** Anchors of the parts of the page stats and the jump bar link to. */
-const SECTIONS = {
-  attention: 'needs-attention',
-  agents: 'agents',
-  boards: 'boards',
-  ticketUsage: 'ticket-usage',
-  routing: 'routing',
-  settings: 'model-and-effort',
-  activity: 'activity',
-  timeWorked: 'time-worked',
-  tokens: 'tokens',
-  models: 'models',
-  recent: 'recent-activity',
-} as const
+/** The overview's tabs, in the order the side nav lists them; each has its own URL, `/overview/<id>`. */
+const TABS = [
+  { id: 'summary', label: 'Summary', icon: LayoutDashboardIcon },
+  { id: 'agents', label: 'Agents', icon: BotIcon },
+  { id: 'boards', label: 'Boards', icon: SquareKanbanIcon },
+  { id: 'usage', label: 'Usage', icon: CoinsIcon },
+  { id: 'routing', label: 'Routing', icon: RouteIcon },
+  { id: 'activity', label: 'Activity', icon: ActivityIcon },
+] as const
 
-type SectionId = (typeof SECTIONS)[keyof typeof SECTIONS]
+export type OverviewTab = (typeof TABS)[number]['id']
+
+/** The tab a URL's `:tab` names; Summary for none or one that doesn't exist. */
+function overviewTab(tab: string | undefined): OverviewTab {
+  return TABS.find(({ id }) => id === tab)?.id ?? 'summary'
+}
+
+const tabHref = (tab: OverviewTab) => (tab === 'summary' ? '/overview' : `/overview/${tab}`)
+
+/** Tabs whose numbers don't depend on the 7/14/30-day range, so the range toggle isn't shown on them. */
+const ALL_TIME_TABS: ReadonlySet<OverviewTab> = new Set(['routing'])
+
+const ID_PREFIX = 'overview'
+
+function CountBadge({ count }: { count: number }) {
+  if (!count) return null
+  return (
+    <span className="rounded-full bg-primary px-1.5 text-[11px] font-medium text-primary-foreground tabular-nums">
+      {count}
+    </span>
+  )
+}
 
 interface StatProps {
   label: string
@@ -83,8 +103,8 @@ interface StatProps {
   detail: ReactNode
   /** A second line of detail, if any. */
   more?: ReactNode
-  /** The section that breaks the number down. */
-  target?: SectionId
+  /** The tab that breaks the number down. */
+  target?: OverviewTab
 }
 
 function Stat({ label, value, detail, more, target }: StatProps) {
@@ -98,12 +118,12 @@ function Stat({ label, value, detail, more, target }: StatProps) {
   )
   if (!target) return <div className="rounded-xl border bg-card p-4">{body}</div>
   return (
-    <a
-      href={`#${target}`}
+    <Link
+      href={tabHref(target)}
       className="rounded-xl border bg-card p-4 transition-colors hover:bg-muted/50 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
     >
       {body}
-    </a>
+    </Link>
   )
 }
 
@@ -138,43 +158,12 @@ function ModelTotals({ usage }: { usage: UsageTotals }) {
 
 const tickets = (count: number) => `${count} ${count === 1 ? 'ticket' : 'tickets'}`
 
-function JumpBar({ attention }: { attention: number }) {
-  const links: [SectionId, string, number?][] = [
-    [SECTIONS.attention, 'Needs attention', attention],
-    [SECTIONS.agents, 'Agents'],
-    [SECTIONS.boards, 'Boards'],
-    [SECTIONS.ticketUsage, 'Ticket usage'],
-    [SECTIONS.routing, 'Routing'],
-    [SECTIONS.settings, 'Model and effort'],
-    [SECTIONS.recent, 'Recent activity'],
-  ]
-  return (
-    <nav aria-label="Jump to" className="flex flex-wrap gap-2">
-      {links.map(([id, label, count]) => (
-        <a
-          key={id}
-          href={`#${id}`}
-          className="inline-flex items-center gap-1.5 rounded-full border bg-card px-3 py-1 text-xs transition-colors hover:bg-muted focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
-        >
-          {label}
-          {!!count && (
-            <span className="rounded-full bg-primary px-1.5 text-[11px] font-medium text-primary-foreground tabular-nums">
-              {count}
-            </span>
-          )}
-        </a>
-      ))}
-    </nav>
-  )
-}
-
 function formatMedian(values: number[]) {
   const value = median(values)
   return value === null ? '—' : formatDuration(value)
 }
 
 interface SectionProps {
-  id: SectionId
   title: string
   /** Controls shown next to the title. */
   actions?: ReactNode
@@ -182,9 +171,9 @@ interface SectionProps {
   className?: string
 }
 
-function Section({ id, title, actions, children, className }: SectionProps) {
+function Section({ title, actions, children, className }: SectionProps) {
   return (
-    <section id={id} className={cn('grid scroll-mt-4 grid-cols-1 content-start gap-3', className)}>
+    <section className={cn('grid grid-cols-1 content-start gap-3', className)}>
       <div className="flex min-h-7 flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-medium">{title}</h2>
         {actions && <div className="flex items-center gap-1">{actions}</div>}
@@ -212,7 +201,10 @@ function DiskTotal({ overview: { boards, disk } }: { overview: Overview }) {
   )
 }
 
-export function OverviewPage() {
+export function OverviewPage({ tab: tabParam }: { tab?: string }) {
+  const tab = overviewTab(tabParam)
+  const [, navigate] = useLocation()
+  const main = useRef<HTMLElement>(null)
   const [days, setDays] = useStoredState<OverviewRange>(storageKeys.overviewRange, 14)
   const [usageGrouping, setUsageGrouping] = useState<UsageGrouping>('tickets')
   const { data: overview, error, isPlaceholderData } = useOverview(days)
@@ -220,9 +212,15 @@ export function OverviewPage() {
   const now = useNow()
   const queryClient = useQueryClient()
 
+  const tabLabel = TABS.find(({ id }) => id === tab)!.label
   useEffect(() => {
-    document.title = 'Overview · ultrakanban'
-  }, [])
+    document.title = `${tabLabel} · Overview · ultrakanban`
+  }, [tabLabel])
+
+  // Each tab starts at its top.
+  useEffect(() => {
+    main.current?.scrollTo({ top: 0 })
+  }, [tab])
 
   // A failed refetch keeps the loaded overview: tell the user instead of replacing it.
   useEffect(() => {
@@ -264,6 +262,7 @@ export function OverviewPage() {
   )
 
   let content: ReactNode = null
+  let badges: Partial<Record<OverviewTab, ReactNode>> = {}
   if (overview) {
     const { totals, agents, hiddenAgents } = overview
     // Idle agents that aren't a board's host agent are usually old or misspelled names.
@@ -290,37 +289,28 @@ export function OverviewPage() {
       title: format(day.start, 'EEEE, MMM d'),
     }))
 
-    content = (
-      <div className={cn('grid grid-cols-1 gap-6 transition-opacity', isPlaceholderData && 'opacity-60')}>
-        <JumpBar attention={attention.waiting.length + attention.review.length + attention.stalled.length} />
-
-        {claudeUsage && <ClaudeUsage usage={claudeUsage} now={now} />}
-
+    const statCards = (
+      <>
         <div className="grid grid-cols-2 gap-3 *:last:col-span-2 md:grid-cols-3 md:*:last:col-span-1 xl:grid-cols-5">
           <Stat
             label="Agents working"
             value={totals.activeAgents}
             detail={`${agents.length} ${agents.length === 1 ? 'agent' : 'agents'} listed${waiting ? `, ${waiting} waiting for review` : ''}`}
-            target={SECTIONS.agents}
+            target="agents"
           />
           <Stat
             label="Tickets being worked"
             value={totals.working}
             detail={`${totals.open} open tickets`}
-            target={SECTIONS.agents}
+            target="agents"
           />
-          <Stat
-            label="In review"
-            value={totals.review}
-            detail="Waiting on a pull request"
-            target={SECTIONS.attention}
-          />
-          <Stat label="Completed" value={completed} detail={`Last ${days} days`} target={SECTIONS.activity} />
+          <Stat label="In review" value={totals.review} detail="Waiting on a pull request" />
+          <Stat label="Completed" value={completed} detail={`Last ${days} days`} target="activity" />
           <Stat
             label="Time worked"
             value={formatDuration(workedMs)}
             detail={`Last ${days} days, all agents`}
-            target={SECTIONS.timeWorked}
+            target="activity"
           />
         </div>
 
@@ -339,15 +329,15 @@ export function OverviewPage() {
             label="Backlog"
             value={created === completed ? '±0' : `${created > completed ? '+' : '−'}${Math.abs(created - completed)}`}
             detail={`${created} created, ${completed} completed`}
-            target={SECTIONS.activity}
+            target="activity"
           />
-          <Stat label="Unclaimed" value={unclaimed} detail="Open and unassigned" target={SECTIONS.boards} />
+          <Stat label="Unclaimed" value={unclaimed} detail="Open and unassigned" target="boards" />
           <Stat
             label="Tokens used"
             value={formatTokens(totalTokens(usage))}
             detail={planCost === null ? runs(usage.runs) : `${formatCost(planCost)} estimated, ${runs(usage.runs)}`}
             more={apiKeyCost > 0 && `${formatCost(apiKeyCost)} billed to the API key`}
-            target={SECTIONS.tokens}
+            target="usage"
           />
           <Stat
             label="Cost per completed ticket"
@@ -357,14 +347,150 @@ export function OverviewPage() {
                 ? `Estimated, all runs of ${tickets(completedCost.tickets)}`
                 : 'No completed ticket reported a cost'
             }
-            target={SECTIONS.ticketUsage}
+            target="usage"
           />
         </div>
+      </>
+    )
 
+    const panels: Record<OverviewTab, ReactNode> = {
+      summary: (
+        <>
+          <Section title="Needs attention">
+            <NeedsAttention
+              waiting={attention.waiting}
+              review={attention.review}
+              stalled={attention.stalled}
+              now={now}
+            />
+          </Section>
+          {statCards}
+          {claudeUsage && <ClaudeUsage usage={claudeUsage} now={now} />}
+          <Section title="Recent activity">
+            <RecentActivity activity={overview.recent} />
+          </Section>
+        </>
+      ),
+      agents: (
+        <Section
+          title="Agents"
+          actions={
+            <>
+              {hiddenAgents.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  title={`Cleared: ${hiddenAgents.join(', ')}`}
+                  className="text-muted-foreground"
+                  onClick={() => changeHidden(api.showHiddenAgents())}
+                >
+                  Show {hiddenAgents.length} cleared
+                </Button>
+              )}
+              {stale.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="xs"
+                  title="Clear idle agents that don’t run a board until they do something again"
+                  onClick={() => changeHidden(api.hideAgents(stale))}
+                >
+                  Clear idle
+                </Button>
+              )}
+            </>
+          }
+        >
+          <AgentList
+            agents={agents}
+            boards={overview.boards}
+            worked={worked}
+            now={now}
+            hidden={hiddenAgents.length}
+            onHide={(names) => changeHidden(api.hideAgents(names))}
+          />
+        </Section>
+      ),
+      boards: (
+        <Section title="Boards" actions={<DiskTotal overview={overview} />}>
+          <BoardTable boards={overview.boards} />
+        </Section>
+      ),
+      usage: (
+        <>
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <ColumnChart
+              title="Token usage"
+              description="Tokens agent runs used per day, as reported by the agent loop"
+              series={[...TOKEN_SERIES]}
+              columns={daily.map((day, i) => ({
+                ...columns[i],
+                values: TOKEN_SERIES.map((series) => day.usage[series.key]),
+              }))}
+              formatValue={(value) => value.toLocaleString()}
+              formatTick={formatTokens}
+              minStep={1}
+            />
+            <ColumnChart
+              title="Tokens by model"
+              description="Tokens per day by the model that used them, subagents included"
+              series={models}
+              columns={daily.map((day, i) => ({
+                ...columns[i],
+                values: models.map((series) => seriesTokens(day.usage, series)),
+              }))}
+              formatValue={(value) => value.toLocaleString()}
+              formatTick={formatTokens}
+              minStep={1}
+              footer={models.length > 0 && <ModelTotals usage={usage} />}
+            />
+          </div>
+          <Section
+            title="Ticket usage"
+            actions={
+              <ToggleGroup
+                type="single"
+                variant="outline"
+                size="sm"
+                value={usageGrouping}
+                onValueChange={(value) => value && setUsageGrouping(value as UsageGrouping)}
+                aria-label="Group by"
+              >
+                <ToggleGroupItem value="tickets" className="px-3">
+                  Tickets
+                </ToggleGroupItem>
+                <ToggleGroupItem value="tags" className="px-3">
+                  By tag
+                </ToggleGroupItem>
+              </ToggleGroup>
+            }
+          >
+            <p className="-mt-1 text-xs text-muted-foreground">
+              Tickets agents ran on in the last {days} days, with all their runs
+            </p>
+            <TicketUsageTable tickets={overview.tickets} grouping={usageGrouping} />
+          </Section>
+        </>
+      ),
+      routing: (
+        <>
+          <Section title="Routing">
+            <p className="-mt-1 text-xs text-muted-foreground">
+              Cost per finished ticket had each source picked every ticket’s model and effort, on all boards since
+              routing was recorded
+            </p>
+            <RoutingTable routing={overview.routing} />
+          </Section>
+          <Section title="Model and effort">
+            <p className="-mt-1 text-xs text-muted-foreground">
+              How tickets went at the model and effort that did most of their work, on all boards over all time
+            </p>
+            <SettingsTable settings={overview.settings} />
+          </Section>
+        </>
+      ),
+      activity: (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           <ColumnChart
-            id={SECTIONS.activity}
-            className="scroll-mt-4"
             title="Activity"
             description={`Board events per day, across ${totals.boards} ${totals.boards === 1 ? 'board' : 'boards'}`}
             series={[...ACTIVITY_SERIES]}
@@ -376,8 +502,6 @@ export function OverviewPage() {
             minStep={1}
           />
           <ColumnChart
-            id={SECTIONS.timeWorked}
-            className="scroll-mt-4"
             title="Time worked"
             description="Hours agents spent on claimed tickets per day, until review"
             series={WORK_SERIES}
@@ -385,159 +509,50 @@ export function OverviewPage() {
             formatValue={(hours) => formatDuration(hours * HOUR_MS)}
             formatTick={(hours) => `${+hours.toFixed(1)}h`}
           />
-          <ColumnChart
-            id={SECTIONS.tokens}
-            className="scroll-mt-4"
-            title="Token usage"
-            description="Tokens agent runs used per day, as reported by the agent loop"
-            series={[...TOKEN_SERIES]}
-            columns={daily.map((day, i) => ({
-              ...columns[i],
-              values: TOKEN_SERIES.map((series) => day.usage[series.key]),
-            }))}
-            formatValue={(value) => value.toLocaleString()}
-            formatTick={formatTokens}
-            minStep={1}
-          />
-          <ColumnChart
-            id={SECTIONS.models}
-            className="scroll-mt-4"
-            title="Tokens by model"
-            description="Tokens per day by the model that used them, subagents included"
-            series={models}
-            columns={daily.map((day, i) => ({
-              ...columns[i],
-              values: models.map((series) => seriesTokens(day.usage, series)),
-            }))}
-            formatValue={(value) => value.toLocaleString()}
-            formatTick={formatTokens}
-            minStep={1}
-            footer={models.length > 0 && <ModelTotals usage={usage} />}
-          />
         </div>
+      ),
+    }
 
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
-          <div className="grid grid-cols-1 content-start gap-6">
-            <Section
-              id={SECTIONS.agents}
-              title="Agents"
-              actions={
-                <>
-                  {hiddenAgents.length > 0 && (
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      title={`Cleared: ${hiddenAgents.join(', ')}`}
-                      className="text-muted-foreground"
-                      onClick={() => changeHidden(api.showHiddenAgents())}
-                    >
-                      Show {hiddenAgents.length} cleared
-                    </Button>
-                  )}
-                  {stale.length > 0 && (
-                    <Button
-                      variant="outline"
-                      size="xs"
-                      title="Clear idle agents that don’t run a board until they do something again"
-                      onClick={() => changeHidden(api.hideAgents(stale))}
-                    >
-                      Clear idle
-                    </Button>
-                  )}
-                </>
-              }
-            >
-              <AgentList
-                agents={agents}
-                boards={overview.boards}
-                worked={worked}
-                now={now}
-                hidden={hiddenAgents.length}
-                onHide={(names) => changeHidden(api.hideAgents(names))}
-              />
-            </Section>
-            <Section id={SECTIONS.boards} title="Boards" actions={<DiskTotal overview={overview} />}>
-              <BoardTable boards={overview.boards} />
-            </Section>
-            <Section
-              id={SECTIONS.ticketUsage}
-              title="Ticket usage"
-              actions={
-                <ToggleGroup
-                  type="single"
-                  variant="outline"
-                  size="sm"
-                  value={usageGrouping}
-                  onValueChange={(value) => value && setUsageGrouping(value as UsageGrouping)}
-                  aria-label="Group by"
-                >
-                  <ToggleGroupItem value="tickets" className="px-3">
-                    Tickets
-                  </ToggleGroupItem>
-                  <ToggleGroupItem value="tags" className="px-3">
-                    By tag
-                  </ToggleGroupItem>
-                </ToggleGroup>
-              }
-            >
-              <p className="-mt-1 text-xs text-muted-foreground">
-                Tickets agents ran on in the last {days} days, with all their runs
-              </p>
-              <TicketUsageTable tickets={overview.tickets} grouping={usageGrouping} />
-            </Section>
-            <Section id={SECTIONS.routing} title="Routing">
-              <p className="-mt-1 text-xs text-muted-foreground">
-                Cost per finished ticket had each source picked every ticket’s model and effort, on all boards since
-                routing was recorded
-              </p>
-              <RoutingTable routing={overview.routing} />
-            </Section>
-            <Section id={SECTIONS.settings} title="Model and effort">
-              <p className="-mt-1 text-xs text-muted-foreground">
-                How tickets went at the model and effort that did most of their work, on all boards over all time
-              </p>
-              <SettingsTable settings={overview.settings} />
-            </Section>
-          </div>
-          {/* On wide screens Recent activity takes what's left of the height of the Agents and Boards column
-              beside it, and its list scrolls within that. */}
-          <div className="grid grid-cols-1 content-start gap-6 xl:grid-rows-[auto_minmax(0,1fr)] xl:content-stretch">
-            <Section id={SECTIONS.attention} title="Needs attention">
-              <NeedsAttention
-                waiting={attention.waiting}
-                review={attention.review}
-                stalled={attention.stalled}
-                now={now}
-              />
-            </Section>
-            <Section
-              id={SECTIONS.recent}
-              title="Recent activity"
-              className="xl:grid-rows-[auto_minmax(0,1fr)] xl:content-stretch"
-            >
-              <RecentActivity activity={overview.recent} />
-            </Section>
-          </div>
-        </div>
+    badges = {
+      summary: <CountBadge count={attention.waiting.length + attention.review.length + attention.stalled.length} />,
+      agents: <CountBadge count={totals.activeAgents} />,
+    }
+    content = (
+      <div className={cn('grid grid-cols-1 gap-6 transition-opacity', isPlaceholderData && 'opacity-60')}>
+        {panels[tab]}
       </div>
     )
   } else if (error) {
     content = <p className="text-sm text-muted-foreground">Couldn’t load the overview: {error.message}</p>
   }
 
+  const ids = sideTabIds(ID_PREFIX, tab)
   return (
     <>
       <AppHeader />
-      <main className="flex-1 overflow-y-auto motion-safe:scroll-smooth">
+      <main ref={main} className="flex-1 overflow-y-auto">
         <div className="mx-auto grid max-w-7xl grid-cols-1 gap-5 p-4 sm:p-6">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-h-8 flex-wrap items-center justify-between gap-3">
             <div>
               <h1 className="text-lg font-semibold tracking-tight">Overview</h1>
               <p className="text-sm text-muted-foreground">What’s happening across all boards.</p>
             </div>
-            {range}
+            {!ALL_TIME_TABS.has(tab) && range}
           </div>
-          {content}
+          <div className="flex flex-col gap-5 sm:flex-row sm:gap-6">
+            <SideTabs
+              tabs={TABS}
+              active={tab}
+              onSelect={(id) => navigate(tabHref(id))}
+              idPrefix={ID_PREFIX}
+              label="Overview sections"
+              badges={badges}
+              className="-mx-4 px-4 sm:sticky sm:top-6 sm:mx-0 sm:self-start sm:border-r-0 sm:p-0"
+            />
+            <div id={ids.panel} role="tabpanel" aria-labelledby={ids.tab} className="min-w-0 flex-1">
+              {content}
+            </div>
+          </div>
         </div>
       </main>
     </>
