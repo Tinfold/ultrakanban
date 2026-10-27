@@ -310,7 +310,7 @@ export async function routeClaim(ticket: Ticket): Promise<RoutedSetting | null> 
 }
 
 /**
- * The setting to work an already claimed ticket at, for runs on feedback (`GET /tickets/:id/route`): as `routeClaim`,
+ * The setting to work an already claimed ticket at, for runs on feedback (`POST /tickets/:id/route`): as `routeClaim`,
  * but only on a board whose Jev mode is `on`, so it asks Jev only when the ticket changed since Jev last picked. Null
  * on other boards, without recording anything.
  */

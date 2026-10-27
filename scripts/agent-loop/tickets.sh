@@ -47,9 +47,12 @@ worked on again."
 # board routed it to when it routes with Jev (kept from the claim, so Jev isn't asked again while the ticket doesn't
 # change), else MODEL and EFFORT.
 use_ticket_worker() {
-  local id=$1 model=${2#-} effort=${3#-} routed
+  local id=$1 model=${2#-} effort=${3#-} response routed=
   if [[ -z $model && -z $effort ]]; then
-    routed=$(get "/tickets/$id/route" | jq -r '.routed // empty | "\(.model)\t\(.effort)"') || routed=
+    response=$(post "/tickets/$id/route" '{}')
+    if [[ ${response##*$'\n'} == 200 ]]; then
+      routed=$(jq -r '.routed // empty | "\(.model)\t\(.effort)"' <<<"${response%$'\n'*}") || routed=
+    fi
     if [[ -n $routed ]]; then
       model=${routed%%$'\t'*}
       effort=${routed#*$'\t'}

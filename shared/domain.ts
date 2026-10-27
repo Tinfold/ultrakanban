@@ -741,7 +741,7 @@ export interface RoutingPick {
  * The model and effort a claimed ticket is worked at on a board that routes with Jev (`jevMode` `on`), and the source
  * that won (docs/JEV.md, item 5): the ticket's own setting, else Jev's pick at or above the board's threshold, else the
  * history suggestion when it is built on `HISTORY_MIN_TICKETS` similar tickets, else the board's default. Returned as
- * `routed` by `claim`, `claim-next` and `GET /tickets/:id/route`; the ticket's own `agentModel`/`agentEffort` stay as
+ * `routed` by `claim`, `claim-next` and `POST /tickets/:id/route`; the ticket's own `agentModel`/`agentEffort` stay as
  * they are.
  */
 export interface RoutedSetting extends RoutingPick {

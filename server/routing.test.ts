@@ -323,7 +323,7 @@ describe('routing', () => {
         })
       ).body
     const route = async (ticket: Ticket) =>
-      (await call<{ routed: RoutedSetting | null }>('GET', `/tickets/${ticket.id}/route`)).body.routed
+      (await call<{ routed: RoutedSetting | null }>('POST', `/tickets/${ticket.id}/route`)).body.routed
     /** Three finished tickets worked at sonnet/low, so the history suggestion picks it for tickets like them. */
     async function history() {
       for (const index of [0, 1, 2]) {
