@@ -78,16 +78,13 @@ describe('routing a ticket with Jev', () => {
       },
     ])
     assert.deepEqual(
-      questions.map((question: { id: string; type: string }) => `${question.id}:${question.type}`),
+      Object.entries(questions).map(([id, question]) => `${id}:${(question as { type: string }).type}`),
       ['model:choice', 'effort:score', 'fully_specified:noul'],
     )
+    assert.deepEqual(Object.keys(questions.model.criteria), ['haiku', 'sonnet', 'opus'])
+    assert.ok(Object.values<string>(questions.model.criteria).every(Boolean))
     assert.deepEqual(
-      questions[0].options.map((option: { name: string }) => option.name),
-      ['haiku', 'sonnet', 'opus'],
-    )
-    assert.ok(questions[0].options.every((option: { description?: string }) => option.description))
-    assert.deepEqual(
-      questions[1].levels.map((level: { name: string }) => level.name),
+      questions.effort.criteria.map((level: string) => level.split(':')[0]),
       [...AGENT_EFFORTS],
     )
   })

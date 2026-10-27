@@ -470,6 +470,10 @@ export const MIGRATIONS = [
   ALTER TABLE ticket_routes ADD COLUMN content_key TEXT;
   `,
   `
+  -- How Jev's pick and the history suggestion combine (see BoardSummary.jevCombine; JEV_DEFAULTS when NULL).
+  ALTER TABLE boards ADD COLUMN jev_combine TEXT;
+  `,
+  `
   -- The most turns a run of the board's agent may take (see BoardSummary.agentMaxTurns); NULL for no limit.
   ALTER TABLE boards ADD COLUMN agent_max_turns INTEGER;
   `,

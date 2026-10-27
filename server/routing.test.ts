@@ -142,6 +142,18 @@ describe('routing', () => {
     )
   })
 
+  test('doesn’t count Jev’s requests as runs, nor Jev as an agent', async () => {
+    await routeWithJev()
+    const ticket = await addTicket({ title: 'Only claimed' })
+    await claim(ticket)
+    const { body: claimed } = await call<Ticket>('GET', `/tickets/${ticket.id}`)
+    assert.equal(claimed.usage.runs, 0)
+    assert.equal(claimed.usage.tokens, 1200)
+    const { body: overview } = await call<Overview>('GET', '/overview?days=7')
+    assert.equal(overview.tickets.find((entry) => entry.id === ticket.id)?.usage.runs, 0)
+    assert.ok(!overview.agents.some((agent) => agent.name === JEV_AGENT))
+  })
+
   test('a failing Jev doesn’t fail the claim, and boards without Jev never ask it', async () => {
     await routeWithJev()
     jev.status = 500
@@ -311,7 +323,7 @@ describe('routing', () => {
         })
       ).body
     const route = async (ticket: Ticket) =>
-      (await call<{ routed: RoutedSetting | null }>('GET', `/tickets/${ticket.id}/route`)).body.routed
+      (await call<{ routed: RoutedSetting | null }>('POST', `/tickets/${ticket.id}/route`)).body.routed
     /** Three finished tickets worked at sonnet/low, so the history suggestion picks it for tickets like them. */
     async function history() {
       for (const index of [0, 1, 2]) {
@@ -383,6 +395,98 @@ describe('routing', () => {
         effort: 'medium',
         source: 'default',
         confidence: null,
+      })
+    })
+
+    describe('combining Jev’s pick with the history suggestion', () => {
+      /** The route of a ticket like the history suggestion's (sonnet/low) when Jev picks `model` at `effort`. */
+      const combined = async (title: string, model: string, effort: AgentEffort, confidence = 0.9) => {
+        jev.answers = picks(model, effort, confidence)
+        return (await claimed(await addTicket({ title: `Fix login bug: ${title}`, tags: ['bug'] }))).routed
+      }
+
+      test('jev-only never uses the history suggestion', async () => {
+        await history()
+        await routeOn({ jevCombine: 'jev-only' })
+        assert.deepEqual(await combined('below', 'haiku', 'low', 0.5), {
+          model: 'opus',
+          effort: 'medium',
+          source: 'default',
+          confidence: null,
+        })
+        assert.deepEqual(await combined('above', 'fable', 'high'), {
+          model: 'fable',
+          effort: 'high',
+          source: 'jev',
+          confidence: 0.9,
+        })
+      })
+
+      test('jev-first, the default, uses Jev’s pick over the history suggestion', async () => {
+        await history()
+        await routeOn({ jevCombine: 'jev-first' })
+        assert.deepEqual(await combined('above', 'fable', 'high'), {
+          model: 'fable',
+          effort: 'high',
+          source: 'jev',
+          confidence: 0.9,
+        })
+        assert.equal((await combined('below', 'fable', 'high', 0.5))?.source, 'history')
+      })
+
+      test('higher takes the more capable model and effort of the two', async () => {
+        await history()
+        await routeOn({ jevCombine: 'higher' })
+        // The model decides the source: Jev's here, the history suggestion's below.
+        assert.deepEqual(await combined('dearer model', 'opus', 'low'), {
+          model: 'opus',
+          effort: 'low',
+          source: 'jev',
+          confidence: 0.9,
+        })
+        const mixed = await addTicket({ title: 'Fix login bug: mixed', tags: ['bug'] })
+        jev.answers = picks('haiku', 'high')
+        assert.deepEqual((await claimed(mixed)).routed, {
+          model: 'sonnet',
+          effort: 'high',
+          source: 'history',
+          confidence: null,
+        })
+        assert.equal((await run(mixed, 'claude/sonnet/high')).routing?.source, 'history')
+        // On the same model, the effort decides it.
+        assert.equal((await combined('same model', 'sonnet', 'medium'))?.source, 'jev')
+        // With only one pick, it is used.
+        assert.equal((await combined('below', 'haiku', 'low', 0.5))?.source, 'history')
+        jev.answers = picks('fable', 'max')
+        assert.equal((await claimed(await addTicket({ title: 'Write release notes' }))).routed?.source, 'jev')
+      })
+
+      test('lower takes the less capable model and effort of the two, within the board’s caps', async () => {
+        await history()
+        await routeOn({ jevCombine: 'lower' })
+        assert.deepEqual(await combined('dearer', 'opus', 'high'), {
+          model: 'sonnet',
+          effort: 'low',
+          source: 'history',
+          confidence: null,
+        })
+        assert.deepEqual(await combined('cheaper model', 'haiku', 'high'), {
+          model: 'haiku',
+          effort: 'low',
+          source: 'jev',
+          confidence: 0.9,
+        })
+        // A tie goes to Jev.
+        assert.equal((await combined('same', 'sonnet', 'low'))?.source, 'jev')
+
+        // Picks outside the board's models are left out before combining.
+        await routeOn({ jevCombine: 'lower', jevModels: ['opus', 'fable'] })
+        assert.deepEqual(await combined('outside', 'opus', 'high'), {
+          model: 'opus',
+          effort: 'high',
+          source: 'jev',
+          confidence: 0.9,
+        })
       })
     })
 
@@ -466,10 +570,7 @@ describe('routing', () => {
       jev.answers = picks('sonnet', 'low')
       const ticket = await addTicket({ title: 'Fix login bug again', tags: ['bug'] })
       const body = await claimed(ticket)
-      assert.deepEqual(
-        jev.calls[0].body.questions[0].options.map((option: { name: string }) => option.name),
-        ['opus', 'haiku'],
-      )
+      assert.deepEqual(Object.keys(jev.calls[0].body.questions.model.criteria), ['opus', 'haiku'])
       assert.equal(body.routed?.source, 'default')
     })
 

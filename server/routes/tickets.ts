@@ -73,7 +73,8 @@ const tooLargeMessage = `Attachments can be at most ${MAX_ATTACHMENT_BYTES / 102
 export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles, notifier }: AppServices) =>
   new Hono()
     .get('/:ticketId', (c) => c.json(getTicket(c.req.param('ticketId'))))
-    .get('/:ticketId/route', async (c) => c.json({ routed: await routeRun(getTicket(c.req.param('ticketId'))) }))
+    // A POST, though it reads: it may ask Jev, a paid request, and keep its pick.
+    .post('/:ticketId/route', async (c) => c.json({ routed: await routeRun(getTicket(c.req.param('ticketId'))) }))
     .patch('/:ticketId', async (c) => {
       const input = await readJson(c, updateTicketSchema)
       const ticket = transaction(() => updateTicket(c.req.param('ticketId'), input, actorOf(c)))

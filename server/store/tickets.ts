@@ -10,6 +10,7 @@ import {
   type FailingCheck,
   IN_PROGRESS_COLUMN,
   isWeeklyLimit,
+  JEV_AGENT,
   parsePullRequestUrl,
   PRIORITIES,
   type Priority,
@@ -135,7 +136,7 @@ const SELECT_TICKETS = `
     (SELECT group_concat(tag_id) FROM ticket_tags WHERE ticket_id = t.id) AS tag_ids,
     (SELECT count(*) FROM activity WHERE ticket_id = t.id AND type = 'comment') AS comment_count,
     (SELECT count(*) FROM attachments WHERE ticket_id = t.id) AS attachment_count,
-    (SELECT count(*) FROM token_usage WHERE ticket_id = t.id) AS usage_runs,
+    (SELECT count(*) FROM token_usage WHERE ticket_id = t.id AND agent <> '${JEV_AGENT}') AS usage_runs,
     (SELECT sum(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) FROM token_usage
       WHERE ticket_id = t.id) AS usage_tokens,
     (SELECT sum(cost_usd) FROM token_usage WHERE ticket_id = t.id) AS usage_cost,

@@ -16,7 +16,7 @@ function countedDetail(source: RoutingSourceStats) {
 }
 
 /**
- * Cost per finished ticket of each routing source (Jev's picks, dry run or not, the history suggestion and the
+ * Cost per finished ticket of each routing source (Jev's picks, dry run or not, the similar-tickets suggestion and the
  * board default), on the tickets claimed since routing was recorded.
  */
 export function RoutingTable({ routing }: { routing: RoutingComparison }) {

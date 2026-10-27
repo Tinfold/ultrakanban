@@ -336,8 +336,16 @@ export interface Attachment {
 export const JEV_MODES = ['dry-run', 'on'] as const
 export type JevMode = (typeof JEV_MODES)[number]
 
+/**
+ * How a board combines Jev's pick with the history suggestion (see `BoardSummary.jevCombine`): `jev-only` never uses
+ * the history suggestion, `jev-first` uses it only when Jev has no pick above the threshold, and `higher` / `lower`
+ * take the more or the less capable model and effort of the two when both have a pick.
+ */
+export const JEV_COMBINES = ['jev-only', 'jev-first', 'higher', 'lower'] as const
+export type JevCombine = (typeof JEV_COMBINES)[number]
+
 /** Jev routing settings used when a board doesn't set its own. */
-export const JEV_DEFAULTS = { threshold: 0.7, mode: 'dry-run' as JevMode }
+export const JEV_DEFAULTS = { threshold: 0.7, mode: 'dry-run' as JevMode, combine: 'jev-first' as JevCombine }
 
 export interface BoardSummary {
   id: string
@@ -430,6 +438,8 @@ export interface BoardSummary {
   jevThreshold: number | null
   /** Whether Jev may only pick a cheaper setting than the board's default, never a dearer one. */
   jevOnlyLower: boolean
+  /** How Jev's pick and the history suggestion combine; `JEV_DEFAULTS.combine` when not set. */
+  jevCombine: JevCombine | null
   /**
    * `dry-run` records Jev's pick without using it, `on` uses it. Set to `dry-run` when Jev is first switched on; null
    * until then.
@@ -733,7 +743,7 @@ export interface RoutingPick {
  * The model and effort a claimed ticket is worked at on a board that routes with Jev (`jevMode` `on`), and the source
  * that won (docs/JEV.md, item 5): the ticket's own setting, else Jev's pick at or above the board's threshold, else the
  * history suggestion when it is built on `HISTORY_MIN_TICKETS` similar tickets, else the board's default. Returned as
- * `routed` by `claim`, `claim-next` and `GET /tickets/:id/route`; the ticket's own `agentModel`/`agentEffort` stay as
+ * `routed` by `claim`, `claim-next` and `POST /tickets/:id/route`; the ticket's own `agentModel`/`agentEffort` stay as
  * they are.
  */
 export interface RoutedSetting extends RoutingPick {
@@ -940,10 +950,14 @@ function addCounts(totals: UsageCounts, counts: TokenCounts & { costUsd: number 
   totals.runs += runs
 }
 
-/** Adds a run's usage to `totals` and returns them. */
-export function addUsage(totals: UsageTotals, run: TokenCounts & { costUsd: number | null; models: ModelUsage[] }) {
-  addCounts(totals, run, 1)
-  for (const model of run.models) addCounts((totals.models[model.model] ??= noCounts()), model, 1)
+/** Adds a run's usage to `totals` and returns them. A Jev request (`JEV_AGENT`) adds its tokens and cost, not a run. */
+export function addUsage(
+  totals: UsageTotals,
+  run: TokenCounts & { agent?: string; costUsd: number | null; models: ModelUsage[] },
+) {
+  const runs = run.agent === JEV_AGENT ? 0 : 1
+  addCounts(totals, run, runs)
+  for (const model of run.models) addCounts((totals.models[model.model] ??= noCounts()), model, runs)
   return totals
 }
 

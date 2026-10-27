@@ -6,6 +6,7 @@ import {
   type BoardDetail,
   type BoardSummary,
   JEV_DEFAULTS,
+  type JevCombine,
   type JevMode,
   type TicketSize,
 } from '../../shared/domain.ts'
@@ -46,6 +47,7 @@ interface BoardRow {
   jev_models: string | null
   jev_threshold: number | null
   jev_only_lower: number
+  jev_combine: JevCombine | null
   jev_mode: JevMode | null
   ticket_count: number
   waiting_count: number
@@ -98,6 +100,7 @@ const toBoard = (row: BoardRow): BoardSummary => ({
   jevModels: row.jev_models === null ? null : (JSON.parse(row.jev_models) as AgentModelAlias[]),
   jevThreshold: row.jev_threshold,
   jevOnlyLower: row.jev_only_lower === 1,
+  jevCombine: row.jev_combine,
   jevMode: row.jev_mode,
   ticketCount: row.ticket_count,
   waitingCount: row.waiting_count,
@@ -167,6 +170,7 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     jevModels,
     jevThreshold,
     jevOnlyLower,
+    jevCombine,
     jevMode,
   } = input
   return updateBoard(id, {
@@ -193,6 +197,7 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     jevModels,
     jevThreshold,
     jevOnlyLower,
+    jevCombine,
     jevMode,
   })
 }
@@ -228,10 +233,12 @@ export function updateBoard(id: string, input: UpdateBoardInput): BoardSummary {
     jev_models: input.jevModels === undefined ? undefined : input.jevModels && JSON.stringify(input.jevModels),
     jev_threshold: input.jevThreshold,
     jev_only_lower: input.jevOnlyLower === undefined ? undefined : Number(input.jevOnlyLower),
-    jev_mode: input.jevMode,
+    jev_combine: input.jevCombine,
+    // null is what a board that has never had Jev on reads back, so sending its settings back leaves the mode alone.
+    jev_mode: input.jevMode ?? undefined,
   })
   // A board that switches Jev on for the first time starts in dry run: it records Jev's picks without using them.
-  if (input.jevEnabled && input.jevMode === undefined) {
+  if (input.jevEnabled && !input.jevMode) {
     sql.run('UPDATE boards SET jev_mode = ? WHERE id = ? AND jev_mode IS NULL', JEV_DEFAULTS.mode, id)
   }
   const board = getBoard(id)
