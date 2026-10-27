@@ -57,6 +57,8 @@ export const containing = new Set<string>()
 let afterMerge: (key: string) => void = () => {}
 export const setAfterMerge = (fn: typeof afterMerge) => void (afterMerge = fn)
 export const merges: string[] = []
+/** Pull requests the fake GitHub was asked to read, as `owner/name#number`. */
+export const pullRequestReads: string[] = []
 /** Comments the fake GitHub was asked to post, as `owner/name#number: body`; a body of "fail" is turned down. */
 export const prComments: string[] = []
 export const pull = (repo: string, number: number) => {
@@ -135,7 +137,10 @@ const pullRequests = createPullRequestSync({
     github.created.push(input)
     return { repo, url: `https://github.com/${repo}` }
   },
-  getPullRequest: async (repo, number) => ({ headRepo: repo, ...pull(repo, number) }),
+  async getPullRequest(repo, number) {
+    pullRequestReads.push(`${repo}#${number}`)
+    return { headRepo: repo, ...pull(repo, number) }
+  },
   listPullRequestFiles: async (repo, number) => pull(repo, number).files,
   containsCommit: async (_repo, head, base) => containing.has(`${head}>${base}`),
   mergeMethods: async () => ['merge', 'squash'],

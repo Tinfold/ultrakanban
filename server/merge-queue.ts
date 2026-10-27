@@ -449,6 +449,8 @@ export function createMergeQueue(
       const ready = new Set<string>()
       findings.clear()
       for (const item of items) {
+        // The plan lists local pull requests too, as ones "merge all" skips; auto-merge leaves them out altogether.
+        if (parseLocalPullRequestUrl(item.url)) continue
         const ticket = getTicket(item.ticketId)
         const pullRequest = pullRequestOf.get(item.ticketId) ?? null
         const billingOnly = !item.skip && checklistDone(ticket) && (await onlyBillingFails(ticket, pullRequest))
@@ -484,12 +486,18 @@ export function createMergeQueue(
     })
   }
 
-  /** The review column's tickets with a pull request that isn't merged or closed, going by what the board knows. */
+  /**
+   * The review column's tickets with a GitHub pull request that isn't merged or closed, going by what the board knows.
+   * Local pull requests aren't on GitHub, and are merged only on their page.
+   */
   function reviewTickets(boardId: string) {
     const reviewColumnId = getBoard(boardId).reviewColumnId
     if (!reviewColumnId) return []
     return listTickets(boardId, { column: reviewColumnId }).filter(
-      (ticket) => ticket.pullRequest && !['merged', 'closed'].includes(ticket.pullRequest.state),
+      (ticket) =>
+        ticket.pullRequest &&
+        !parseLocalPullRequestUrl(ticket.pullRequest.url) &&
+        !['merged', 'closed'].includes(ticket.pullRequest.state),
     )
   }
 

@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { beforeEach, describe, test } from 'node:test'
 import { type ApiErrorBody, type MergePlan, type MergeRun, type Ticket } from '../shared/domain.ts'
 import { type GitHubPullRequest } from './github.ts'
+import { transaction } from './db.ts'
+import { openLocalPullRequest } from './store/local-pull-requests.ts'
 import {
   addTicket,
   annotations,
@@ -11,9 +13,11 @@ import {
   checkRuns,
   containing,
   deletedBranches,
+  github,
   merges,
   mergeQueue,
   pull,
+  pullRequestReads,
   pullRequestStatuses,
   pulls,
   setAfterMerge,
@@ -296,6 +300,53 @@ describe('merging all reviewed pull requests', () => {
     assert.equal(await waitOf(mixed), 'Checks failing: job 1, job 2')
     assert.equal(await waitOf(running), 'Checks failing: job 1, job 2, job 3')
     assert.equal(await waitOf(newCommit), 'Checks failing: job 1')
+  })
+
+  test('auto-merge and ready notifications leave local pull requests out, asking GitHub nothing', async () => {
+    await call('PATCH', `/boards/${boardId}`, { localRepoPath: '/repos/app', notifyUrl: 'https://ntfy.sh/merging' })
+    const local = await addTicket({ title: 'Local', column: 'Review' })
+    const input = { head: 'feature', base: 'main', title: 'Local', body: '' }
+    transaction(() => openLocalPullRequest(local.id, input, 'claude/opus/high'))
+    // A GitHub repository named like the local one, with a ready pull request of the same number.
+    pulls.set('local/app#1', {
+      state: 'open',
+      merged: false,
+      draft: false,
+      title: 'Not this one',
+      mergeable: true,
+      mergeableState: 'clean',
+      base: 'main',
+      head: 'feature',
+      headSha: 'sha-elsewhere',
+      files: [],
+    })
+    const waitOf = async () => (await call<Ticket>('GET', `/tickets/${local.id}`)).body.autoMergeWait
+    pullRequestReads.length = 0
+
+    assert.deepEqual(await mergeQueue.notifyReady(boardId), [])
+
+    await call('PATCH', `/boards/${boardId}`, { autoMerge: true })
+    github.auth = null
+    try {
+      await mergeQueue.autoMergeAll()
+      assert.equal(await waitOf(), null, "no GitHub token isn't a reason it waits")
+    } finally {
+      github.auth = 'env'
+    }
+
+    await inReview(2)
+    await mergeQueue.autoMergeAll()
+    assert.deepEqual(merges, ['acme/app#2:merge'])
+    assert.equal(await waitOf(), null)
+    const { body: run } = await call<MergeRun>('GET', `/boards/${boardId}/merge-run`)
+    assert.deepEqual(
+      run.steps.map((step) => step.number),
+      [2],
+    )
+    assert.deepEqual(
+      pullRequestReads.filter((read) => read.startsWith('local/')),
+      [],
+    )
   })
 
   describe('deleting branches after merge', () => {
