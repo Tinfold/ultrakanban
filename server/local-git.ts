@@ -26,9 +26,11 @@ const FALLBACK_IDENTITY = {
   GIT_COMMITTER_EMAIL: 'ultrakanban@localhost',
 }
 
+/** Runs git. Paths in what it writes are quoted only when they must be (see `quotePath`), whatever its config says. */
 function run(cwd: string, args: string[], env: NodeJS.ProcessEnv = gitEnv()): Promise<GitResult> {
   return new Promise((resolve, reject) => {
-    execFile('git', args, { cwd, env, maxBuffer: 256 * 1024 * 1024 }, (error, stdout, stderr) => {
+    const argv = ['-c', 'core.quotePath=false', ...args]
+    execFile('git', argv, { cwd, env, maxBuffer: 256 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error && typeof error.code !== 'number') return reject(error)
       resolve({ code: error ? (error.code as number) : 0, stdout, stderr })
     })
@@ -185,15 +187,49 @@ function parseFilePatch(lines: string[]) {
   return { hunks, binary }
 }
 
-/** Parses `git diff` output, given the files it is about in the same order (from `--name-status`). */
+const ESCAPES: Record<string, string> = {
+  '\x07': '\\a',
+  '\b': '\\b',
+  '\t': '\\t',
+  '\n': '\\n',
+  '\v': '\\v',
+  '\f': '\\f',
+  '\r': '\\r',
+  '"': '\\"',
+  '\\': '\\\\',
+}
+
+/**
+ * A path as git writes it in a patch with `core.quotePath` off (see `run`): as it is, unless it has a control
+ * character, `"` or `\`, which are escaped C style within double quotes.
+ */
+function quotePath(path: string) {
+  const escape = (char: string) =>
+    ESCAPES[char] ?? (char < ' ' || char === '\x7f' ? `\\${char.charCodeAt(0).toString(8).padStart(3, '0')}` : char)
+  const quoted = [...path].map(escape).join('')
+  return quoted === path ? path : `"${quoted}"`
+}
+
+/**
+ * Parses `git diff` output, given the files it is about (from `--name-status`). Each file's part of it is found by the
+ * paths in its `diff --git` line, not by order: a file that changes type, turning into a symlink say, has two parts,
+ * its deletion and its creation, and gets the hunks of both.
+ */
 export function parseDiff(patch: string, files: Pick<DiffFile, 'path' | 'oldPath' | 'status'>[]): DiffFile[] {
-  const parts: string[][] = []
+  const parts = new Map<string, string[][]>()
+  let part: string[] | null = null
   for (const line of patch.split('\n')) {
-    if (line.startsWith('diff --git ')) parts.push([])
-    parts.at(-1)?.push(line)
+    if (line.startsWith('diff --git ')) {
+      part = []
+      parts.set(line, [...(parts.get(line) ?? []), part])
+    }
+    part?.push(line)
   }
-  return files.map((file, index) => {
-    const { hunks, binary } = parseFilePatch(parts[index] ?? [])
+  return files.map((file) => {
+    const header = `diff --git ${quotePath(`a/${file.oldPath ?? file.path}`)} ${quotePath(`b/${file.path}`)}`
+    const patches = (parts.get(header) ?? []).map(parseFilePatch)
+    const hunks = patches.flatMap((patch) => patch.hunks)
+    const binary = !hunks.length && patches.some((patch) => patch.binary)
     const count = (type: string) => hunks.reduce((sum, h) => sum + h.lines.filter((l) => l.type === type).length, 0)
     return { ...file, binary, additions: count('add'), deletions: count('delete'), hunks }
   })

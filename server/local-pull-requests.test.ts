@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, test } from 'node:test'
 import type {
   Activity,
   ApiErrorBody,
+  DiffFile,
   LocalCommit,
   LocalPullRequest,
   LocalPullRequestComment,
@@ -239,6 +240,39 @@ describe('local pull requests', () => {
       binary.files.map((file) => [file.path, file.binary, file.hunks]),
       [['image.bin', true, []]],
     )
+  })
+
+  test('the diff gives each file its own hunks, after a file turned into a symlink and with quoted paths', async () => {
+    git(work, 'checkout', '-q', '-b', 'feature')
+    rmSync(join(work, 'README.md'))
+    symlinkSync('target.txt', join(work, 'README.md'))
+    git(work, 'add', 'README.md')
+    git(work, 'mv', 'src/main.ts', 'src/"main".ts')
+    commit(work, 'Symlink', {
+      'old.txt': 'new\n',
+      'src/"main".ts': lines(20, { 3: 'three' }),
+      'tab\there.txt': 'tab\n',
+    })
+    git(work, 'push', '-q', 'origin', 'feature')
+    await open({ head: 'feature' })
+
+    const { body: diff } = await call<LocalPullRequestDiff>('GET', pr('/1/diff'))
+    const changes = (file: DiffFile) =>
+      file.hunks.flatMap((hunk) => hunk.lines.filter((l) => l.type !== 'context').map((l) => `${l.type} ${l.text}`))
+    assert.deepEqual(
+      diff.files.map((file) => [file.path, file.status, file.oldPath, file.additions, file.deletions, changes(file)]),
+      [
+        // Its deletion as a file and its creation as a symlink.
+        ['README.md', 'modified', null, 1, 1, ['delete # App', 'add target.txt']],
+        ['old.txt', 'modified', null, 1, 1, ['delete old', 'add new']],
+        ['src/"main".ts', 'renamed', 'src/main.ts', 1, 1, ['delete line 3', 'add three']],
+        ['tab\there.txt', 'added', null, 1, 0, ['add tab']],
+      ],
+    )
+    assert.deepEqual(diff.files[2].hunks[0].lines.slice(2, 4), [
+      { type: 'delete', oldLine: 3, newLine: null, text: 'line 3' },
+      { type: 'add', oldLine: null, newLine: 3, text: 'three' },
+    ])
   })
 
   test('comments, general or inline, wake the agent unless it wrote them', async () => {
