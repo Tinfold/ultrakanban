@@ -108,7 +108,7 @@ def clip($n): if length > $n then .[:($n - 1)] + "…" else . end;
 | ($steps | length) as $count
 | {agent: $agent, outcome: $outcome, exitCode: $code, durationMs: $duration,
    turns: (.result.num_turns // .turns // null),
-   tokens: ($usage | objects | .inputTokens + .outputTokens + .cacheReadTokens + .cacheWriteTokens) // null,
+   tokens: (($usage | objects | .inputTokens + .outputTokens + .cacheReadTokens + .cacheWriteTokens) // null),
    costUsd: (($usage | objects | .costUsd) // null), apiKey: $apiKey,
    message: (((.result.result // .text // (.output // [] | join("\n"))) | strings | select(test("\\S"))) // $errors
      | clip(4000)),
