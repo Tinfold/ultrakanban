@@ -399,6 +399,31 @@ const MIGRATIONS = [
   ALTER TABLE boards ADD COLUMN agent_conflict_concurrency INTEGER;
   `,
   `
+  -- Whether auto-merge goes ahead when the only failing checks failed because of billing (see BoardSummary).
+  ALTER TABLE boards ADD COLUMN ignore_billing_failures INTEGER NOT NULL DEFAULT 0;
+  `,
+  `
+  -- The credits the Claude account can spend on usage besides its plan's limits (see ClaudeUsageCredit), as JSON.
+  ALTER TABLE claude_usage ADD COLUMN credits TEXT NOT NULL DEFAULT '[]';
+  `,
+  `
+  -- Whether agents go on claiming once a Claude usage limit is used up, on usage credits (see ClaudeUsageReserve).
+  ALTER TABLE claude_usage ADD COLUMN usage_credits INTEGER NOT NULL DEFAULT 0;
+  -- Credits now say their kind; the supervisor's next report fills them in again.
+  UPDATE claude_usage SET credits = '[]';
+  `,
+  `
+  -- Agents going on on their API key once Claude usage runs out (see AgentApiKey): whether they may, at most how many
+  -- dollars a run and a calendar month may spend, and whether the agents last reported having a key.
+  ALTER TABLE claude_usage ADD COLUMN api_key_fallback INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE claude_usage ADD COLUMN api_key_run_budget_usd REAL NOT NULL DEFAULT 5;
+  ALTER TABLE claude_usage ADD COLUMN api_key_monthly_budget_usd REAL;
+  ALTER TABLE setup ADD COLUMN agents_api_key INTEGER NOT NULL DEFAULT 0;
+  -- Whether a run went on the agents' API key, so its cost was billed rather than estimated.
+  ALTER TABLE token_usage ADD COLUMN api_key INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE run_records ADD COLUMN api_key INTEGER NOT NULL DEFAULT 0;
+  `,
+  `
   -- Path of a git repository on the host the board works on instead of a GitHub one (see BoardSummary).
   ALTER TABLE boards ADD COLUMN local_repo_path TEXT;
   `,
@@ -439,31 +464,6 @@ const MIGRATIONS = [
     updated_at TEXT NOT NULL
   );
   CREATE INDEX local_pull_request_comments_pull_request ON local_pull_request_comments(pull_request_id, created_at);
-  `,
-  `
-  -- Whether auto-merge goes ahead when the only failing checks failed because of billing (see BoardSummary).
-  ALTER TABLE boards ADD COLUMN ignore_billing_failures INTEGER NOT NULL DEFAULT 0;
-  `,
-  `
-  -- The credits the Claude account can spend on usage besides its plan's limits (see ClaudeUsageCredit), as JSON.
-  ALTER TABLE claude_usage ADD COLUMN credits TEXT NOT NULL DEFAULT '[]';
-  `,
-  `
-  -- Whether agents go on claiming once a Claude usage limit is used up, on usage credits (see ClaudeUsageReserve).
-  ALTER TABLE claude_usage ADD COLUMN usage_credits INTEGER NOT NULL DEFAULT 0;
-  -- Credits now say their kind; the supervisor's next report fills them in again.
-  UPDATE claude_usage SET credits = '[]';
-  `,
-  `
-  -- Agents going on on their API key once Claude usage runs out (see AgentApiKey): whether they may, at most how many
-  -- dollars a run and a calendar month may spend, and whether the agents last reported having a key.
-  ALTER TABLE claude_usage ADD COLUMN api_key_fallback INTEGER NOT NULL DEFAULT 0;
-  ALTER TABLE claude_usage ADD COLUMN api_key_run_budget_usd REAL NOT NULL DEFAULT 5;
-  ALTER TABLE claude_usage ADD COLUMN api_key_monthly_budget_usd REAL;
-  ALTER TABLE setup ADD COLUMN agents_api_key INTEGER NOT NULL DEFAULT 0;
-  -- Whether a run went on the agents' API key, so its cost was billed rather than estimated.
-  ALTER TABLE token_usage ADD COLUMN api_key INTEGER NOT NULL DEFAULT 0;
-  ALTER TABLE run_records ADD COLUMN api_key INTEGER NOT NULL DEFAULT 0;
   `,
 ]
 
