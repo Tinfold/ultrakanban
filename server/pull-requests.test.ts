@@ -303,6 +303,8 @@ describe('pull request workflow', () => {
     for (const agentConflictConcurrency of [-1, 1.5, AGENT_MAX_CONCURRENCY + 1, '2']) {
       assert.equal((await call('PATCH', `/boards/${boardId}`, { agentConflictConcurrency })).status, 400)
     }
+    assert.equal((await call('PATCH', `/boards/${boardId}`, { agentConflictModel: 'opus high' })).status, 400)
+    assert.equal((await call('PATCH', `/boards/${boardId}`, { agentCiEffort: 'extreme' })).status, 400)
     assert.equal((await call('PATCH', `/boards/${boardId}`, { agentBacklog: 'yes' })).status, 400)
     assert.equal((await call('PATCH', `/boards/${boardId}`, { agentAllSkills: 1 })).status, 400)
     assert.equal((await call('PATCH', `/boards/${boardId}`, { agentDocker: null })).status, 400)
@@ -335,6 +337,27 @@ describe('pull request workflow', () => {
     assert.equal(agentWorkerName(on), 'claude-2/claude-sonnet-5/xhigh')
     const { body: boards } = await call<BoardSummary[]>('GET', '/boards')
     assert.ok(boards.some((board) => board.id === boardId && board.agentEnabled))
+
+    // Fix runs' model and effort: null (sonnet at medium) until set, each on its own.
+    assert.deepEqual(
+      [on.agentConflictModel, on.agentConflictEffort, on.agentCiModel, on.agentCiEffort],
+      [null, null, null, null],
+    )
+    const { body: fixes } = await call<BoardSummary>('PATCH', `/boards/${boardId}`, {
+      agentConflictModel: 'haiku',
+      agentConflictEffort: 'low',
+      agentCiModel: 'claude-sonnet-5-5',
+    })
+    assert.deepEqual(
+      [fixes.agentConflictModel, fixes.agentConflictEffort, fixes.agentCiModel, fixes.agentCiEffort],
+      ['haiku', 'low', 'claude-sonnet-5-5', null],
+    )
+    const { body: unset } = await call<BoardSummary>('PATCH', `/boards/${boardId}`, {
+      agentConflictModel: null,
+      agentConflictEffort: null,
+      agentCiModel: null,
+    })
+    assert.deepEqual([unset.agentConflictModel, unset.agentConflictEffort, unset.agentCiModel], [null, null, null])
 
     // Models that an Anthropic-compatible endpoint serves instead of Claude: Ollama's tags, OpenRouter's providers.
     for (const agentModel of ['qwen3-coder:30b', 'openai/gpt-5', 'claude-opus-5-5[1m]']) {
@@ -372,6 +395,38 @@ describe('pull request workflow', () => {
       ],
       [null, false, null, null, null, null, null, false, false, false],
     )
+  })
+
+  test('a board has a GitHub repository or a local one, not both', async () => {
+    const patch = (input: object) => call<BoardSummary>('PATCH', `/boards/${boardId}`, input)
+    const repos = (board: BoardSummary) => [board.githubRepo, board.localRepoPath]
+
+    assert.deepEqual(repos((await patch({ githubRepo: 'acme/app' })).body), ['acme/app', null])
+    assert.deepEqual(repos((await patch({ localRepoPath: ' ~/Projects/App ' })).body), [null, '~/Projects/App'])
+    assert.deepEqual(repos((await patch({ name: 'Renamed' })).body), [null, '~/Projects/App'], 'kept by other edits')
+    assert.deepEqual(repos((await patch({ localRepoPath: '/srv/git/app' })).body), [null, '/srv/git/app'])
+    assert.deepEqual(repos((await patch({ githubRepo: 'acme/app' })).body), ['acme/app', null])
+    assert.deepEqual(repos((await patch({ githubRepo: null, localRepoPath: '~/app' })).body), [null, '~/app'])
+    assert.deepEqual(repos((await patch({ localRepoPath: null })).body), [null, null])
+
+    for (const localRepoPath of ['', 'relative/path', '~', '~user/app', './app', '/', '/ app', 'a'.repeat(1001)]) {
+      assert.equal((await patch({ localRepoPath })).status, 400, localRepoPath)
+    }
+    const both = await patch({ githubRepo: 'acme/app', localRepoPath: '~/app' })
+    assert.equal(both.status, 400)
+    assert.deepEqual(repos((await call<BoardDetail>('GET', `/boards/${boardId}`)).body.board), [null, null])
+
+    const { body: created } = await call<BoardSummary>('POST', '/boards', { name: 'Local', localRepoPath: '~/x' })
+    assert.deepEqual(repos(created), [null, '~/x'])
+  })
+
+  test("a local repository is enough to switch the board's agent on", async () => {
+    const patch = (input: object) => call<BoardSummary>('PATCH', `/boards/${boardId}`, input)
+    const on = await patch({ localRepoPath: '~/Projects/App', agentEnabled: true })
+    assert.equal(on.status, 200)
+    assert.equal(on.body.agentEnabled, true)
+    assert.equal((await patch({ localRepoPath: null })).status, 400, 'the agent still needs a repository')
+    assert.equal((await patch({ githubRepo: 'acme/app' })).body.agentEnabled, true, 'switching to GitHub keeps it on')
   })
 
   test('comments can be posted on the pull request too', async () => {

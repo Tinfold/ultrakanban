@@ -4,12 +4,14 @@ import {
   type Activity,
   type AgentRun,
   type Attachment,
+  parseLocalPullRequestUrl,
   parsePullRequestUrl,
   type PullRequest,
   type RunOutcome,
   type RunRecord,
 } from '@shared/domain'
 import { Markdown } from '@/components/common/Markdown'
+import { PullRequestAnchor } from '@/components/common/PullRequestAnchor'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
@@ -40,10 +42,11 @@ const PULL_REQUEST_EVENTS = {
 
 function PullRequestLink({ url }: { url: string }) {
   const pullRequest = parsePullRequestUrl(url)
+  const local = parseLocalPullRequestUrl(url)
   return (
-    <a href={url} target="_blank" rel="noreferrer" className="text-foreground hover:underline">
-      {pullRequest ? `${pullRequest.repo}#${pullRequest.number}` : url}
-    </a>
+    <PullRequestAnchor href={url} className="text-foreground hover:underline">
+      {pullRequest ? `${pullRequest.repo}#${pullRequest.number}` : local ? `pull request #${local.number}` : url}
+    </PullRequestAnchor>
   )
 }
 
@@ -136,14 +139,12 @@ function ActivityItem({ entry, attachmentsById, onViewAttachment }: ActivityItem
           )}
           <Timestamp iso={entry.createdAt} />
           {entry.type === 'comment' && entry.data.pullRequestComment && (
-            <a
+            <PullRequestAnchor
               href={entry.data.pullRequestComment}
-              target="_blank"
-              rel="noreferrer"
               className="ml-auto text-muted-foreground hover:text-foreground hover:underline"
             >
               also on the pull request
-            </a>
+            </PullRequestAnchor>
           )}
         </div>
         <Markdown className="px-3 py-2.5">{entry.data.body}</Markdown>
@@ -191,6 +192,7 @@ const OUTCOME_STYLES: Record<RunOutcome, { item: string; label: string }> = {
   killed: { item: 'border-red-500/40 bg-red-500/5', label: 'text-red-600 dark:text-red-400' },
   stopped: { item: '', label: 'text-muted-foreground' },
   stop_requested: { item: '', label: 'text-muted-foreground' },
+  loop_stopped: { item: '', label: 'text-muted-foreground' },
   usage_limit: { item: 'border-amber-500/40 bg-amber-500/5', label: 'text-amber-600 dark:text-amber-400' },
 }
 

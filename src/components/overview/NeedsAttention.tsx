@@ -1,5 +1,6 @@
 import { Link } from 'wouter'
 import type { OverviewTicket } from '@shared/domain'
+import { PullRequestAnchor } from '@/components/common/PullRequestAnchor'
 import { PullRequestIcon } from '@/components/common/PullRequestIcon'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { formatDateTime, formatDuration, ticketRef } from '@/lib/format'
@@ -53,16 +54,14 @@ function Group({ title, tickets, now, waiting }: GroupProps) {
             </Link>
             {ticket.pullRequest && (
               // Straight to the pull request, for reviewing without opening the ticket first.
-              <a
+              <PullRequestAnchor
                 href={ticket.pullRequest.url}
-                target="_blank"
-                rel="noreferrer"
                 aria-label={`Open the pull request (${PULL_REQUEST_STATE_LABELS[ticket.pullRequest.state].toLowerCase()})`}
                 title="Open the pull request"
                 className="shrink-0 rounded-md p-2 hover:bg-background focus-visible:bg-background focus-visible:outline-none"
               >
                 <PullRequestIcon state={ticket.pullRequest.state} className="size-3.5" />
-              </a>
+              </PullRequestAnchor>
             )}
           </li>
         ))}

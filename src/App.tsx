@@ -7,6 +7,7 @@ import { useLiveUpdates } from '@/hooks/use-live-updates'
 import { BoardPage } from '@/pages/BoardPage'
 import { HomePage } from '@/pages/HomePage'
 import { OverviewPage } from '@/pages/OverviewPage'
+import { PullRequestPage } from '@/pages/PullRequestPage'
 import { SetupPage } from '@/pages/SetupPage'
 
 const queryClient = new QueryClient({
@@ -21,6 +22,11 @@ function Routes() {
         <Route path="/" component={HomePage} />
         <Route path="/overview" component={OverviewPage} />
         <Route path="/setup" component={SetupPage} />
+        <Route path="/b/:boardId/pr/:number/:tab?">
+          {({ boardId, number, tab }) => (
+            <PullRequestPage key={`${boardId}/${number}`} boardId={boardId} number={Number(number)} tab={tab} />
+          )}
+        </Route>
         <Route path="/b/:boardId">{({ boardId }) => <BoardPage key={boardId} boardId={boardId} />}</Route>
         <Route>
           <HomePage />

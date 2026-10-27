@@ -20,6 +20,14 @@ export type AgentEffort = (typeof AGENT_EFFORTS)[number]
 export const AGENT_MODELS = ['fable', 'opus', 'sonnet', 'haiku'] as const
 export type AgentModelAlias = (typeof AGENT_MODELS)[number]
 
+/** One-line hint on what each model suits and costs, shown in the model picker. */
+export const AGENT_MODEL_HINTS: Record<AgentModelAlias, string> = {
+  fable: 'Most capable, highest cost',
+  opus: 'Hard or multi-file work, high cost',
+  sonnet: 'Routine, well-scoped work, medium cost',
+  haiku: 'Mechanical edits, lowest cost',
+}
+
 /** Whether a model is one of Claude's: an alias (`AGENT_MODELS`) or a full name such as claude-opus-5-5. */
 export const isClaudeModel = (model: string) =>
   (AGENT_MODELS as readonly string[]).includes(model) || /^claude-/i.test(model)
@@ -31,6 +39,12 @@ export const AGENT_DEFAULTS = {
   effort: 'medium',
   concurrency: 1,
   conflictConcurrency: 2,
+  /** Model and effort for runs that only fix merge conflicts (`agentConflictModel`/`agentConflictEffort`). */
+  conflictModel: 'sonnet',
+  conflictEffort: 'medium',
+  /** Model and effort for runs that only fix failing CI (`agentCiModel`/`agentCiEffort`). */
+  ciModel: 'sonnet',
+  ciEffort: 'medium',
 } as const
 /** Most runs a board's agent can work at once; each one needs its own git worktree and counts against Claude usage. */
 export const AGENT_MAX_CONCURRENCY = 8
@@ -81,7 +95,7 @@ export const TICKET_TEMPLATES: readonly TicketTemplate[] = [
     description:
       '## Steps to reproduce\n\n## Expected\n\n## Actual\n\n- [ ] Find the cause\n- [ ] Fix it\n- [ ] Add a test that would have caught it',
     tags: ['bug'],
-    agentEffort: 'medium',
+    agentEffort: 'high',
     agentModel: 'opus',
   },
   {
@@ -91,6 +105,14 @@ export const TICKET_TEMPLATES: readonly TicketTemplate[] = [
     tags: ['feature'],
     agentEffort: 'medium',
     agentModel: 'opus',
+  },
+  {
+    id: 'small',
+    name: 'Small change',
+    description: '## What to change\n\n- [ ] Make the change\n- [ ] Check it',
+    tags: ['chore'],
+    agentEffort: 'low',
+    agentModel: 'sonnet',
   },
   {
     id: 'question',
@@ -218,8 +240,9 @@ export interface FailingCheck {
 }
 
 export interface PullRequest {
+  /** A GitHub pull request's URL, or a local pull request's link (`/b/<board>/pr/<number>`, see `LocalPullRequest`). */
   url: string
-  /** `owner/name` */
+  /** `owner/name`; for a local pull request `local/<the folder name of the board's local repository>`. */
   repo: string
   number: number
   state: PullRequestState
@@ -250,6 +273,140 @@ export function parsePullRequestUrl(url: string) {
     repo: `${owner}/${name}`,
     number: Number(number),
   }
+}
+
+const LOCAL_PULL_REQUEST_URL = /^(?:https?:\/\/[^/]+)?\/b\/([\w-]+)\/pr\/(\d+)(?:[/?#].*)?$/
+
+/**
+ * Parses the link of a local pull request (see `LocalPullRequest`), `/b/<board>/pr/<number>`, also with the board's
+ * host in front (`http://localhost:4317/b/...`) or a sub-page after it.
+ */
+export function parseLocalPullRequestUrl(url: string) {
+  const match = LOCAL_PULL_REQUEST_URL.exec(url.trim())
+  if (!match) return null
+  const [, boardId, number] = match
+  return { url: localPullRequestUrl(boardId, Number(number)), boardId, number: Number(number) }
+}
+
+export const localPullRequestUrl = (boardId: string, number: number) => `/b/${boardId}/pr/${number}`
+
+export const LOCAL_PULL_REQUEST_STATES = ['open', 'merged', 'closed'] as const
+export type LocalPullRequestState = (typeof LOCAL_PULL_REQUEST_STATES)[number]
+
+/**
+ * A pull request that lives on the board rather than on GitHub, for a board with a local repository
+ * (`BoardSummary.localRepoPath`): its head branch is merged into its base branch in that repository. The ticket it was
+ * opened for links it as its `pullRequest`, by `url`.
+ */
+export interface LocalPullRequest {
+  boardId: string
+  /** Numbered per board, from 1. */
+  number: number
+  /** `/b/<board>/pr/<number>`, the page that shows it, and its ticket's `pullRequest.url`. */
+  url: string
+  /** The ticket it was opened for; null once that ticket is deleted. */
+  ticketId: string | null
+  ticketNumber: number | null
+  title: string
+  /** Markdown. */
+  body: string
+  /** The branch whose commits it merges. */
+  head: string
+  /** The branch it merges them into. */
+  base: string
+  state: LocalPullRequestState
+  /** Who opened it (their `X-Actor`). */
+  author: string
+  /**
+   * The head and base commits once it is merged or closed, so its diff and commits stay readable after its branches
+   * move on or are deleted; null while open (its branches' commits count then) or when a branch was gone.
+   */
+  headSha: string | null
+  baseSha: string | null
+  /** The merge commit; null unless merged, or when its commits were in the base already. */
+  mergeSha: string | null
+  /** Who merged or closed it, and when. */
+  closedBy: string | null
+  closedAt: string | null
+  commentCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export const DIFF_SIDES = ['left', 'right'] as const
+/** The side of a diff a line is on, as on GitHub: `left` the base's version (old), `right` the head's (new). */
+export type DiffSide = (typeof DIFF_SIDES)[number]
+
+/** A comment on a local pull request: on the whole of it, or inline on one line of a file's diff. */
+export interface LocalPullRequestComment {
+  id: string
+  /** Markdown. */
+  body: string
+  author: string
+  /** The file an inline comment is on; null for a comment on the whole pull request. */
+  path: string | null
+  /** The line it is on, numbered as on its `side` (the old file's lines on the left, the new one's on the right). */
+  line: number | null
+  side: DiffSide | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface LocalPullRequestDetail extends LocalPullRequest {
+  /** Oldest first. */
+  comments: LocalPullRequestComment[]
+}
+
+/** A line of a diff hunk, with its number in the old file (unless added) and in the new one (unless deleted). */
+export interface DiffLine {
+  type: 'context' | 'add' | 'delete'
+  oldLine: number | null
+  newLine: number | null
+  /** The line without its leading `+`, `-` or space. */
+  text: string
+}
+
+export interface DiffHunk {
+  /** The `@@ -1,4 +1,5 @@ ...` line. */
+  header: string
+  oldStart: number
+  oldLines: number
+  newStart: number
+  newLines: number
+  lines: DiffLine[]
+}
+
+export interface DiffFile {
+  /** The file's path in the head; in the base for a deleted file. */
+  path: string
+  /** Its path in the base when it was renamed or copied; null otherwise. */
+  oldPath: string | null
+  status: 'added' | 'deleted' | 'modified' | 'renamed' | 'copied'
+  /** Binary files have no hunks. */
+  binary: boolean
+  additions: number
+  deletions: number
+  hunks: DiffHunk[]
+}
+
+/** What a local pull request changes: `git diff base...head`, file by file. */
+export interface LocalPullRequestDiff {
+  /** The commits compared: where head branched off base, and head. */
+  baseSha: string
+  headSha: string
+  files: DiffFile[]
+}
+
+/** A commit of a local pull request (`git log base..head`). */
+export interface LocalCommit {
+  sha: string
+  author: string
+  email: string
+  /** ISO 8601, the author date. */
+  date: string
+  /** The message's first line, and the rest of it. */
+  subject: string
+  body: string
 }
 
 export const MERGE_METHODS = ['merge', 'squash', 'rebase'] as const
@@ -357,6 +514,11 @@ export interface BoardSummary {
   doneColumnId: string | null
   /** GitHub repository (`owner/name`) the board's tickets are about. */
   githubRepo: string | null
+  /**
+   * Path of a git repository on the host (absolute, or starting with `~/`) the board works on instead of a GitHub
+   * one. A board has one or the other: setting either clears the other.
+   */
+  localRepoPath: string | null
   /** Whether the host's agent supervisor runs an agent loop for this board (see scripts/agent-supervisor.sh). */
   agentEnabled: boolean
   /** Name of the board's agent (its controller); `claude` when not set. Its workers are named by `agentWorkerName`. */
@@ -370,12 +532,24 @@ export interface BoardSummary {
   agentEffort: AgentEffort | null
   /** How many runs the agent works at once, each on its own ticket in its own git worktree; 1 when not set. */
   agentConcurrency: number | null
+  /** The most turns one run of the agent may take (claude's `--max-turns`); no limit when not set. */
+  agentMaxTurns: number | null
   /**
    * How many more runs the agent can make at once that only fix merge conflicts (and answer whatever else is new on
    * those tickets), each in its own git worktree, beside `agentConcurrency`: the conflicts that merging one pull request
    * causes in the others are fixed side by side. 0 for none; 2 when not set.
    */
   agentConflictConcurrency: number | null
+  /**
+   * Model and effort level for runs started only to fix merge conflicts, whatever the ticket's own setting: such runs
+   * merge the base branch and rarely need the ticket's model. Runs that also hand over human feedback keep the ticket's.
+   * `sonnet` and `medium` when not set.
+   */
+  agentConflictModel: string | null
+  agentConflictEffort: AgentEffort | null
+  /** Model and effort level for runs started only to fix failing CI (and any merge conflicts); as for conflicts. */
+  agentCiModel: string | null
+  agentCiEffort: AgentEffort | null
   /** Whether the agent also takes tickets from the Backlog column once the Todo column has none left. */
   agentBacklog: boolean
   /**
@@ -560,6 +734,32 @@ export interface Ticket {
 }
 
 /**
+ * A ticket as `?compact=true` lists it: what an agent needs to pick a ticket and see where it stands, without its
+ * description, usage or run. Fetch the ticket itself for the rest.
+ */
+export type CompactTicket = Pick<
+  Ticket,
+  | 'id'
+  | 'number'
+  | 'columnId'
+  | 'title'
+  | 'priority'
+  | 'assignee'
+  | 'tagIds'
+  | 'epicId'
+  | 'parentId'
+  | 'version'
+  | 'estimate'
+  | 'approval'
+  | 'waitingSince'
+  | 'archived'
+  | 'subtickets'
+  | 'commentCount'
+  | 'agentModel'
+  | 'agentEffort'
+> & { pullRequest: Pick<PullRequest, 'url' | 'repo' | 'number' | 'state' | 'checks' | 'conflicts'> | null }
+
+/**
  * Why the board's auto-merge (`BoardSummary.autoMerge`) isn't merging a ticket's pull request yet, as its latest round
  * found: what keeps it from being ready, or that merging it failed. Auto-merge looks again every minute.
  */
@@ -613,11 +813,29 @@ export interface AgentSettingStats {
   successRate: number
   /** Cost per ticket in US dollars, averaged by similarity over those that reported one; null when none did. */
   costUsd: number | null
+  /**
+   * Cost per finished ticket: `costUsd` over `successRate`, as each finished ticket also pays for the ones given up on.
+   * Null when none reported a cost or none was finished. Settings are compared by it when all of them have a `costUsd`.
+   */
+  costPerFinishedUsd: number | null
   /** Tokens per ticket, averaged by similarity. */
   tokens: number
+  /** Tokens per ticket weighted by kind (see `TOKEN_WEIGHTS`), averaged by similarity. */
+  weightedTokens: number
+  /**
+   * Weighted tokens per finished ticket, `weightedTokens` over `successRate`; null when none was finished. Settings are
+   * compared by it when any of them has no `costUsd`.
+   */
+  weightedTokensPerFinished: number | null
   /** Those tickets, most similar first (at most 5). */
   similar: SimilarTicket[]
 }
+
+/**
+ * How every decided ticket went at one model and effort, the one that did most of its work (`Overview.settings`). The
+ * same figures as `AgentSettingStats`, with every ticket counting fully rather than by similarity.
+ */
+export type SettingReport = Omit<AgentSettingStats, 'similar'>
 
 /**
  * The model and effort to work a new ticket at, from how similar tickets went (`GET /boards/:id/agent-suggestion`):
@@ -643,6 +861,11 @@ export interface AgentRun {
   /** What the run is doing, as its agent last said, e.g. "Answering review feedback". */
   step: string | null
   /**
+   * Tokens the run has used so far (input, output and cache, subagents included), as its agent last said; null until
+   * it does.
+   */
+  tokens: number | null
+  /**
    * When someone asked for the run to stop (`POST /tickets/:id/stop`) and who, until it ends: the agent loop stops it
    * at its next check of the ticket, keeping its session and work, and resumes it once there is new feedback. Null
    * while nobody has.
@@ -656,6 +879,7 @@ export interface BoardDetail {
   tags: Tag[]
   /** Oldest first. */
   epics: Epic[]
+  /** `CompactTicket`s instead with `?compact=true`. */
   tickets: Ticket[]
   /** Archived tickets left out of `tickets`; 0 when they were asked for. */
   archivedCount: number
@@ -678,6 +902,21 @@ export type Activity =
   | ActivityBase<'pull_request', { url: string; event: 'linked' | 'unlinked' | Exclude<PullRequestState, 'unknown'> }>
 
 export type ActivityType = Activity['type']
+
+export const ACTIVITY_TYPES = [
+  'created',
+  'updated',
+  'checked',
+  'moved',
+  'claimed',
+  'released',
+  'comment',
+  'plan',
+  'approved',
+  'stopped',
+  'attachment',
+  'pull_request',
+] as const satisfies readonly ActivityType[]
 
 /** Tokens an agent used, split the way Claude reports them. */
 export interface TokenCounts {
@@ -788,6 +1027,11 @@ export const ROUTING_MIN_FINISHED = 10
  * board has decided at least this many tickets at it.
  */
 export const ROUTING_MIN_SETTING_TICKETS = 3
+/**
+ * A setting is suggested (`GET /boards/:id/agent-suggestion`) only once at least this many similar decided tickets were
+ * worked at it: one says more about that ticket than about the setting.
+ */
+export const SUGGESTION_MIN_TICKETS = 2
 /** History routes a ticket only when its suggestion is built on at least this many similar tickets. */
 export const HISTORY_MIN_TICKETS = 3
 
@@ -845,14 +1089,16 @@ export const RUN_OUTCOMES = [
   'killed',
   'stopped',
   'stop_requested',
+  'loop_stopped',
   'usage_limit',
 ] as const
 /**
  * How an agent run ended: `finished` (the agent exited successfully), `failed` (it exited with an error), `timed_out`
  * (it ran longer than the agent loop's TICKET_TIMEOUT), `killed` (by a signal, most likely the kernel's for running out
  * of memory), `stopped` (the loop stopped it because someone took the ticket away from the agent), `stop_requested`
- * (the loop stopped it because someone asked, see `AgentRun.stopRequested`, and resumes it once there is new feedback)
- * or `usage_limit` (the account ran out of Claude usage, so the loop waits for it to reset and then resumes the run).
+ * (the loop stopped it because someone asked, see `AgentRun.stopRequested`, and resumes it once there is new feedback),
+ * `loop_stopped` (the loop itself was stopped, e.g. restarted, and its next run on the ticket resumes it) or
+ * `usage_limit` (the account ran out of Claude usage, so the loop waits for it to reset and then resumes the run).
  */
 export type RunOutcome = (typeof RUN_OUTCOMES)[number]
 
@@ -890,6 +1136,8 @@ export interface RunRecord {
   durationMs: number | null
   /** How many turns (responses of the model) the run took. */
   turns: number | null
+  /** Tokens the run used (input, output and cache, see `totalTokens`), when the agent reports them. */
+  tokens: number | null
   /** Estimated cost in US dollars, when the agent reports one: billed, not estimated, for a run on the API key. */
   costUsd: number | null
   /** Whether the run went on the agents' API key (see `AgentApiKey`) rather than the Claude plan. */
@@ -1212,6 +1460,8 @@ export interface Overview {
   tickets: OverviewTicketUsage[]
   /** How routing sources compare on every board, over all time: routing data is slow to build up. */
   routing: RoutingComparison
+  /** How each model and effort did on every board's decided tickets, over all time, the most tickets first. */
+  settings: SettingReport[]
   /** The latest activity entries across all boards, newest first. */
   recent: OverviewActivity[]
 }
@@ -1359,10 +1609,15 @@ export interface ClaudeUsage {
   reportedAt: string | null
   /** The subscription, e.g. "pro" or "max". */
   plan: string | null
+  /**
+   * When `limits` were read; null if they never were. A report with only an error keeps the last limits, so this can be
+   * older than `reportedAt`.
+   */
+  limitsAt: string | null
   limits: ClaudeUsageLimit[]
   /** The credits the account can spend on usage besides its limits; empty when it has none. */
   credits: ClaudeUsageCredit[]
-  /** Why the last report has no limits, e.g. no claude login on the host. */
+  /** Why the last report has no limits, e.g. no claude login on the host; the last limits stay until they go stale. */
   error: string | null
   /** How far agents may use the week and the current session (see `ClaudeUsageReserve`). */
   reserve: ClaudeUsageReserve
@@ -1370,7 +1625,7 @@ export interface ClaudeUsage {
   apiKey: AgentApiKey
   /**
    * The limit that holds agents back right now: one at or over its reserve (see `reserveFor`) that hasn't reset since,
-   * when the report is fresh (see `CLAUDE_USAGE_FRESH_MINUTES`). Of several, the one that resets last (the most used of
+   * when the limits are fresh (`limitsAt`, see `CLAUDE_USAGE_FRESH_MINUTES`). Of several, the one that resets last (the most used of
    * those that reset together), as agents claim again only once all of them have. Null otherwise.
    */
   reserveReached: ClaudeUsageLimit | null

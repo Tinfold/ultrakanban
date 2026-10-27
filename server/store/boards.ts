@@ -26,12 +26,18 @@ interface BoardRow {
   review_column_id: string | null
   done_column_id: string | null
   github_repo: string | null
+  local_repo_path: string | null
   agent_enabled: number
   agent_name: string | null
   agent_model: string | null
   agent_effort: AgentEffort | null
   agent_concurrency: number | null
+  agent_max_turns: number | null
   agent_conflict_concurrency: number | null
+  agent_conflict_model: string | null
+  agent_conflict_effort: AgentEffort | null
+  agent_ci_model: string | null
+  agent_ci_effort: AgentEffort | null
   agent_backlog: number
   agent_all_skills: number
   agent_docker: number
@@ -78,12 +84,18 @@ const toBoard = (row: BoardRow): BoardSummary => ({
   reviewColumnId: row.review_column_id,
   doneColumnId: row.done_column_id,
   githubRepo: row.github_repo,
+  localRepoPath: row.local_repo_path,
   agentEnabled: row.agent_enabled === 1,
   agentName: row.agent_name,
   agentModel: row.agent_model,
   agentEffort: row.agent_effort,
   agentConcurrency: row.agent_concurrency,
+  agentMaxTurns: row.agent_max_turns,
   agentConflictConcurrency: row.agent_conflict_concurrency,
+  agentConflictModel: row.agent_conflict_model,
+  agentConflictEffort: row.agent_conflict_effort,
+  agentCiModel: row.agent_ci_model,
+  agentCiEffort: row.agent_ci_effort,
   agentBacklog: row.agent_backlog === 1,
   agentAllSkills: row.agent_all_skills === 1,
   agentDocker: row.agent_docker === 1,
@@ -148,12 +160,18 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     reviewColumn,
     doneColumn,
     githubRepo,
+    localRepoPath,
     agentEnabled,
     agentName,
     agentModel,
     agentEffort,
     agentConcurrency,
+    agentMaxTurns,
     agentConflictConcurrency,
+    agentConflictModel,
+    agentConflictEffort,
+    agentCiModel,
+    agentCiEffort,
     agentBacklog,
     agentAllSkills,
     agentDocker,
@@ -174,12 +192,18 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
     reviewColumn,
     doneColumn,
     githubRepo,
+    localRepoPath,
     agentEnabled,
     agentName,
     agentModel,
     agentEffort,
     agentConcurrency,
+    agentMaxTurns,
     agentConflictConcurrency,
+    agentConflictModel,
+    agentConflictEffort,
+    agentCiModel,
+    agentCiEffort,
     agentBacklog,
     agentAllSkills,
     agentDocker,
@@ -199,6 +223,9 @@ export function createBoard(input: CreateBoardInput): BoardSummary {
 }
 
 export function updateBoard(id: string, input: UpdateBoardInput): BoardSummary {
+  if (input.githubRepo && input.localRepoPath) {
+    throw badRequest('Set either a GitHub repository or a local repository path, not both')
+  }
   touchBoard(id)
   if (input.jevEnabled && !typesafeKey()) throw badRequest('Set a TypeSafe API key before routing with Jev')
   const columnId = (ref: string | null | undefined) => (ref ? resolveColumn(id, ref).id : ref)
@@ -207,13 +234,20 @@ export function updateBoard(id: string, input: UpdateBoardInput): BoardSummary {
     description: input.description,
     review_column_id: columnId(input.reviewColumn),
     done_column_id: columnId(input.doneColumn),
-    github_repo: input.githubRepo,
+    // A board has a GitHub repository or a local one, not both: setting one clears the other.
+    github_repo: input.localRepoPath ? null : input.githubRepo,
+    local_repo_path: input.githubRepo ? null : input.localRepoPath,
     agent_enabled: input.agentEnabled === undefined ? undefined : Number(input.agentEnabled),
     agent_name: input.agentName,
     agent_model: input.agentModel,
     agent_effort: input.agentEffort,
     agent_concurrency: input.agentConcurrency,
+    agent_max_turns: input.agentMaxTurns,
     agent_conflict_concurrency: input.agentConflictConcurrency,
+    agent_conflict_model: input.agentConflictModel,
+    agent_conflict_effort: input.agentConflictEffort,
+    agent_ci_model: input.agentCiModel,
+    agent_ci_effort: input.agentCiEffort,
     agent_backlog: input.agentBacklog === undefined ? undefined : Number(input.agentBacklog),
     agent_all_skills: input.agentAllSkills === undefined ? undefined : Number(input.agentAllSkills),
     agent_docker: input.agentDocker === undefined ? undefined : Number(input.agentDocker),
@@ -237,8 +271,8 @@ export function updateBoard(id: string, input: UpdateBoardInput): BoardSummary {
     sql.run('UPDATE boards SET jev_mode = ? WHERE id = ? AND jev_mode IS NULL', JEV_DEFAULTS.mode, id)
   }
   const board = getBoard(id)
-  if (board.agentEnabled && !board.githubRepo) {
-    throw badRequest('Set the GitHub repository before switching the agent on')
+  if (board.agentEnabled && !board.githubRepo && !board.localRepoPath) {
+    throw badRequest('Set the GitHub or local repository before switching the agent on')
   }
   return board
 }

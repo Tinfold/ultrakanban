@@ -181,7 +181,7 @@ export interface TagUsage {
  * counts towards each. Sorted by the average per ticket of `sort`, highest first.
  */
 export function usageByTag(tickets: OverviewTicketUsage[], sort: UsageSort): TagUsage[] {
-  const groups = new Map<string, Omit<TagUsage, 'perTicket'>>()
+  const groups = new Map<string, Omit<TagUsage, 'perTicket'> & { costed: number }>()
   for (const ticket of tickets) {
     const tags = ticket.tags.length ? ticket.tags : [null]
     for (const tag of tags) {
@@ -189,22 +189,26 @@ export function usageByTag(tickets: OverviewTicketUsage[], sort: UsageSort): Tag
       const group = groups.get(name) ?? {
         tag: tag && { name: tag.name, color: tag.color },
         tickets: 0,
+        costed: 0,
         total: { runs: 0, tokens: 0, costUsd: null },
       }
       groups.set(name, group)
       group.tickets++
       group.total.runs += ticket.usage.runs
       group.total.tokens += ticket.usage.tokens
-      if (ticket.usage.costUsd !== null) group.total.costUsd = (group.total.costUsd ?? 0) + ticket.usage.costUsd
+      if (ticket.usage.costUsd !== null) {
+        group.costed++
+        group.total.costUsd = (group.total.costUsd ?? 0) + ticket.usage.costUsd
+      }
     }
   }
   return [...groups.values()]
-    .map((group): TagUsage => ({
+    .map(({ costed, ...group }): TagUsage => ({
       ...group,
       perTicket: {
         runs: group.total.runs / group.tickets,
         tokens: group.total.tokens / group.tickets,
-        costUsd: group.total.costUsd === null ? null : group.total.costUsd / group.tickets,
+        costUsd: group.total.costUsd === null ? null : group.total.costUsd / costed,
       },
     }))
     .sort(

@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { beforeEach, describe, test } from 'node:test'
 import { type ApiErrorBody, type MergePlan, type MergeRun, type Ticket } from '../shared/domain.ts'
 import { type GitHubPullRequest } from './github.ts'
+import { transaction } from './db.ts'
+import { openLocalPullRequest } from './store/local-pull-requests.ts'
 import {
   addTicket,
   annotations,
@@ -11,9 +13,11 @@ import {
   checkRuns,
   containing,
   deletedBranches,
+  github,
   merges,
   mergeQueue,
   pull,
+  pullRequestReads,
   pullRequestStatuses,
   pulls,
   setAfterMerge,
@@ -298,6 +302,76 @@ describe('merging all reviewed pull requests', () => {
     assert.equal(await waitOf(newCommit), 'Checks failing: job 1')
   })
 
+  test('auto-merge and ready notifications leave local pull requests out, asking GitHub nothing', async () => {
+    await call('PATCH', `/boards/${boardId}`, { localRepoPath: '/repos/app', notifyUrl: 'https://ntfy.sh/merging' })
+    const local = await addTicket({ title: 'Local', column: 'Review' })
+    const input = { head: 'feature', base: 'main', title: 'Local', body: '' }
+    transaction(() => openLocalPullRequest(local.id, input, 'claude/opus/high'))
+    // A GitHub repository named like the local one, with a ready pull request of the same number.
+    pulls.set('local/app#1', {
+      state: 'open',
+      merged: false,
+      draft: false,
+      title: 'Not this one',
+      mergeable: true,
+      mergeableState: 'clean',
+      base: 'main',
+      head: 'feature',
+      headSha: 'sha-elsewhere',
+      files: [],
+    })
+    const waitOf = async () => (await call<Ticket>('GET', `/tickets/${local.id}`)).body.autoMergeWait
+    pullRequestReads.length = 0
+
+    assert.deepEqual(await mergeQueue.notifyReady(boardId), [])
+
+    await call('PATCH', `/boards/${boardId}`, { autoMerge: true })
+    github.auth = null
+    try {
+      await mergeQueue.autoMergeAll()
+      assert.equal(await waitOf(), null, "no GitHub token isn't a reason it waits")
+    } finally {
+      github.auth = 'env'
+    }
+
+    await inReview(2)
+    await mergeQueue.autoMergeAll()
+    assert.deepEqual(merges, ['acme/app#2:merge'])
+    assert.equal(await waitOf(), null)
+    const { body: run } = await call<MergeRun>('GET', `/boards/${boardId}/merge-run`)
+    assert.deepEqual(
+      run.steps.map((step) => step.number),
+      [2],
+    )
+    assert.deepEqual(
+      pullRequestReads.filter((read) => read.startsWith('local/')),
+      [],
+    )
+  })
+
+  test('plans a board whose pull requests are all local without a GitHub token', async () => {
+    await call('PATCH', `/boards/${boardId}`, { localRepoPath: '/repos/app' })
+    const local = await addTicket({ title: 'Local', column: 'Review' })
+    const input = { head: 'feature', base: 'main', title: 'Local', body: '' }
+    transaction(() => openLocalPullRequest(local.id, input, 'claude/opus/high'))
+    github.auth = null
+    try {
+      const { status, body: plan } = await call<MergePlan>('GET', `/boards/${boardId}/merge-plan`)
+      assert.equal(status, 200)
+      assert.deepEqual(
+        plan.items.map((item) => [item.ticketId, item.skip]),
+        [[local.id, 'A local pull request: merge it on its page']],
+      )
+
+      await inReview(1)
+      const withGitHub = await call<ApiErrorBody>('GET', `/boards/${boardId}/merge-plan`)
+      assert.equal(withGitHub.status, 400)
+      assert.match(withGitHub.body.error.message, /needs a GitHub token/)
+    } finally {
+      github.auth = 'env'
+    }
+  })
+
   describe('deleting branches after merge', () => {
     /** Adds a ticket in review whose branch exists on the fake GitHub at the pull request's head. */
     async function withBranch(number: number, pullRequest: Parameters<typeof inReview>[1] = {}) {
@@ -365,5 +439,32 @@ describe('merging all reviewed pull requests', () => {
       assert.deepEqual(merges, ['acme/app#1:merge'])
       assert.deepEqual(deletedBranches, [])
     })
+  })
+})
+
+describe('auto-merge waits', () => {
+  test('keep since when only failed changes', async () => {
+    const { setAutoMergeWaits } = await import('./store/auto-merge.ts')
+    const { body: board } = await call<{ id: string }>('POST', '/boards', {
+      name: 'Waits',
+      columns: ['Todo', 'Review'],
+      reviewColumn: 'Review',
+      autoMerge: true,
+    })
+    useBoard(board.id)
+    const ticket = await addTicket({
+      title: 'Waiting',
+      column: 'Review',
+      pullRequest: 'https://github.com/acme/app/pull/90',
+    })
+    const wait = async () => (await call<Ticket>('GET', `/tickets/${ticket.id}`)).body.autoMergeWait
+    setAutoMergeWaits(boardId, new Map([[ticket.id, { reason: 'checks', failed: false }]]))
+    const first = await wait()
+    assert.ok(first?.since)
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    setAutoMergeWaits(boardId, new Map([[ticket.id, { reason: 'checks', failed: true }]]))
+    const second = await wait()
+    assert.equal(second?.failed, true)
+    assert.equal(second?.since, first.since)
   })
 })

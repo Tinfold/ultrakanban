@@ -55,7 +55,8 @@ systemd=1
 [[ -z ${NO_SYSTEMD:-} ]] && systemctl --user show-environment >/dev/null 2>&1 || systemd=
 # The installed files and where they come from in the checkout.
 INSTALLED=(bin/agent-loop.sh:scripts/agent-loop.sh bin/agent-board.sh:scripts/agent-board.sh
-  bin/agent-supervisor.sh:scripts/agent-supervisor.sh skill/SKILL.md:.claude/skills/ultrakanban/SKILL.md)
+  bin/agent-supervisor.sh:scripts/agent-supervisor.sh skill/SKILL.md:.claude/skills/ultrakanban/SKILL.md
+  skill/WORKER.md:.claude/skills/ultrakanban/WORKER.md)
 for part in triage board ci checkout run tickets; do
   INSTALLED+=("bin/agent-loop/$part.sh:scripts/agent-loop/$part.sh")
 done
@@ -557,9 +558,9 @@ reconcile() {
       echo "can't read the agents switch from $KANBAN; going by its last answer (paused: $paused)"
       ;;
   esac
-  [[ $paused == true ]] || wanted=$(jq -r '.[] | select(.agentEnabled and .githubRepo != null)
-    | [.id, .githubRepo, .agentName // "claude", .agentModel // "opus", .agentEffort // "medium", .agentConcurrency // 1,
-       .agentConflictConcurrency // ""]
+  [[ $paused == true ]] || wanted=$(jq -r '.[] | select(.agentEnabled and (.githubRepo // .localRepoPath) != null)
+    | [.id, .githubRepo // .localRepoPath, .agentName // "claude", .agentModel // "opus", .agentEffort // "medium",
+       .agentConcurrency // 1, .agentConflictConcurrency // ""]
     | @tsv' <<<"$boards")
 
   while IFS=$'\t' read -r id repo agent model effort concurrency conflicts; do
@@ -568,8 +569,18 @@ reconcile() {
     # The conflict loops only when set, so that boards which leave them at the default keep the settings they had.
     settings="$repo $agent/$model/$effort x$concurrency${conflicts:++$conflicts}"
     if [[ $(cat "$AGENT_HOME/boards/$id/settings" 2>/dev/null) != "$settings" ]]; then
+      # Replaced rather than written over, so the loops see it change even when it keeps its size and modification time.
+      mkdir -p "$AGENT_HOME/boards/$id" && printf '%s\n' "$settings" >"$AGENT_HOME/boards/$id/settings.new" &&
+        mv -f "$AGENT_HOME/boards/$id/settings.new" "$AGENT_HOME/boards/$id/settings"
+      loop_state "$id"
+      # A running loop watches the settings file and starts again with the new settings once its runs finish (see
+      # agent-board.sh), as it does for updated scripts, rather than having them stopped here.
+      if [[ $state == @(active|reloading) && -z $restart ]]; then
+        echo "board $id: settings changed ($repo as $agent/$model/$effort, $concurrency at a time); its agent loop \
+starts again with them once its runs finish"
+        continue
+      fi
       echo "board $id: starting its agent loop ($repo as $agent/$model/$effort, $concurrency at a time)"
-      mkdir -p "$AGENT_HOME/boards/$id" && printf '%s\n' "$settings" >"$AGENT_HOME/boards/$id/settings"
       loop_restart "$id"
       continue
     fi

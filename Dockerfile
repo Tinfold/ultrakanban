@@ -10,6 +10,9 @@ RUN npm run build
 FROM node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=4317
+# git, for boards with a local repository (server/local-git.ts). It trusts repositories whoever owns them: they are the
+# host's, mounted in, and their owner needn't be node's uid, which git would otherwise refuse as "dubious ownership".
+RUN apk add --no-cache git && git config --system --add safe.directory '*'
 COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY server ./server

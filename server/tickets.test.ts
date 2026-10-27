@@ -5,6 +5,7 @@ import {
   AGENT_IDLE_MINUTES,
   type ApiErrorBody,
   type BoardDetail,
+  type CompactTicket,
   RUN_MAX_STEPS,
   RUN_MESSAGE_MAX,
   RUN_RECORDS_KEPT,
@@ -12,7 +13,7 @@ import {
   type Ticket,
 } from '../shared/domain.ts'
 import { subscribe, subscribeWake } from './events.ts'
-import { addTicket, boardId, call, ticketsIn, useBoard } from './test-app.ts'
+import { addTicket, boardId, call, pullRequestStatuses, ticketsIn, useBoard } from './test-app.ts'
 
 /** The boards `fn` wakes the agent of (`wake` events), in order. */
 async function wakes(fn: () => Promise<unknown>) {
@@ -61,14 +62,39 @@ describe('tickets', () => {
   test('rejects stale writes with ifVersion', async () => {
     const ticket = await addTicket({ title: 'A' })
     const ok = await call<Ticket>('PATCH', `/tickets/${ticket.id}`, { title: 'B', ifVersion: 1 })
-    const stale = await call<{ error: { code: string } }>('PATCH', `/tickets/${ticket.id}`, {
-      title: 'C',
-      ifVersion: 1,
-    })
+    const stale = await call<{ error: { code: string; details: Record<string, unknown> } }>(
+      'PATCH',
+      `/tickets/${ticket.id}`,
+      {
+        title: 'C',
+        ifVersion: 1,
+      },
+    )
 
     assert.equal(ok.body.version, 2)
     assert.equal(stale.status, 409)
     assert.equal(stale.body.error.code, 'version_conflict')
+    assert.deepEqual(Object.keys(stale.body.error.details).sort(), ['assignee', 'columnId', 'version'])
+    assert.equal(stale.body.error.details.version, 2)
+  })
+
+  test('a stale description save says what the description is now', async () => {
+    const ticket = await addTicket({ title: 'A', description: 'one' })
+    await call('PATCH', `/tickets/${ticket.id}`, { description: 'two', ifVersion: 1 })
+    const stale = await call<{ error: { code: string; details: Record<string, unknown> } }>(
+      'PATCH',
+      `/tickets/${ticket.id}`,
+      { description: 'three', ifVersion: 1 },
+    )
+
+    assert.equal(stale.status, 409)
+    assert.equal(stale.body.error.code, 'version_conflict')
+    assert.deepEqual(stale.body.error.details, {
+      version: 2,
+      assignee: null,
+      columnId: ticket.columnId,
+      description: 'two',
+    })
   })
 
   test('validates input', async () => {
@@ -137,7 +163,11 @@ describe('agent claiming', () => {
 
     const claimed = await call<Ticket>('POST', `/tickets/${ticket.id}/claim`, { agent: 'alpha', moveTo: 'Doing' })
     const again = await call<Ticket>('POST', `/tickets/${ticket.id}/claim`, { agent: 'alpha' })
-    const stolen = await call<{ error: { code: string } }>('POST', `/tickets/${ticket.id}/claim`, { agent: 'beta' })
+    const stolen = await call<{ error: { code: string; details: Record<string, unknown> } }>(
+      'POST',
+      `/tickets/${ticket.id}/claim`,
+      { agent: 'beta' },
+    )
     const badRelease = await call('POST', `/tickets/${ticket.id}/release`, { agent: 'beta' })
     const released = await call<Ticket>('POST', `/tickets/${ticket.id}/release`, { agent: 'alpha' })
     const reclaimed = await call<Ticket>('POST', `/tickets/${ticket.id}/claim`, { agent: 'beta' })
@@ -147,6 +177,8 @@ describe('agent claiming', () => {
     assert.equal(again.status, 200)
     assert.equal(stolen.status, 409)
     assert.equal(stolen.body.error.code, 'already_claimed')
+    assert.deepEqual(Object.keys(stolen.body.error.details).sort(), ['assignee', 'columnId', 'version'])
+    assert.equal(stolen.body.error.details.assignee, 'alpha')
     assert.equal(badRelease.status, 409)
     assert.equal(released.body.assignee, null)
     assert.equal(reclaimed.body.assignee, 'beta')
@@ -213,6 +245,30 @@ describe('agent claiming', () => {
     assert.equal((await claim()).body.title, 'waiting')
   })
 
+  test('claiming a specific ticket refuses blocked ones', async () => {
+    const blocker = await addTicket({ title: 'blocker', column: 'Doing' })
+    const tagged = await addTicket({ title: 'tagged', tags: ['blocked'] })
+    const waiting = await addTicket({ title: 'waiting', description: `Blocked by #${blocker.number}` })
+    const parent = await addTicket({ title: 'parent' })
+    await call('POST', `/tickets/${parent.id}/children`, { title: 'child', column: 'Todo' })
+
+    const claim = (id: string, agent = 'a') => call<Ticket & ApiErrorBody>('POST', `/tickets/${id}/claim`, { agent })
+    for (const ticket of [tagged, waiting, parent]) {
+      const refused = await claim(ticket.id)
+      assert.equal(refused.status, 409)
+      assert.equal(refused.body.error.code, 'blocked')
+      assert.equal((await call<Ticket>('GET', `/tickets/${ticket.id}`)).body.assignee, null)
+    }
+
+    await call('POST', `/tickets/${blocker.id}/move`, { column: 'Done' })
+    assert.equal((await claim(waiting.id)).status, 200)
+
+    // A ticket an agent already holds stays claimable by it, even once it is blocked.
+    await call('PATCH', `/tickets/${waiting.id}`, { tags: ['blocked'] })
+    assert.equal((await claim(waiting.id)).status, 200)
+    assert.equal((await claim(waiting.id, 'b')).body.error.code, 'already_claimed')
+  })
+
   test('records activity', async () => {
     const ticket = await addTicket({ title: 'A' })
     await call('POST', `/tickets/${ticket.id}/claim`, { agent: 'alpha', moveTo: 'Done' })
@@ -223,6 +279,100 @@ describe('agent claiming', () => {
       body.map((entry) => entry.type),
       ['created', 'claimed', 'moved', 'comment'],
     )
+  })
+})
+
+describe('lean responses', () => {
+  test('lists compact tickets, without their description, on the board and the tickets list', async () => {
+    const ticket = await addTicket({ title: 'A', description: 'Long text', tags: ['bug'] })
+    const { body: board } = await call<BoardDetail>('GET', `/boards/${boardId}?compact=1`)
+    const { body: list } = await call<Record<string, unknown>[]>('GET', `/boards/${boardId}/tickets?compact=true`)
+
+    for (const compact of [board.tickets[0], list[0]] as Record<string, unknown>[]) {
+      assert.equal(compact.id, ticket.id)
+      assert.equal(compact.title, 'A')
+      assert.deepEqual(compact.tagIds, ticket.tagIds)
+      assert.equal(compact.version, ticket.version)
+      for (const left of ['description', 'usage', 'run', 'boardId']) assert.equal(left in compact, false, left)
+    }
+    assert.equal(board.columns.length > 0, true)
+    assert.equal((await call<Ticket[]>('GET', `/boards/${boardId}/tickets`)).body[0].description, 'Long text')
+  })
+
+  test('keeps every field of a ticket the agent loop reads in the compact board', async () => {
+    // What scripts/agent-loop reads of each ticket on the board it fetches once per round with ?compact=true
+    // (handle_feedback and backlog_on in tickets.sh). Add to it when the loop reads more.
+    const read = [
+      'id',
+      'number',
+      'columnId',
+      'assignee',
+      'version',
+      'approval',
+      'agentModel',
+      'agentEffort',
+      'pullRequest.url',
+      'pullRequest.repo',
+      'pullRequest.number',
+      'pullRequest.conflicts',
+    ]
+    const url = 'https://github.com/acme/app/pull/7'
+    const agent = 'claude/sonnet/high'
+    await call('PATCH', `/boards/${boardId}`, { approvalSize: 'M' })
+    pullRequestStatuses.set(url, { state: 'open', title: 'Some PR', conflicts: true })
+    const created = await addTicket({ title: 'A', agentModel: 'sonnet', agentEffort: 'high', pullRequest: url })
+    await call('POST', `/tickets/${created.id}/pull-request/sync`)
+    pullRequestStatuses.clear()
+    await call('POST', `/tickets/${created.id}/claim`, { agent, moveTo: 'Doing' }, agent)
+    await call('POST', `/tickets/${created.id}/plan`, { agent, estimate: 'L', plan: 'Do it' }, agent)
+    const { body: ticket } = await call<Ticket>('GET', `/tickets/${created.id}`)
+    const { body: board } = await call<BoardDetail>('GET', `/boards/${boardId}?compact=1`)
+    const [compact] = board.tickets as unknown as CompactTicket[]
+    const at = (value: unknown, path: string) =>
+      path.split('.').reduce((object, key) => (object as Record<string, unknown> | null)?.[key], value)
+
+    for (const path of read) {
+      assert.ok(at(ticket, path) != null, `the ticket has no ${path} to check`)
+      assert.deepEqual(at(compact, path), at(ticket, path), path)
+    }
+  })
+
+  test('filters the tickets list by column and assignee', async () => {
+    const mine = await addTicket({ title: 'mine' })
+    await addTicket({ title: 'theirs' })
+    await addTicket({ title: 'doing', column: 'Doing' })
+    await call('POST', `/tickets/${mine.id}/claim`, { agent: 'alpha' })
+    const titles = async (query: string) =>
+      (await call<Ticket[]>('GET', `/boards/${boardId}/tickets?${query}`)).body.map((t) => t.title)
+
+    assert.deepEqual(await titles('column=Todo'), ['mine', 'theirs'])
+    assert.deepEqual(await titles('assignee=alpha'), ['mine'])
+    assert.deepEqual(await titles('column=Doing&assignee=alpha'), [])
+  })
+
+  test('lists only activity after an id, and of the given types', async () => {
+    const ticket = await addTicket({ title: 'A' })
+    await call('POST', `/tickets/${ticket.id}/comments`, { body: 'one' })
+    await call('POST', `/tickets/${ticket.id}/claim`, { agent: 'alpha' })
+    await call('POST', `/tickets/${ticket.id}/comments`, { body: 'two' })
+    const activity = async (query: string) =>
+      (await call<Activity[]>('GET', `/tickets/${ticket.id}/activity?${query}`)).body
+    const all = await activity('')
+
+    assert.deepEqual(
+      (await activity('type=comment')).map((entry) => entry.data),
+      [{ body: 'one' }, { body: 'two' }],
+    )
+    assert.deepEqual(
+      (await activity(`afterId=${all[1].id}`)).map((entry) => entry.type),
+      ['claimed', 'comment'],
+    )
+    assert.deepEqual(
+      (await activity(`afterId=${all[1].id}&type=comment&type=claimed`)).map((entry) => entry.type),
+      ['claimed', 'comment'],
+    )
+    assert.deepEqual(await activity(`afterId=${all.at(-1)!.id}`), [])
+    assert.equal((await call('GET', `/tickets/${ticket.id}/activity?type=nope`)).status, 400)
   })
 })
 
@@ -254,7 +404,7 @@ describe('idle tickets', () => {
 
     const minutes = AGENT_IDLE_MINUTES + 1
     const released = await later(minutes, async () => {
-      assert.equal((await call('POST', `/tickets/${running.id}/heartbeat`, undefined, 'alpha')).status, 204)
+      assert.equal((await call('POST', `/tickets/${running.id}/heartbeat`, undefined, 'alpha')).status, 200)
       await call('POST', `/tickets/${discussed.id}/comments`, { body: 'Still on it' }, 'alpha')
       const listed = await call<Ticket[]>('GET', `/columns/${column.id}/idle-tickets`)
       assert.deepEqual(
@@ -277,6 +427,30 @@ describe('idle tickets', () => {
     assert.deepEqual(
       activity.slice(-2).map((entry) => entry.type),
       ['released', 'moved'],
+    )
+  })
+
+  test('releasing into the done column skips tickets that cannot enter it instead of failing the batch', async () => {
+    await call('PATCH', `/boards/${boardId}`, { doneColumn: 'Done' })
+    const stuck = await addTicket({ title: 'Stuck' })
+    const asked = await addTicket({ title: 'Asked', tags: ['question'] })
+    for (const ticket of [stuck, asked]) {
+      await call('POST', `/tickets/${ticket.id}/claim`, { agent: 'alpha', moveTo: 'Doing' })
+    }
+    const column = await doingColumn()
+
+    const released = await later(AGENT_IDLE_MINUTES + 1, () =>
+      call<Ticket[]>('POST', `/columns/${column.id}/release-idle`, { moveTo: 'Done' }),
+    )
+
+    assert.equal(released.status, 200)
+    assert.deepEqual(
+      released.body.map((ticket) => ticket.title),
+      ['Asked'],
+    )
+    assert.deepEqual(
+      (await ticketsIn('Doing')).map((ticket) => [ticket.title, ticket.assignee]),
+      [['Stuck', 'alpha']],
     )
   })
 
@@ -303,7 +477,7 @@ describe('idle tickets', () => {
 
     const later1 = await later(1, async () => {
       // Without a step, a heartbeat keeps the run's step, and nothing changes that boards need to show.
-      assert.equal((await call('POST', `/tickets/${ticket.id}/heartbeat`)).status, 204)
+      assert.equal((await call('POST', `/tickets/${ticket.id}/heartbeat`)).status, 200)
       return run()
     })
     assert.equal(later1?.startedAt, started?.startedAt)
@@ -313,11 +487,18 @@ describe('idle tickets', () => {
 
     await call('POST', `/tickets/${ticket.id}/heartbeat`, { step: 'Fixing CI' })
     assert.equal((await run())?.step, 'Fixing CI')
+    assert.equal((await run())?.tokens, null)
     assert.equal(events.length, 2)
+
+    // The tokens a run has used so far change what boards show, and a heartbeat without them keeps them.
+    await call('POST', `/tickets/${ticket.id}/heartbeat`, { tokens: 120_000 })
+    await call('POST', `/tickets/${ticket.id}/heartbeat`, { step: 'Fixing CI' })
+    assert.deepEqual(await run().then((current) => [current?.step, current?.tokens]), ['Fixing CI', 120_000])
+    assert.equal(events.length, 3)
 
     assert.equal((await call('DELETE', `/tickets/${ticket.id}/heartbeat`)).status, 204)
     assert.equal(await run(), null)
-    assert.equal(events.length, 3)
+    assert.equal(events.length, 4)
     unsubscribe()
     assert.equal((await call('DELETE', '/tickets/missing/heartbeat')).status, 404)
     assert.equal((await call('POST', `/tickets/${ticket.id}/heartbeat`, { step: 'x'.repeat(201) })).status, 400)
@@ -368,11 +549,18 @@ describe('idle tickets', () => {
     assert.equal((await activity()).filter((item) => item.type === 'stopped').length, 1)
 
     // The run's heartbeats keep the request; its end clears it, and the next run starts without one.
-    await call('POST', `/tickets/${ticket.id}/heartbeat`, undefined, 'alpha')
+    const beat = await call<{ stopRequested: { at: string; by: string } | null }>(
+      'POST',
+      `/tickets/${ticket.id}/heartbeat`,
+      undefined,
+      'alpha',
+    )
+    assert.equal(beat.body.stopRequested?.by, 'person')
     assert.equal((await get()).run?.stopRequested?.by, 'person')
     await call('DELETE', `/tickets/${ticket.id}/heartbeat`, undefined, 'alpha')
     assert.equal((await get()).run, null)
-    await call('POST', `/tickets/${ticket.id}/heartbeat`, undefined, 'alpha')
+    const fresh = await call<{ stopRequested: null }>('POST', `/tickets/${ticket.id}/heartbeat`, undefined, 'alpha')
+    assert.equal(fresh.body.stopRequested, null)
     assert.equal((await get()).run?.stopRequested, null)
 
     assert.equal((await call('POST', '/tickets/missing/stop')).status, 404)
@@ -496,6 +684,20 @@ describe('boards', () => {
     assert.equal(after.tickets[0].columnId, after.columns[1].id)
   })
 
+  test('deleting a column with tickets needs moveTicketsTo or deleteTickets', async () => {
+    await addTicket({ title: 'A', column: 'Doing' })
+    const { body: board } = await call<BoardDetail>('GET', `/boards/${boardId}`)
+    const id = board.columns[1].id
+
+    const refused = await call('DELETE', `/columns/${id}`)
+    assert.equal(refused.status, 409)
+    const deleted = await call('DELETE', `/columns/${id}?deleteTickets=true`)
+    const { body: after } = await call<BoardDetail>('GET', `/boards/${boardId}`)
+
+    assert.equal(deleted.status, 204)
+    assert.equal(after.tickets.length, 0)
+  })
+
   test('export/import round-trips a board', async () => {
     const ticket = await addTicket({ title: 'A', column: 'Done', tags: ['x'], priority: 'high', agentEffort: 'low' })
     await call('POST', `/tickets/${ticket.id}/comments`, { body: 'hello' })
@@ -515,6 +717,24 @@ describe('boards', () => {
     unsubscribe()
 
     assert.deepEqual(events, [boardId])
+  })
+})
+
+describe('ticket search', () => {
+  test('matches the search text literally, not as LIKE wildcards', async () => {
+    await addTicket({ title: 'Half of it is done 50% now' })
+    await addTicket({ title: 'Five hundred' })
+    await addTicket({ title: 'Snake_case name' })
+    await addTicket({ title: 'Snakexcase name' })
+    await addTicket({ title: 'Back\\slash' })
+    await addTicket({ title: 'Backxslash' })
+
+    const titles = async (q: string) =>
+      (await call<Ticket[]>('GET', `/boards/${boardId}/tickets?q=${encodeURIComponent(q)}`)).body.map((t) => t.title)
+
+    assert.deepEqual(await titles('50%'), ['Half of it is done 50% now'])
+    assert.deepEqual(await titles('snake_case'), ['Snake_case name'])
+    assert.deepEqual(await titles('Back\\slash'), ['Back\\slash'])
   })
 })
 
@@ -597,6 +817,7 @@ describe('run records', () => {
     exitCode: 0,
     durationMs: 1_380_000,
     turns: 41,
+    tokens: 1_234_567,
     costUsd: 1.2,
     message: 'Opened the pull request.',
     steps: [
@@ -622,6 +843,7 @@ describe('run records', () => {
       { tool: 'Edit', summary: 'src/app.ts', error: true },
     ])
     assert.equal(first.body.omittedSteps, null)
+    assert.equal(first.body.tokens, 1_234_567)
     // A run that ended without a result has little more to say.
     assert.deepEqual(
       { ...second.body, id: 0, createdAt: '' },
@@ -633,6 +855,7 @@ describe('run records', () => {
         exitCode: 124,
         durationMs: null,
         turns: null,
+        tokens: null,
         costUsd: null,
         apiKey: false,
         message: '',

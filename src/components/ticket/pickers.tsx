@@ -7,10 +7,11 @@ import {
   PlusIcon,
   UserRoundXIcon,
 } from 'lucide-react'
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useRef, useState } from 'react'
 import {
   AGENT_DEFAULTS,
   AGENT_EFFORTS,
+  AGENT_MODEL_HINTS,
   AGENT_MODELS,
   type AgentEffort,
   type Priority,
@@ -20,6 +21,7 @@ import { ColorDot } from '@/components/common/TagChip'
 import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Calendar } from '@/components/ui/calendar'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import {
@@ -111,14 +113,37 @@ export function EffortPicker({ value, onChange, children }: PickerProps<AgentEff
 
 const BOARD_MODEL = '__board'
 
+/** The last model in the menu `element` is in, just above the model name field. */
+const lastModel = (element: Element) =>
+  [...(element.closest('[role="menu"]')?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? [])].at(-1)
+
 /** The model the board's agent works a ticket with; `null` follows the board's setting. */
 export function ModelPicker({ value, onChange, children }: PickerProps<string | null>) {
   const { detail } = useBoardContext()
-  const models = [...new Set([...AGENT_MODELS, ...(value ? [value] : [])])]
+  const [typed, setTyped] = useState('')
+  const field = useRef<HTMLInputElement>(null)
+  const isClaude = (detail.board.agentName ?? AGENT_DEFAULTS.name) === 'claude'
+  const models = [...new Set([...(isClaude ? AGENT_MODELS : []), ...(value ? [value] : [])])]
+  const submit = () => {
+    const name = typed.trim()
+    if (!name) return
+    onChange(name)
+    setTyped('')
+  }
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-48">
+      <DropdownMenuContent
+        align="start"
+        className="w-80"
+        onKeyDown={(event) => {
+          // Menus keep Tab and the arrow keys on their items: Tab, or ArrowDown on the last model, goes to the name field.
+          if (event.key === 'Tab' || (event.key === 'ArrowDown' && event.target === lastModel(event.currentTarget))) {
+            event.preventDefault()
+            field.current?.focus()
+          }
+        }}
+      >
         <DropdownMenuRadioGroup
           value={value ?? BOARD_MODEL}
           onValueChange={(next) => onChange(next === BOARD_MODEL ? null : next)}
@@ -129,9 +154,36 @@ export function ModelPicker({ value, onChange, children }: PickerProps<string | 
           {models.map((model) => (
             <DropdownMenuRadioItem key={model} value={model}>
               {model}
+              {model in AGENT_MODEL_HINTS && (
+                <span className="ml-2 text-xs text-muted-foreground">
+                  {AGENT_MODEL_HINTS[model as keyof typeof AGENT_MODEL_HINTS]}
+                </span>
+              )}
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
+        <div className="border-t p-1.5">
+          <Input
+            ref={field}
+            value={typed}
+            onChange={(event) => setTyped(event.target.value)}
+            onKeyDown={(event) => {
+              // Keep the menu's typeahead and arrow keys from stealing the typing.
+              event.stopPropagation()
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                submit()
+              } else if (event.key === 'Tab' || event.key === 'ArrowUp') {
+                // Back to the models.
+                event.preventDefault()
+                lastModel(event.currentTarget)?.focus()
+              }
+            }}
+            placeholder="Type a model name, then Enter"
+            aria-label="Model name"
+            className="h-8"
+          />
+        </div>
       </DropdownMenuContent>
     </DropdownMenu>
   )

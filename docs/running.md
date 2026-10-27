@@ -28,8 +28,12 @@ something acts on it: the agent services on Linux, or elsewhere the updater cont
 [Agents](agents.md#running-agents-unattended)). Changes to `deploy/nginx.conf` take effect after
 `docker compose up -d --build` too, since it is built into the nginx image.
 
-There is no authentication, so only publish it on a network you trust. To put it on the internet, terminate
-TLS in front of nginx (or add a `listen 443 ssl` server block with your certificates in `deploy/nginx.conf`).
+There is no authentication, so only publish it on a network you trust. Anyone who can reach it can do what the board
+can, and that includes pointing a board's local repository path at any git repository the server can see, then reading
+its diffs and merging its branches. In Docker that is any repository in the home directory it mounts
+(`ULTRAKANBAN_HOME`): the image trusts every repository whoever owns it (`safe.directory`), so that local repositories
+work. To put it on the internet, terminate TLS in front of nginx (or add a `listen 443 ssl` server block with your
+certificates in `deploy/nginx.conf`).
 
 ## Without Docker
 
@@ -47,17 +51,18 @@ npm run build
 npm start            # http://127.0.0.1:4317 serves the app and the API
 ```
 
-| Variable                  | Default                   | Purpose                                                                                                                                                       |
-| ------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PORT`                    | `4317`                    | API / app port                                                                                                                                                |
-| `HOST`                    | `127.0.0.1`               | Bind address. Use `0.0.0.0` to reach it from your phone on LAN                                                                                                |
-| `ULTRAKANBAN_DB`          | `data/ultrakanban.db`     | SQLite database file (`:memory:` for throwaway)                                                                                                               |
-| `ULTRAKANBAN_ATTACHMENTS` | next to the database      | Directory for uploaded attachment files                                                                                                                       |
-| `GITHUB_TOKEN`            | `gh auth token`           | Token for checking pull requests (private repos need `repo` read access) and creating repositories (`repo` scope). One set on the Setup page takes precedence |
-| `TYPESAFE_API_KEY`        |                           | Optional TypeSafe AI key for routing tickets with Jev ([docs/JEV.md](JEV.md)). One set in the environment takes precedence over one on the Setup page.        |
-| `TYPESAFE_API_BASE`       | `https://api.typesafe.ai` | Where TypeSafe is reached; set it to use a LiteLLM or other proxy                                                                                             |
-| `GITHUB_SYNC_INTERVAL`    | `60`                      | Seconds between pull request checks                                                                                                                           |
-| `ULTRAKANBAN_URL`         |                           | Address people open the app at, e.g. `http://kanban.lan:4317`; notifications link to the ticket there                                                         |
+| Variable                  | Default                   | Purpose                                                                                                                                                                     |
+| ------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                    | `4317`                    | API / app port                                                                                                                                                              |
+| `HOST`                    | `127.0.0.1`               | Bind address. Use `0.0.0.0` to reach it from your phone on LAN                                                                                                              |
+| `ULTRAKANBAN_DB`          | `data/ultrakanban.db`     | SQLite database file (`:memory:` for throwaway)                                                                                                                             |
+| `ULTRAKANBAN_ATTACHMENTS` | next to the database      | Directory for uploaded attachment files                                                                                                                                     |
+| `GITHUB_TOKEN`            | `gh auth token`           | Token for checking pull requests (private repos need `repo` read access) and creating repositories (`repo` scope). One set on the Setup page takes precedence               |
+| `TYPESAFE_API_KEY`        |                           | Optional TypeSafe AI key for routing tickets with Jev ([docs/JEV.md](JEV.md)). One set in the environment takes precedence over one on the Setup page.                      |
+| `TYPESAFE_API_BASE`       | `https://api.typesafe.ai` | Where TypeSafe is reached; set it to use a LiteLLM or other proxy                                                                                                           |
+| `GITHUB_SYNC_INTERVAL`    | `60`                      | Seconds between pull request checks                                                                                                                                         |
+| `ULTRAKANBAN_URL`         |                           | Address people open the app at, e.g. `http://kanban.lan:4317`; notifications link to the ticket there                                                                       |
+| `ULTRAKANBAN_HOME`        | home directory            | What `~/` in a board's local repository path stands for. In Docker, your home directory, which the container mounts at the same path (`scripts/setup.sh` puts it in `.env`) |
 
 There is no authentication: only expose it on networks you trust.
 

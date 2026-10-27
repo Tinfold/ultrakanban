@@ -319,6 +319,34 @@ describe('overview', () => {
     }
   })
 
+  test('deleting a ticket keeps the usage of its runs on the board', async () => {
+    const agent = 'deleted-ticket-agent'
+    const ticket = await addTicket({ title: 'Deleted' })
+    await call('POST', `/tickets/${ticket.id}/usage`, {
+      agent,
+      inputTokens: 10,
+      outputTokens: 20,
+      costUsd: 0.5,
+      models: [{ model: 'opus', inputTokens: 10, outputTokens: 20, costUsd: 0.5 }],
+    })
+    const tokensBefore = (await call<Overview>('GET', '/overview')).body.boards.find(
+      (entry) => entry.id === boardId,
+    )?.tokens
+    assert.equal((await call('DELETE', `/tickets/${ticket.id}`)).status, 204)
+
+    const { body: board } = await call<TokenUsage[]>('GET', `/boards/${boardId}/usage`)
+    const runs = board.filter((entry) => entry.agent === agent)
+    assert.deepEqual(
+      runs.map((entry) => [entry.ticketId, entry.costUsd, entry.models.map((model) => model.model)]),
+      [[null, 0.5, ['opus']]],
+    )
+    const { body: overview } = await call<Overview>('GET', '/overview')
+    assert.equal(overview.boards.find((entry) => entry.id === boardId)?.tokens, tokensBefore)
+    const usage = overview.agents.find((entry) => entry.name === agent)?.usage
+    assert.deepEqual([usage?.runs, usage?.costUsd], [1, 0.5])
+    assert.ok(!overview.tickets.some((entry) => entry.id === ticket.id))
+  })
+
   test('agents report runs that were not on a ticket to the board', async () => {
     const agent = 'board-token-agent'
     const ticket = await addTicket({ title: 'A' })

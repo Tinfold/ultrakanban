@@ -1,4 +1,4 @@
-import type { BoardDetail, Priority, Tag, Ticket } from '@shared/domain'
+import type { AgentEffort, BoardDetail, Priority, Tag, Ticket, TicketSize } from '@shared/domain'
 import { priorityRank } from './priority'
 
 export const SORT_OPTIONS = {
@@ -8,6 +8,7 @@ export const SORT_OPTIONS = {
   updatedAt: 'Recently updated',
   createdAt: 'Newest',
   title: 'Title',
+  cost: 'Cost',
 } as const
 
 export type SortKey = keyof typeof SORT_OPTIONS
@@ -19,6 +20,12 @@ export interface TicketFilter {
   assignees: (string | null)[]
   /** `null` matches tickets in no epic. Missing from view preferences saved before there were epics. */
   epicIds?: (string | null)[]
+  /** Models tickets are set to; `null` matches tickets using the board's. Missing from older saved preferences. */
+  models?: (string | null)[]
+  /** Effort levels tickets are set to; `null` matches tickets using the board's. Missing from older saved preferences. */
+  efforts?: (AgentEffort | null)[]
+  /** Size estimates; `null` matches tickets without one. Missing from older saved preferences. */
+  estimates?: (TicketSize | null)[]
 }
 
 export interface ViewPrefs {
@@ -36,7 +43,13 @@ export const DEFAULT_VIEW: ViewPrefs = {
 export const NO_FILTER: TicketFilter = DEFAULT_VIEW.filter
 
 export const activeFilterCount = (filter: TicketFilter) =>
-  filter.priorities.length + filter.tagIds.length + filter.assignees.length + (filter.epicIds?.length ?? 0)
+  filter.priorities.length +
+  filter.tagIds.length +
+  filter.assignees.length +
+  (filter.epicIds?.length ?? 0) +
+  (filter.models?.length ?? 0) +
+  (filter.efforts?.length ?? 0) +
+  (filter.estimates?.length ?? 0)
 
 function matchesQuery(ticket: Ticket, query: string, tagsById: Map<string, Tag>) {
   const needle = query
@@ -68,6 +81,9 @@ export function filterTickets(
       (!filter.tagIds.length || filter.tagIds.some((tagId) => ticket.tagIds.includes(tagId))) &&
       (!filter.assignees.length || filter.assignees.includes(ticket.assignee)) &&
       (!filter.epicIds?.length || filter.epicIds.includes(ticket.epicId)) &&
+      (!filter.models?.length || filter.models.includes(ticket.agentModel)) &&
+      (!filter.efforts?.length || filter.efforts.includes(ticket.agentEffort)) &&
+      (!filter.estimates?.length || filter.estimates.includes(ticket.estimate)) &&
       matchesQuery(ticket, query, tagsById),
   )
 }
@@ -81,6 +97,7 @@ const COMPARATORS: Record<SortKey, (a: Ticket, b: Ticket) => number> = {
   dueDate: (a, b) => compareDue(a, b) || a.position - b.position,
   updatedAt: (a, b) => b.updatedAt.localeCompare(a.updatedAt),
   createdAt: (a, b) => b.createdAt.localeCompare(a.createdAt),
+  cost: (a, b) => (b.usage.costUsd ?? -1) - (a.usage.costUsd ?? -1) || a.position - b.position,
   title: (a, b) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' }),
 }
 
@@ -95,6 +112,12 @@ export function groupTickets(board: BoardDetail, tickets: Ticket[], sort: SortKe
 
 export function assigneesOf(tickets: Ticket[]) {
   return [...new Set(tickets.flatMap((ticket) => (ticket.assignee ? [ticket.assignee] : [])))].sort((a, b) =>
+    a.localeCompare(b),
+  )
+}
+
+export function modelsOf(tickets: Ticket[]) {
+  return [...new Set(tickets.flatMap((ticket) => (ticket.agentModel ? [ticket.agentModel] : [])))].sort((a, b) =>
     a.localeCompare(b),
   )
 }

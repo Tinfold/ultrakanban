@@ -1,6 +1,11 @@
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
-import { ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES, parsePullRequestUrl } from '../../shared/domain.ts'
+import {
+  ATTACHMENT_TYPES,
+  MAX_ATTACHMENT_BYTES,
+  parseLocalPullRequestUrl,
+  parsePullRequestUrl,
+} from '../../shared/domain.ts'
 import { parseChecklist } from '../../shared/checklist.ts'
 import {
   approvePlanSchema,
@@ -9,6 +14,7 @@ import {
   commentSchema,
   createSubticketSchema,
   heartbeatSchema,
+  listActivityQuerySchema,
   listRunsQuerySchema,
   mergeTicketSchema,
   moveTicketSchema,
@@ -28,6 +34,7 @@ import { actorOf, errorBody, readJson } from '../http.ts'
 import { routeClaim, routeRun } from '../jev-routing.ts'
 import { listActivity } from '../store/activity.ts'
 import { createAttachment, listAttachments } from '../store/attachments.ts'
+import { addLocalPullRequestComment } from '../store/local-pull-requests.ts'
 import {
   addComment,
   approvePlan,
@@ -48,10 +55,16 @@ import {
 } from '../store/tickets.ts'
 import { listRuns, recordRun } from '../store/runs.ts'
 import { listUsage, recordUsage } from '../store/usage.ts'
+import { mergeLocalPullRequest } from './local-pull-requests.ts'
 
-/** Posts the comment on the ticket's pull request; returns its URL. */
-async function commentOnPullRequest(github: GitHubClient, ticketId: string, body: string) {
+/** Posts the comment on the ticket's pull request, on GitHub or a local one; returns its URL. */
+async function commentOnPullRequest(github: GitHubClient, ticketId: string, body: string, actor: string) {
   const url = getTicket(ticketId).pullRequest?.url
+  const local = url && parseLocalPullRequestUrl(url)
+  if (local) {
+    const comment = transaction(() => addLocalPullRequestComment(local.boardId, local.number, { body }, actor))
+    return `${local.url}#comment-${comment.id}`
+  }
   const pullRequest = url && parsePullRequestUrl(url)
   if (!pullRequest) throw badRequest('The ticket has no GitHub pull request to comment on')
   if (!(await github.auth())) {
@@ -123,7 +136,13 @@ export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles, notifi
     .post('/:ticketId/pull-request/sync', async (c) => c.json(await pullRequests.syncTicket(c.req.param('ticketId'))))
     .post('/:ticketId/merge', async (c) => {
       const { method } = await readJson(c, mergeTicketSchema)
-      return c.json(await mergeQueue.mergeTicket(c.req.param('ticketId'), method, actorOf(c)))
+      const ticketId = c.req.param('ticketId')
+      const local = parseLocalPullRequestUrl(getTicket(ticketId).pullRequest?.url ?? '')
+      if (local) {
+        await mergeLocalPullRequest(local.boardId, local.number, actorOf(c))
+        return c.json(getTicket(ticketId))
+      }
+      return c.json(await mergeQueue.mergeTicket(ticketId, method, actorOf(c)))
     })
     .get('/:ticketId/attachments', (c) => c.json(listAttachments(c.req.param('ticketId'))))
     .post(
@@ -189,8 +208,7 @@ export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles, notifi
     .post('/:ticketId/heartbeat', async (c) => {
       // The body is optional: a heartbeat without one keeps the run's step.
       const input = (await c.req.text()) ? await readJson(c, heartbeatSchema) : {}
-      recordHeartbeat(c.req.param('ticketId'), input)
-      return c.body(null, 204)
+      return c.json(recordHeartbeat(c.req.param('ticketId'), input))
     })
     .delete('/:ticketId/heartbeat', (c) => {
       endRun(c.req.param('ticketId'))
@@ -200,7 +218,8 @@ export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles, notifi
     .post('/:ticketId/stop', (c) => c.json(transaction(() => requestStop(c.req.param('ticketId'), actorOf(c)))))
     .get('/:ticketId/activity', (c) => {
       const ticket = getTicket(c.req.param('ticketId'))
-      return c.json(listActivity(ticket.id))
+      const query = listActivityQuerySchema.parse({ afterId: c.req.query('afterId'), type: c.req.queries('type') })
+      return c.json(listActivity(ticket.id, query))
     })
     .get('/:ticketId/usage', (c) => c.json(listUsage(c.req.param('ticketId'))))
     .post('/:ticketId/usage', async (c) => {
@@ -226,7 +245,7 @@ export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles, notifi
       const ticketId = c.req.param('ticketId')
       // Posted on the pull request first, so a comment GitHub turns down isn't left on the ticket alone.
       const pullRequestComment = pullRequest
-        ? await commentOnPullRequest(pullRequests.github, ticketId, body)
+        ? await commentOnPullRequest(pullRequests.github, ticketId, body, actorOf(c))
         : undefined
       const comment = transaction(() => addComment(ticketId, body, actorOf(c), pullRequestComment))
       const ticket = getTicket(ticketId)

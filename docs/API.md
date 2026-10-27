@@ -9,16 +9,21 @@ JSON over HTTP. Base URL: `http://127.0.0.1:4317/api` (in development the Vite d
   - `400 validation_error` / `bad_request` - fix the request.
   - `404 not_found` - unknown board/column/tag/ticket or route.
   - `404 no_ticket_available` - `claim-next` found nothing to claim.
-  - `404 usage_reserve_reached` - `claim-next` hands out no new tickets while the week's or the current session's
+  - `429 usage_reserve_reached` - `claim-next` and `POST /tickets/:id/claim` hand out no new tickets while the week's or the current session's
     Claude usage is at its usage reserve, or a limit is used up and agents may not spend usage credits (see
-    [Claude usage](#claude-usage)); `details` has the `limit` and its `reservePercent`. Try again later.
-  - `409 already_claimed` / `claimed_by_other` - someone else holds the ticket (`details.ticket` has its current state).
-  - `409 version_conflict` - `ifVersion` did not match (`details.ticket` has its current state).
+    [Claude usage](#claude-usage)); `details` has the `limit` and its `reservePercent`. The `Retry-After` header says how many seconds until the limit resets (300 if that is unknown).
+  - `409 blocked` - `POST /tickets/:id/claim` on a ticket `claim-next` would skip (tagged `blocked`, waiting for an
+    unfinished ticket, or with unfinished sub-tickets). A ticket the agent already holds can still be claimed by it.
+  - `409 already_claimed` / `claimed_by_other` - someone else holds the ticket (`details` has its current `version`, `assignee` and `columnId`).
+  - `409 version_conflict` - `ifVersion` did not match (`details` has its current `version`, `assignee` and `columnId`,
+    and its `description` too for a `PATCH /tickets/:id` that sets one).
   - `409 tag_exists` - tag names are unique per board (case-insensitive).
   - `409 pull_request_not_merged` - the board's done column only accepts tickets whose pull request is merged.
   - `409 merge_in_progress` - the board's pull requests are already being merged.
   - `409 awaiting_approval` - the ticket's plan waits for a person's approval (see [Plans and approval](#plans-and-approval)).
   - `409 cannot_merge` - the ticket's pull request can't be merged now (draft, conflicts, builds on another in review).
+  - `409 merge_conflicts` / `merge_failed` - a local pull request can't be merged (see [Local pull requests](#local-pull-requests)).
+  - `502 git_error` - git failed in the board's local repository; the message says how.
   - `413 payload_too_large` / `415 unsupported_media_type` - attachments must be PNG, JPEG, GIF, WebP, MP4 or WebM, up to 25 MB.
 
 Columns, tags and epics can be referenced **by id or by name** (an epic's title) (case-insensitive) wherever a request field says `ref`.
@@ -47,10 +52,11 @@ for a model that has none (`gemini/gemini-2.5-pro/default`). The model is everyt
    ticket of the board (`blocked by #12`, `blocked on #12`, `depends on #3 and #4`, `waiting on #7`) until that ticket is in the
    done column (the board's last column if it has none) or its pull request is merged. It also skips tickets whose
    sub-tickets aren't all finished (see [Sub-tickets](#sub-tickets)). While the week's or the current session's Claude
-   usage is at its usage reserve, it claims nothing and answers `404 usage_reserve_reached` (see
+   usage is at its usage reserve, it claims nothing and answers `429 usage_reserve_reached` (see
    [Claude usage](#claude-usage)).
-   Or claim a specific ticket: `POST /api/tickets/:ticketId/claim`.
-3. Read the ticket's comments (`GET /api/tickets/:ticketId/activity`) before starting: they may be newer than
+   Or claim a specific ticket: `POST /api/tickets/:ticketId/claim`, which applies the same checks (`409 blocked`,
+   `429 usage_reserve_reached`) unless the agent already holds the ticket.
+3. Read the ticket's comments (`GET /api/tickets/:ticketId/activity?type=comment`) before starting: they may be newer than
    the description. Report progress and decisions with `POST /api/tickets/:ticketId/comments`.
    If the description has a checklist (`- [ ] step`), check off each step as soon as you finish it with
    `POST /api/tickets/:ticketId/checklist/:index` rather than rewriting the description, not all at once before
@@ -200,6 +206,117 @@ ticket in the review column whose open pull request has merge conflicts, asking 
 only fix conflicts (`agentConflictConcurrency`) and those that work tickets fix them side by side. It returns
 `{ tickets: Ticket[] }`, the tickets it commented on; `400` if the board has no review column.
 
+### Local pull requests
+
+A board with a local repository (`localRepoPath`, see [Boards](#boards)) has pull requests of its own, so nothing has
+to be on GitHub: the agent pushes its branch to that repository and opens one for its ticket. Opening one links it as
+the ticket's `pullRequest`, with the URL `/b/<board>/pr/<number>` (the page that shows it), and the ticket follows its
+state as it does a GitHub pull request's: merging it moves the ticket to the done column.
+
+| Method | Path                                              | Body                                                          | Returns                                                      |
+| ------ | ------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------ |
+| POST   | `/tickets/:ticketId/local-pull-request`           | `{ head, base?, title?, body? }`                              | `201 LocalPullRequestDetail`, linked to the ticket           |
+| GET    | `/boards/:boardId/pull-requests?state=`           |                                                               | `LocalPullRequest[]`, newest first; `state` filters them     |
+| GET    | `/boards/:boardId/pull-requests/:number`          |                                                               | `LocalPullRequestDetail`, with its comments                  |
+| GET    | `/boards/:boardId/pull-requests/:number/diff`     |                                                               | `LocalPullRequestDiff`: `git diff base...head`, file by file |
+| GET    | `/boards/:boardId/pull-requests/:number/commits`  |                                                               | `LocalCommit[]`: `git log base..head`, oldest first          |
+| POST   | `/boards/:boardId/pull-requests/:number/comments` | `{ body, path?, line?, side?: "right" \| "left" }` (markdown) | `201 LocalPullRequestComment`                                |
+| POST   | `/boards/:boardId/pull-requests/:number/merge`    |                                                               | the merged `LocalPullRequestDetail`; its ticket is now done  |
+| POST   | `/boards/:boardId/pull-requests/:number/close`    |                                                               | the closed `LocalPullRequestDetail`                          |
+
+- **Opening:** `head` is the branch to merge and `base` the one to merge it into, the repository's default branch (its
+  `HEAD`) when left out; `title` is the ticket's when left out. Both branches must be in the local repository, and
+  `head` must have commits `base` doesn't (`400` otherwise, and when the board has no local repository or it isn't a
+  git repository). A branch has one open pull request at a time, and so does a ticket (push to its branch, or close
+  it first): `409 pull_request_exists` (its `details.pullRequest` is the open one). The author is the request's `X-Actor`. A ticket can also link a local pull request opened for it
+  through `pullRequest` (on `PATCH /tickets/:ticketId` or `review`); one opened for another ticket is a `400`.
+- **Comments:** without `path` and `line` a comment is on the whole pull request; with them it is inline, on that line
+  of that file's diff, numbered as on its `side`: `right` (the default) the head's version of the file, `left` the
+  base's (for deleted lines). A comment from anyone but the agent holding the ticket wakes the agent, as a ticket
+  comment does. `POST /tickets/:ticketId/comments` with `pullRequest: true` posts on the ticket's local pull request
+  when it has one (`data.pullRequestComment` is `/b/<board>/pr/<number>#comment-<id>`).
+- **Merging** runs `git merge --no-ff` of the head into the base, with the message `Merge pull request #<number> from
+  <head>`, in the worktree that has the base checked out, so its files follow. In a bare repository, or when nobody
+  has the base checked out, the same merge commit is made without a worktree. It is refused, changing nothing, with
+  `409 merge_conflicts` when they conflict (`details.files` lists the files; rebase the head onto the base and resolve
+  them first), `409 merge_failed` when git refuses (e.g. uncommitted changes in the worktree that the merge would
+  overwrite) or can't run, or when the worktree that has the base checked out isn't there (`git worktree prune` forgets
+  one that was deleted), `409 branch_missing` and `409 pull_request_not_open`. Merge commits are by the repository's git identity,
+  or `ultrakanban <ultrakanban@localhost>` when it has none. `POST /tickets/:ticketId/merge` merges a ticket's local
+  pull request the same way; "merge all" skips them, and auto-merge and the `ready` notification leave them out.
+- **Closing** leaves the branches as they are and the ticket where it is (its `pullRequest.state` is `closed`).
+- Once merged or closed, its diff and commits are read from the commits it had then (`headSha`, `baseSha`), so they
+  stay readable when its branches move on or are deleted, until git prunes them (`409 commit_missing`).
+
+```ts
+interface LocalPullRequest {
+  boardId: string
+  number: number // per board, from 1
+  url: string // /b/<board>/pr/<number>; its ticket's pullRequest.url
+  ticketId: string | null // null once the ticket is deleted
+  ticketNumber: number | null
+  title: string
+  body: string // markdown
+  head: string // branch merged
+  base: string // branch merged into
+  state: 'open' | 'merged' | 'closed'
+  author: string
+  headSha: string | null // the commits it had once merged or closed; null while open
+  baseSha: string | null
+  mergeSha: string | null // the merge commit; null unless merged (or when head was in base already)
+  closedBy: string | null // who merged or closed it
+  closedAt: string | null
+  commentCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+interface LocalPullRequestDetail extends LocalPullRequest {
+  comments: LocalPullRequestComment[] // oldest first
+}
+
+interface LocalPullRequestComment {
+  id: string
+  body: string // markdown
+  author: string
+  path: string | null // inline comments only
+  line: number | null
+  side: 'right' | 'left' | null // right: the head's version of the file, left: the base's
+  createdAt: string
+  updatedAt: string
+}
+
+interface LocalPullRequestDiff {
+  baseSha: string // where head branched off base
+  headSha: string
+  files: {
+    path: string // in the head; in the base for a deleted file
+    oldPath: string | null // renamed or copied from
+    status: 'added' | 'deleted' | 'modified' | 'renamed' | 'copied'
+    binary: boolean // binary files have no hunks
+    additions: number
+    deletions: number
+    hunks: {
+      header: string // @@ -1,4 +1,5 @@ ...
+      oldStart: number
+      oldLines: number
+      newStart: number
+      newLines: number
+      lines: { type: 'context' | 'add' | 'delete'; oldLine: number | null; newLine: number | null; text: string }[]
+    }[]
+  }[]
+}
+
+interface LocalCommit {
+  sha: string
+  author: string
+  email: string
+  date: string // ISO 8601, author date
+  subject: string // first line of the message
+  body: string // the rest of it
+}
+```
+
 ## Types
 
 ```ts
@@ -246,6 +363,29 @@ interface Ticket {
   updatedAt: string
 }
 
+// A ticket as ?compact=true lists it: no description, usage, run and the like. GET /tickets/:ticketId for the rest.
+type CompactTicket = Pick<
+  Ticket,
+  | 'id'
+  | 'number'
+  | 'columnId'
+  | 'title'
+  | 'priority'
+  | 'assignee'
+  | 'tagIds'
+  | 'epicId'
+  | 'parentId'
+  | 'version'
+  | 'estimate'
+  | 'approval'
+  | 'waitingSince'
+  | 'archived'
+  | 'subtickets'
+  | 'commentCount'
+  | 'agentModel'
+  | 'agentEffort'
+> & { pullRequest: Pick<PullRequest, 'url' | 'repo' | 'number' | 'state' | 'checks' | 'conflicts'> | null }
+
 interface Epic {
   id: string
   boardId: string
@@ -262,6 +402,7 @@ interface AgentRun {
   startedAt: string // its first heartbeat
   seenAt: string // its latest heartbeat
   step: string | null // what it is doing, as its agent last said
+  tokens: number | null // tokens it has used so far (input, output and cache), as its agent last said
   stopRequested: { at: string; by: string } | null // when someone asked it to stop (POST /tickets/:id/stop) and who, until it ends
 }
 
@@ -272,8 +413,8 @@ interface ChecklistItem {
 }
 
 interface PullRequest {
-  url: string // https://github.com/owner/repo/pull/123
-  repo: string // owner/repo
+  url: string // https://github.com/owner/repo/pull/123, or a local pull request's /b/<board>/pr/<number>
+  repo: string // owner/repo; local/<folder name of the board's local repository> for a local pull request
   number: number
   state: 'unknown' | 'open' | 'draft' | 'merged' | 'closed' // unknown until GitHub has been checked
   title: string | null
@@ -296,12 +437,18 @@ interface BoardSummary {
   reviewColumnId: string | null // where POST /tickets/:id/review moves tickets
   doneColumnId: string | null // only accepts tickets with a merged pull request
   githubRepo: string | null // "owner/name" the board's tickets are about
+  localRepoPath: string | null // git repository on the host the board works on instead ("/..." or "~/...")
   agentEnabled: boolean // the host's agent supervisor runs an agent loop for this board
   agentName: string | null // name of that agent, the loop that controls it ("claude" when null)
   agentModel: string | null // model it runs, an alias or full name ("opus" when null)
   agentEffort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null // effort it runs at ("medium" when null)
   agentConcurrency: number | null // tickets it works at once, 1-8, each in its own git worktree (1 when null)
+  agentMaxTurns: number | null // most turns one run may take (claude's --max-turns), 1-10000 (no limit when null)
   agentConflictConcurrency: number | null // more runs that only fix merge conflicts, 0-8, each in a worktree (2 when null)
+  agentConflictModel: string | null // model for runs only to fix merge conflicts ("sonnet" when null)
+  agentConflictEffort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null // their effort ("medium" when null)
+  agentCiModel: string | null // model for runs only to fix failing CI, maybe with conflicts ("sonnet" when null)
+  agentCiEffort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null // their effort ("medium" when null)
   agentBacklog: boolean // it also takes tickets from the Backlog column once Todo has none
   agentAllSkills: boolean // its runs load every skill, not only the ultrakanban skill
   agentDocker: boolean // its runs go in Docker containers rather than directly on the machine
@@ -329,16 +476,16 @@ interface BoardSummary {
 
 ## Boards
 
-| Method | Path                           | Body / query                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Returns                                                   |
-| ------ | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| GET    | `/boards`                      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | `BoardSummary[]` (most recently updated first)            |
-| POST   | `/boards`                      | `{ name, description?, columns?: string[], reviewColumn?: ref, doneColumn?: ref, githubRepo?, agentEnabled?, agentName?, agentModel?, agentEffort?, agentConcurrency?, agentConflictConcurrency?, agentBacklog?, agentAllSkills?, agentDocker?, autoMerge?, ignoreBillingFailures?, deleteMergedBranches?, archiveDoneDays?, notifyUrl?, approvalSize? }`                                                                                                                                                                                                                        | `BoardSummary`                                            |
-| GET    | `/boards/:boardId`             | `?archived=true`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `{ board, columns, tags, epics, tickets, archivedCount }` |
-| PATCH  | `/boards/:boardId`             | `{ name?, description?, reviewColumn?: ref \| null, doneColumn?: ref \| null, githubRepo?: string \| null, agentEnabled?: boolean, agentName?: string \| null, agentModel?: string \| null, agentEffort?: string \| null, agentConcurrency?: number \| null, agentConflictConcurrency?: number \| null, agentBacklog?: boolean, agentAllSkills?: boolean, agentDocker?: boolean, autoMerge?: boolean, ignoreBillingFailures?: boolean, deleteMergedBranches?: boolean, archiveDoneDays?: number \| null, notifyUrl?: string \| null, approvalSize?: 'S' \| 'M' \| 'L' \| null }` | `BoardSummary`                                            |
-| POST   | `/boards/:boardId/github-repo` | `{ name, owner?, description?, private?: boolean }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | `BoardSummary` (201)                                      |
-| DELETE | `/boards/:boardId`             |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | `204`                                                     |
-| GET    | `/boards/:boardId/export`      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | portable board JSON                                       |
-| POST   | `/boards/import`               | portable board JSON                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | `BoardSummary`                                            |
+| Method | Path                           | Body / query                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Returns                                                   |
+| ------ | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| GET    | `/boards`                      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | `BoardSummary[]` (most recently updated first)            |
+| POST   | `/boards`                      | `{ name, description?, columns?: string[], reviewColumn?: ref, doneColumn?: ref, githubRepo?, localRepoPath?, agentEnabled?, agentName?, agentModel?, agentEffort?, agentConcurrency?, agentMaxTurns?, agentConflictConcurrency?, agentConflictModel?, agentConflictEffort?, agentCiModel?, agentCiEffort?, agentBacklog?, agentAllSkills?, agentDocker?, autoMerge?, ignoreBillingFailures?, deleteMergedBranches?, archiveDoneDays?, notifyUrl?, approvalSize? }`                                                                                                                                                                                                                                                                                                                                                                 | `BoardSummary`                                            |
+| GET    | `/boards/:boardId`             | `?archived=true&compact=true`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | `{ board, columns, tags, epics, tickets, archivedCount }` |
+| PATCH  | `/boards/:boardId`             | `{ name?, description?, reviewColumn?: ref \| null, doneColumn?: ref \| null, githubRepo?: string \| null, localRepoPath?: string \| null, agentEnabled?: boolean, agentName?: string \| null, agentModel?: string \| null, agentEffort?: 'low' \| 'medium' \| 'high' \| 'xhigh' \| 'max' \| null, agentConcurrency?: number \| null, agentMaxTurns?: number \| null, agentConflictConcurrency?: number \| null, agentConflictModel?: string \| null, agentConflictEffort?: string \| null, agentCiModel?: string \| null, agentCiEffort?: string \| null, agentBacklog?: boolean, agentAllSkills?: boolean, agentDocker?: boolean, autoMerge?: boolean, ignoreBillingFailures?: boolean, deleteMergedBranches?: boolean, archiveDoneDays?: number \| null, notifyUrl?: string \| null, approvalSize?: 'S' \| 'M' \| 'L' \| null }` | `BoardSummary`                                            |
+| POST   | `/boards/:boardId/github-repo` | `{ name, owner?, description?, private?: boolean }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `BoardSummary` (201)                                      |
+| DELETE | `/boards/:boardId`             |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | `204`                                                     |
+| GET    | `/boards/:boardId/export`      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | portable board JSON                                       |
+| POST   | `/boards/import`               | portable board JSON                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `BoardSummary`                                            |
 
 `POST /boards/:boardId/github-repo` creates a repository on GitHub with the server's login and sets it as the board's
 `githubRepo`. It is created under `owner` (a user or organization; the signed-in user when omitted), private unless
@@ -348,15 +495,23 @@ request down (e.g. the name is taken, or the token can't create repositories the
 `502 github_error` when GitHub can't be reached. The token needs the `repo` scope (fine-grained tokens:
 Administration write), and `read:org` plus access to the organization to create one in an organization.
 
-`agentEnabled` can only be switched on once `githubRepo` is set (`400` otherwise). It is read by
+A board has either a GitHub repository or a local one: `localRepoPath` is the path of a git repository on the host
+(absolute, or starting with `~/`), and setting it clears `githubRepo`, as setting `githubRepo` clears it. Setting both
+in one request is a `400`.
+
+`agentEnabled` can only be switched on once `githubRepo` or `localRepoPath` is set (`400` otherwise). It is read by
 `scripts/agent-supervisor.sh`, which runs on the host and keeps one agent loop per enabled board; see `docs/agents.md`.
 The loop runs Claude Code with `agentModel` and `agentEffort` and claims tickets as
 `<agentName>/<agentModel>/<agentEffort>`, e.g. `claude/opus/medium` with nothing set. A ticket's own `agentModel`
 and `agentEffort` override the board's for that ticket: the loop runs it with them and under that name.
+`agentMaxTurns` caps the turns one run of the agent may take: the loop passes it to `claude` as `--max-turns`, so a runaway
+run stops there rather than at the ticket timeout. Without it a run has no turn limit.
 `agentConcurrency` is how many tickets the agent works at once: the host runs that many loops, each in its own git
 worktree of the board's clone, and never two on the same ticket. `agentConflictConcurrency` is how many more loops
 it runs, each in a worktree of its own too, that claim nothing and only fix the merge conflicts of the pull requests in
-the review column, so the conflicts that merging one causes in the others are fixed side by side. With `agentBacklog` on, the agent takes new tickets
+the review column, so the conflicts that merging one causes in the others are fixed side by side. Runs only to fix
+merge conflicts use `agentConflictModel` and `agentConflictEffort`, and runs only to fix failing CI `agentCiModel` and
+`agentCiEffort`, instead of the ticket's or board's model and effort; runs that also hand over human feedback don't. With `agentBacklog` on, the agent takes new tickets
 from the `Backlog` column once the `Todo` column has none left and the `In progress` column holds fewer than
 `agentConcurrency` tickets (the loop's `TODO_COLUMN`, `BACKLOG_COLUMN` and `IN_PROGRESS_COLUMN` name them). With `agentAllSkills` off, runs only get the ultrakanban skill, unless the repository has skills of its own.
 With `agentDocker` on, the loop runs Claude Code in a Docker container that only sees the ticket's checkout and the
@@ -368,6 +523,11 @@ archived (`archived: true`): `GET /boards/:boardId` leaves them out, so the boar
 how many it left out in `archivedCount`. `?archived=true` includes them (and `archivedCount` is then 0). They are still
 returned by `GET /boards/:boardId/tickets` (search with `q` included), `GET /tickets/:ticketId` and the board export.
 Moving a ticket out of the done column unarchives it; moving it back in starts the count again.
+
+`?compact=true` (or `1`) on `GET /boards/:boardId` and `GET /boards/:boardId/tickets` lists each ticket as a
+`CompactTicket`: without its description, usage, run and the like, which make up most of a board's size. Agents
+looking for a ticket or checking where tickets stand should use it, then `GET /tickets/:ticketId` for the one they
+work.
 
 With `notifyUrl` set, the server sends a message there when a ticket needs a person:
 
@@ -388,17 +548,17 @@ links to the ticket when the server's `ULTRAKANBAN_URL` is set, otherwise to its
 
 ## Columns and tags
 
-| Method | Path                              | Body / query                                             | Returns                                        |
-| ------ | --------------------------------- | -------------------------------------------------------- | ---------------------------------------------- |
-| POST   | `/boards/:boardId/columns`        | `{ name, color?, wipLimit?: number \| null, position? }` | `Column`                                       |
-| PATCH  | `/columns/:columnId`              | `{ name?, color?, wipLimit? }`                           | `Column`                                       |
-| POST   | `/columns/:columnId/move`         | `{ position }`                                           | `Column`                                       |
-| DELETE | `/columns/:columnId`              | `?moveTicketsTo=ref` (otherwise its tickets are deleted) | `204`                                          |
-| GET    | `/columns/:columnId/idle-tickets` |                                                          | `Ticket[]` idle in the column (see below)      |
-| POST   | `/columns/:columnId/release-idle` | `{ moveTo: ref }`                                        | `Ticket[]` it unassigned and moved to `moveTo` |
-| POST   | `/boards/:boardId/tags`           | `{ name, color? }`                                       | `Tag`                                          |
-| PATCH  | `/tags/:tagId`                    | `{ name?, color? }`                                      | `Tag`                                          |
-| DELETE | `/tags/:tagId`                    |                                                          | `204`                                          |
+| Method | Path                              | Body / query                                                                                         | Returns                                        |
+| ------ | --------------------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| POST   | `/boards/:boardId/columns`        | `{ name, color?, wipLimit?: number \| null, position? }`                                             | `Column`                                       |
+| PATCH  | `/columns/:columnId`              | `{ name?, color?, wipLimit? }`                                                                       | `Column`                                       |
+| POST   | `/columns/:columnId/move`         | `{ position }`                                                                                       | `Column`                                       |
+| DELETE | `/columns/:columnId`              | `?moveTicketsTo=ref` or `?deleteTickets=true` (`409 column_not_empty` if it has tickets and neither) | `204`                                          |
+| GET    | `/columns/:columnId/idle-tickets` |                                                                                                      | `Ticket[]` idle in the column (see below)      |
+| POST   | `/columns/:columnId/release-idle` | `{ moveTo: ref }`                                                                                    | `Ticket[]` it unassigned and moved to `moveTo` |
+| POST   | `/boards/:boardId/tags`           | `{ name, color? }`                                                                                   | `Tag`                                          |
+| PATCH  | `/tags/:tagId`                    | `{ name?, color? }`                                                                                  | `Tag`                                          |
+| DELETE | `/tags/:tagId`                    |                                                                                                      | `204`                                          |
 
 A ticket is idle when no agent has sent a heartbeat for it (`POST /tickets/:ticketId/heartbeat`) and nothing has
 happened on it (no activity) for 10 minutes. `scripts/agent-loop.sh` sends one every `TICKET_CHECK_SECONDS` while a
@@ -406,10 +566,14 @@ run is working the ticket; the board offers to move a working column's idle tick
 tickets whose agent stopped or crashed.
 
 Heartbeats also make up the ticket's `run`, which its card shows: a heartbeat starts a run unless one is going on,
-and can say what the run is doing (`step`; a heartbeat without one keeps the run's step). `scripts/agent-loop.sh`
-sends the run's latest tool call as its step (e.g. `Bash: npm test`) when it changes, checked every
-`RUN_STEP_SECONDS`. The run ends with `DELETE /tickets/:ticketId/heartbeat`, or after 10 minutes without a heartbeat.
+and can say what the run is doing (`step`) and how many tokens it has used so far (`tokens`); a heartbeat without them
+keeps the run's. `scripts/agent-loop.sh` sends the run's latest tool call as its step (e.g. `Bash: npm test`) when it
+changes, checked every `RUN_STEP_SECONDS`, and its tokens so far with every heartbeat, so a runaway run shows while
+it goes on. The run ends with `DELETE /tickets/:ticketId/heartbeat`, or after 10 minutes without a heartbeat.
 Cards show a run as stalled after 3 minutes without one.
+
+A heartbeat answers `200 {"stopRequested": {"at", "by"} | null}`: whether someone asked the run to stop (see below), so
+loops needn't read the ticket for it.
 
 ### Stopping a run
 
@@ -418,40 +582,46 @@ working the ticket to stop, e.g. to give its agent new instructions. It sets the
 (`X-Actor`), logs a `stopped` activity entry (`data: { step }`, what the run was doing), sends a `wake` event (see
 [Live updates](#live-updates)) and returns the `Ticket`; `409 no_run` when no run is going. Asking again before the
 run stops changes nothing. The request lasts until the run ends (`DELETE /tickets/:ticketId/heartbeat`), and a new run
-starts without one. `scripts/agent-loop.sh` sees it at its next check of the ticket (every `TICKET_CHECK_SECONDS`),
+starts without one. `scripts/agent-loop.sh` sees it in the answer to its next heartbeat (every `TICKET_CHECK_SECONDS`),
 stops the run without losing its session or work, and resumes it once there is new feedback, such as a comment.
-Agents of your own that send heartbeats should do the same: stop when their ticket's `run.stopRequested` is set,
+Agents of your own that send heartbeats should do the same: stop when their heartbeat answers a `stopRequested`,
 and end the run.
 
 ## Tickets
 
-| Method | Path                                   | Body / query                                                                                                                                                                                                                                                        | Returns                                                                                                                                                                                                                                                                                                              |
-| ------ | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/boards/:boardId/tickets`             | `?column=ref&assignee=name&unassigned=true&tag=ref&priority=high&epic=ref&q=text` (`epic=none`: in no epic) (`tag`, `priority` repeatable)                                                                                                                          | `Ticket[]` in board order                                                                                                                                                                                                                                                                                            |
-| GET    | `/boards/:boardId/tickets/:number`     |                                                                                                                                                                                                                                                                     | `Ticket`                                                                                                                                                                                                                                                                                                             |
-| POST   | `/boards/:boardId/tickets`             | `{ title, description?, column?: ref, priority?, tags?: ref[], assignee?, dueDate?, agentEffort?, agentModel?, agentDocker?, pullRequest?: url, parent?: ref, epic?: ref, position?, force? }`                                                                      | `Ticket` (defaults to the first column, appended)                                                                                                                                                                                                                                                                    |
-| GET    | `/tickets/:ticketId`                   |                                                                                                                                                                                                                                                                     | `Ticket`                                                                                                                                                                                                                                                                                                             |
-| POST   | `/tickets/:ticketId/route`             |                                                                                                                                                                                                                                                                     | `{ routed: RoutedSetting \| null }`: the setting to work the ticket at on a board whose Jev mode is `on`, for runs on feedback; asks Jev only when the ticket changed since it last picked. `null` on other boards (see [Routing](#routing))                                                                         |
-| PATCH  | `/tickets/:ticketId`                   | `{ title?, description?, priority?, tags?: ref[], assignee?: string \| null, dueDate?, agentEffort?: string \| null, agentModel?: string \| null, agentDocker?: boolean \| null, pullRequest?: url \| null, parent?: ref \| null, epic?: ref \| null, ifVersion? }` | `Ticket`                                                                                                                                                                                                                                                                                                             |
-| DELETE | `/tickets/:ticketId`                   |                                                                                                                                                                                                                                                                     | `204`                                                                                                                                                                                                                                                                                                                |
-| POST   | `/tickets/:ticketId/move`              | `{ column: ref, position?, ifVersion?, force? }`                                                                                                                                                                                                                    | `Ticket` (appended when `position` is omitted)                                                                                                                                                                                                                                                                       |
-| POST   | `/tickets/:ticketId/claim`             | `{ agent, moveTo?: ref, ifVersion? }`                                                                                                                                                                                                                               | `Ticket`, with `routed` on a board whose Jev mode is `on` (see [Routing](#routing)); `409` if claimed by someone else (idempotent for the same agent)                                                                                                                                                                |
-| POST   | `/tickets/:ticketId/release`           | `{ agent, moveTo?: ref, force? }`                                                                                                                                                                                                                                   | `Ticket`; `409` if claimed by someone else unless `force`                                                                                                                                                                                                                                                            |
-| POST   | `/tickets/:ticketId/heartbeat`         | `{ step? }` (optional)                                                                                                                                                                                                                                              | `204`; says an agent is working on the ticket right now (not a change: nothing is logged)                                                                                                                                                                                                                            |
-| DELETE | `/tickets/:ticketId/heartbeat`         |                                                                                                                                                                                                                                                                     | `204`; says the agent's run on the ticket has ended                                                                                                                                                                                                                                                                  |
-| POST   | `/tickets/:ticketId/stop`              |                                                                                                                                                                                                                                                                     | `Ticket` with `run.stopRequested` set: asks the run working it to stop (see Stopping a run); `409 no_run` without one                                                                                                                                                                                                |
-| POST   | `/boards/:boardId/tickets/bulk`        | `{ tickets: ref[], moveTo?: ref, force?, priority?, addTags?: ref[], removeTags?: ref[], epic?: ref \| null }` or `{ tickets: ref[], delete: true }`                                                                                                                | `{ tickets: Ticket[] }`: the same change to several tickets, all or nothing (e.g. `409` if one can't enter the done column, unless `force`); moved tickets are appended in the order given; `tickets: []` when deleted                                                                                               |
-| POST   | `/boards/:boardId/tickets/claim-next`  | `{ agent, column: ref, tags?: ref[], moveTo?: ref }`                                                                                                                                                                                                                | `Ticket` (with `routed` on a board whose Jev mode is `on`, see [Routing](#routing)): highest priority, then earliest due date, then board order, among unassigned, unblocked tickets in `column` having all `tags` (see below)                                                                                       |
-| POST   | `/tickets/:ticketId/plan`              | `{ agent, estimate: 'S' \| 'M' \| 'L', plan: markdown }`                                                                                                                                                                                                            | `Ticket`: posts the plan, sets `estimate`, and holds the ticket for approval (`approval: 'pending'`) when the board's `approvalSize` asks for it; `409` if claimed by someone else                                                                                                                                   |
-| POST   | `/tickets/:ticketId/approve`           | `{ ifVersion? }` (optional)                                                                                                                                                                                                                                         | `Ticket` with `approval: 'approved'`; `409 not_awaiting_approval` if its plan doesn't wait for approval, `409 own_plan` when sent by its assignee                                                                                                                                                                    |
-| POST   | `/tickets/:ticketId/review`            | `{ agent, pullRequest?: url, comment?: markdown, ifVersion? }`                                                                                                                                                                                                      | `Ticket`: links the pull request, assigns `agent`, posts `comment`, moves to the review column; `409` if claimed by someone else, `400` if the board has no review column, or without `pullRequest` unless the ticket is a `question` answered in `comment`, its sub-tickets are all finished, or it already has one |
-| POST   | `/tickets/:ticketId/pull-request/sync` |                                                                                                                                                                                                                                                                     | `Ticket` after checking its pull request on GitHub now                                                                                                                                                                                                                                                               |
-| GET    | `/tickets/:ticketId/checklist`         |                                                                                                                                                                                                                                                                     | `ChecklistItem[]`: the description's task list items (`- [ ]` / `- [x]`), outside code blocks                                                                                                                                                                                                                        |
-| POST   | `/tickets/:ticketId/checklist/:index`  | `{ checked?: boolean, ifVersion? }` (`checked` defaults to `true`)                                                                                                                                                                                                  | `Ticket` with the item at `index` (0-based) checked off or unchecked and the rest of the description untouched; `404` if there is no such item                                                                                                                                                                       |
-| GET    | `/tickets/:ticketId/activity`          |                                                                                                                                                                                                                                                                     | `Activity[]` (oldest first)                                                                                                                                                                                                                                                                                          |
-| POST   | `/tickets/:ticketId/comments`          | `{ body, pullRequest?, notify? }` (markdown); `pullRequest: true` also posts it on the ticket's pull request (`data.pullRequestComment` links it); `notify: true` also sends the board's notification                                                               | `Activity`                                                                                                                                                                                                                                                                                                           |
-| GET    | `/tickets/:ticketId/children`          |                                                                                                                                                                                                                                                                     | `Ticket[]`: its sub-tickets, in board order                                                                                                                                                                                                                                                                          |
-| POST   | `/tickets/:ticketId/children`          | same as `POST /boards/:boardId/tickets`, without `parent`                                                                                                                                                                                                           | `Ticket`: a sub-ticket of this one, on its board (`201`)                                                                                                                                                                                                                                                             |
+| Method | Path                                   | Body / query                                                                                                                                                                                                                                                                                                 | Returns                                                                                                                                                                                                                                                                                                              |
+| ------ | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/boards/:boardId/tickets`             | `?column=ref&assignee=name&unassigned=true&tag=ref&priority=high&epic=ref&q=text&compact=true` (`epic=none`: in no epic) (`tag`, `priority` repeatable)                                                                                                                                                      | `Ticket[]` in board order                                                                                                                                                                                                                                                                                            |
+| GET    | `/boards/:boardId/tickets/:number`     |                                                                                                                                                                                                                                                                                                              | `Ticket`                                                                                                                                                                                                                                                                                                             |
+| POST   | `/boards/:boardId/tickets`             | `{ title, description?, column?: ref, priority?, tags?: ref[], assignee?, dueDate?, agentEffort?, agentModel?, agentDocker?, pullRequest?: url, parent?: ref, epic?: ref, position?, force? }`                                                                                                               | `Ticket` (defaults to the first column, appended)                                                                                                                                                                                                                                                                    |
+| GET    | `/tickets/:ticketId`                   |                                                                                                                                                                                                                                                                                                              | `Ticket`                                                                                                                                                                                                                                                                                                             |
+| POST   | `/tickets/:ticketId/route`             |                                                                                                                                                                                                                                                                                                              | `{ routed: RoutedSetting \| null }`: the setting to work the ticket at on a board whose Jev mode is `on`, for runs on feedback; asks Jev only when the ticket changed since it last picked. `null` on other boards (see [Routing](#routing))                                                                         |
+| PATCH  | `/tickets/:ticketId`                   | `{ title?, description?, priority?, tags?: ref[], assignee?: string \| null, dueDate?, agentEffort?: 'low' \| 'medium' \| 'high' \| 'xhigh' \| 'max' \| null, agentModel?: string \| null, agentDocker?: boolean \| null, pullRequest?: url \| null, parent?: ref \| null, epic?: ref \| null, ifVersion? }` | `Ticket`                                                                                                                                                                                                                                                                                                             |
+| DELETE | `/tickets/:ticketId`                   |                                                                                                                                                                                                                                                                                                              | `204`                                                                                                                                                                                                                                                                                                                |
+| POST   | `/tickets/:ticketId/move`              | `{ column: ref, position?, ifVersion?, force? }`                                                                                                                                                                                                                                                             | `Ticket` (appended when `position` is omitted)                                                                                                                                                                                                                                                                       |
+| POST   | `/tickets/:ticketId/claim`             | `{ agent, moveTo?: ref, ifVersion? }`                                                                                                                                                                                                                                                                        | `Ticket`, with `routed` on a board whose Jev mode is `on` (see [Routing](#routing)); `409` if claimed by someone else (idempotent for the same agent), `409 blocked` if `claim-next` would skip it, `429 usage_reserve_reached` as for `claim-next`                                                                  |
+| POST   | `/tickets/:ticketId/release`           | `{ agent, moveTo?: ref, force? }`                                                                                                                                                                                                                                                                            | `Ticket`; `409` if claimed by someone else unless `force`                                                                                                                                                                                                                                                            |
+| POST   | `/tickets/:ticketId/heartbeat`         | `{ step?, tokens? }` (optional)                                                                                                                                                                                                                                                                              | `200 { stopRequested }`; says an agent is working on the ticket right now (not a change: nothing is logged), and answers whether someone asked its run to stop (see Stopping a run)                                                                                                                                  |
+| DELETE | `/tickets/:ticketId/heartbeat`         |                                                                                                                                                                                                                                                                                                              | `204`; says the agent's run on the ticket has ended                                                                                                                                                                                                                                                                  |
+| POST   | `/tickets/:ticketId/stop`              |                                                                                                                                                                                                                                                                                                              | `Ticket` with `run.stopRequested` set: asks the run working it to stop (see Stopping a run); `409 no_run` without one                                                                                                                                                                                                |
+| POST   | `/boards/:boardId/tickets/bulk`        | `{ tickets: ref[], moveTo?: ref, force?, priority?, addTags?: ref[], removeTags?: ref[], epic?: ref \| null, agentModel?: string \| null, agentEffort?: string \| null }` or `{ tickets: ref[], delete: true }`                                                                                              | `{ tickets: Ticket[] }`: the same change to several tickets, all or nothing (e.g. `409` if one can't enter the done column, unless `force`); moved tickets are appended in the order given; `tickets: []` when deleted                                                                                               |
+| POST   | `/boards/:boardId/tickets/claim-next`  | `{ agent, column: ref, tags?: ref[], moveTo?: ref }`                                                                                                                                                                                                                                                         | `Ticket` (with `routed` on a board whose Jev mode is `on`, see [Routing](#routing)): highest priority, then earliest due date, then board order, among unassigned, unblocked tickets in `column` having all `tags` (see below)                                                                                       |
+| POST   | `/tickets/:ticketId/plan`              | `{ agent, estimate: 'S' \| 'M' \| 'L', plan: markdown }`                                                                                                                                                                                                                                                     | `Ticket`: posts the plan, sets `estimate`, and holds the ticket for approval (`approval: 'pending'`) when the board's `approvalSize` asks for it; `409` if claimed by someone else                                                                                                                                   |
+| POST   | `/tickets/:ticketId/approve`           | `{ ifVersion? }` (optional)                                                                                                                                                                                                                                                                                  | `Ticket` with `approval: 'approved'`; `409 not_awaiting_approval` if its plan doesn't wait for approval, `409 own_plan` when sent by its assignee                                                                                                                                                                    |
+| POST   | `/tickets/:ticketId/review`            | `{ agent, pullRequest?: url, comment?: markdown, ifVersion? }`                                                                                                                                                                                                                                               | `Ticket`: links the pull request, assigns `agent`, posts `comment`, moves to the review column; `409` if claimed by someone else, `400` if the board has no review column, or without `pullRequest` unless the ticket is a `question` answered in `comment`, its sub-tickets are all finished, or it already has one |
+| POST   | `/tickets/:ticketId/pull-request/sync` |                                                                                                                                                                                                                                                                                                              | `Ticket` after checking its pull request on GitHub now                                                                                                                                                                                                                                                               |
+| GET    | `/tickets/:ticketId/checklist`         |                                                                                                                                                                                                                                                                                                              | `ChecklistItem[]`: the description's task list items (`- [ ]` / `- [x]`), outside code blocks                                                                                                                                                                                                                        |
+| POST   | `/tickets/:ticketId/checklist/:index`  | `{ checked?: boolean, ifVersion? }` (`checked` defaults to `true`)                                                                                                                                                                                                                                           | `Ticket` with the item at `index` (0-based) checked off or unchecked and the rest of the description untouched; `404` if there is no such item                                                                                                                                                                       |
+| GET    | `/tickets/:ticketId/activity`          | `?afterId=id&type=comment` (`type` repeatable)                                                                                                                                                                                                                                                               | `Activity[]` (oldest first)                                                                                                                                                                                                                                                                                          |
+| POST   | `/tickets/:ticketId/comments`          | `{ body, pullRequest?, notify? }` (markdown); `pullRequest: true` also posts it on the ticket's pull request, on GitHub or a local one (`data.pullRequestComment` links it); `notify: true` also sends the board's notification                                                                              | `Activity`                                                                                                                                                                                                                                                                                                           |
+| GET    | `/tickets/:ticketId/children`          |                                                                                                                                                                                                                                                                                                              | `Ticket[]`: its sub-tickets, in board order                                                                                                                                                                                                                                                                          |
+| POST   | `/tickets/:ticketId/children`          | same as `POST /boards/:boardId/tickets`, without `parent`                                                                                                                                                                                                                                                    | `Ticket`: a sub-ticket of this one, on its board (`201`)                                                                                                                                                                                                                                                             |
+
+`GET /tickets/:ticketId/activity` lists everything that happened to the ticket, oldest first. `?type=comment` (repeat
+`type` for several: `created`, `updated`, `checked`, `moved`, `claimed`, `released`, `comment`, `plan`, `approved`,
+`stopped`, `attachment`, `pull_request`) lists only those, and `?afterId=<id>` only entries newer than that one
+(activity ids only grow), so an agent can fetch the comments it hasn't seen yet with
+`?afterId=<the last id it read>&type=comment`.
 
 ### Plans and approval
 
@@ -496,7 +666,7 @@ ticket can be in one epic, sub-tickets included.
 | DELETE | `/epics/:epicId`         |                                    | `204`; its tickets stay, in no epic                     |
 
 - Put a ticket in an epic with `epic` (its id or title) when creating or updating it, or for several at once with
-  `POST /boards/:boardId/tickets/bulk`; `"epic": null` takes it out. An unknown title creates the epic, like tags.
+  `POST /boards/:boardId/tickets/bulk`; `"epic": null` takes it out. The bulk endpoint also sets `agentModel`/`agentEffort` on all the tickets (`null` follows the board's setting). An unknown title creates the epic, like tags.
   New sub-tickets join their parent's epic unless `epic` says otherwise.
 - `progress` counts its finished tickets (in the done column, the board's last column if it has none, or with a
   merged pull request) out of all of them, leaving out those in a column named `Cancelled`. It is `done` once they
@@ -670,11 +840,14 @@ interface RunRecord {
   // finished: exited successfully; failed: exited with an error; timed_out: ran past the loop's TICKET_TIMEOUT;
   // killed: by a signal (exit status 137 is most likely the kernel, out of memory); stopped: the loop stopped it as
   // someone took the ticket away; stop_requested: the loop stopped it as someone asked (POST /tickets/:id/stop; the
-  // run is resumed with new feedback); usage_limit: the account ran out of Claude usage (the run is resumed later)
-  outcome: 'finished' | 'failed' | 'timed_out' | 'killed' | 'stopped' | 'stop_requested' | 'usage_limit'
+  // run is resumed with new feedback); loop_stopped: the loop itself was stopped, e.g. restarted (the run is resumed
+  // by its next run); usage_limit: the account ran out of Claude usage (the run is resumed later)
+  outcome:
+    'finished' | 'failed' | 'timed_out' | 'killed' | 'stopped' | 'stop_requested' | 'loop_stopped' | 'usage_limit'
   exitCode: number | null
   durationMs: number | null
   turns: number | null // responses of the model
+  tokens: number | null // input, output and cache tokens it used
   costUsd: number | null
   apiKey: boolean // whether it went on the agents' API key (its cost billed, not estimated)
   message: string // the final message (markdown), or what the run last said or printed; '' when there was nothing
@@ -688,21 +861,29 @@ interface RunRecord {
 
 ### Suggested model and effort
 
-`GET /boards/:boardId/agent-suggestion?title=text&tag=ref&steps=3` suggests a model and effort for a ticket about to be
-created, from how the board's similar tickets went (the new-ticket form shows it). `tag` is repeatable (ids or names;
-ones the board doesn't have are ignored) and `steps` is how many checklist steps its description has (leave it out
-when unknown).
+`GET /boards/:boardId/agent-suggestion?title=text&tag=ref&steps=3&estimate=M` suggests a model and effort for a ticket
+about to be created, from how the board's similar tickets went (the new-ticket form shows it). `tag` is repeatable (ids
+or names; ones the board doesn't have are ignored), `steps` is how many checklist steps its description has and
+`estimate` the size (`S`, `M`, `L`) its agent's plan estimated it at (leave either out when unknown). Routing at claim
+time passes the ticket's own.
 
 - **Past tickets** count once they are decided: finished (in the done column or with a merged pull request), or given
   up on (in the cancelled column, or with their pull request closed unmerged). Each counts at the setting of the
-  `<agent>/<model>/<effort>` name whose runs used the most tokens on it, with the cost of all its runs. Only tickets
+  `<agent>/<model>/<effort>` name whose runs used the most tokens on it (weighted by kind, see below), with the cost
+  of all its runs. Only tickets
   the board's own agent did most of (names starting with its `agentName`, `claude` by default) count: the suggestion
   sets the model and effort it works the ticket at, and another agent's (Codex on GPT, say) aren't any it can run.
-- **Similar** means sharing tags (45%) or title words (45%, stop words left out); a similar number of checklist steps
-  adds up to 10% but isn't enough alone. The 20 most similar count, each weighted by its similarity.
-- **The suggestion** is the cheapest setting (by cost, or by tokens when runs reported no cost) whose weighted success
-  rate is within 0.2 of the best one's, so a cheaper setting that finishes the same kind of work wins and one that
-  keeps failing doesn't. It is `null` when no similar ticket was finished.
+- **Similar** means sharing tags (40%) or title words (40%, stop words left out); a similar number of checklist steps
+  (10%) and a similar plan estimate (10%: the same size counts fully, one size apart half) add to that but aren't
+  enough alone. A size either ticket lacks is left out of the weighting. The 20 most similar count, each weighted by
+  its similarity.
+- **Tokens are weighted by kind** about as Claude prices them, relative to uncached input: output 5, cache writes
+  1.25, cache reads 0.1. Cache reads make up most of a run's raw total.
+- **The suggestion** is the setting that costs least per _finished_ ticket (its average cost over its success rate, so
+  each finished ticket also pays for the ones given up on; all by weighted tokens when any of them has no cost) among
+  those whose weighted success rate is within 0.2 of the best one's. Only settings at least 2 similar decided tickets
+  were worked at can be suggested; the others still show in `options`. It is `null` when none of those finished a
+  similar ticket.
 
 ```ts
 interface AgentSuggestion {
@@ -718,7 +899,10 @@ interface AgentSettingStats {
   finished: number // how many of them were finished
   successRate: number // finished share, weighted by similarity (0 to 1)
   costUsd: number | null // average cost per ticket; null when none reported one
+  costPerFinishedUsd: number | null // costUsd / successRate; null without a cost or a finished ticket
   tokens: number // average tokens per ticket
+  weightedTokens: number // average tokens per ticket, weighted by kind
+  weightedTokensPerFinished: number | null // weightedTokens / successRate; null without a finished ticket
   similar: { id; number; title; similarity; finished; costUsd: number | null; tokens }[] // most similar first, at most 5
 }
 ```
@@ -832,6 +1016,20 @@ interface Overview {
   tickets: { id; boardId; boardName; number; title; column: string; tags: Tag[]; usage }[]
   recent: (Activity & { ticket: { number; title; boardId; boardName } })[] // latest 30, newest first
   routing: RoutingComparison // routing sources compared on every board, over all time (see Routing)
+  // Every board's decided tickets by the model and effort that did most of their work (any agent), over all time,
+  // most tickets first: the suggestion's figures with every ticket counting fully
+  settings: {
+    model
+    effort
+    tickets
+    finished
+    successRate: number // finished share (0 to 1)
+    costUsd: number | null // average cost per ticket; null when none reported one
+    costPerFinishedUsd: number | null // costUsd / successRate; null without a cost or a finished ticket
+    tokens: number // average tokens per ticket
+    weightedTokens: number // average tokens per ticket, weighted by kind
+    weightedTokensPerFinished: number | null // weightedTokens / successRate; null without a finished ticket
+  }[]
 }
 
 // Token usage added up over runs; costUsd sums the runs that reported a cost (null when none did).
@@ -899,6 +1097,7 @@ login (from Claude's usage endpoint, what `/usage` in claude shows). `GET /syste
 {
   reportedAt: string | null // when the supervisor last reported; null if it never has
   plan: string | null // the subscription, e.g. "pro" or "max"
+  limitsAt: string | null // when the limits were read; older than reportedAt after a report with only an error
   limits: Array<{ label: string; percent: number; resetsAt: string | null }> // e.g. "Current session", "Week, all models"
   // the money the account can spend on usage besides its limits, amounts in `currency` units, limit and remaining null
   // when unknown: kind "grant" ("Credit grant", dollars granted to the plan) or "usage" ("Usage credits", what claude.ai
@@ -914,7 +1113,7 @@ login (from Claude's usage endpoint, what `/usage` in claude shows). `GET /syste
     remaining: number | null
     resetsAt: string | null
   }>
-  error: string | null // why there are no limits, e.g. no claude login on the host
+  error: string | null // why the last report has no usage, e.g. no claude login on the host
   // the usage reserve, 1-100 each (see below), null when off; usageCredits: whether agents go on past a used-up limit
   reserve: { week: number | null; session: number | null; usageCredits: boolean }
   // what agents do once usage runs out: wait, or go on on their API key (see below)
@@ -931,19 +1130,21 @@ login (from Claude's usage endpoint, what `/usage` in claude shows). `GET /syste
 ```
 
 The supervisor reports with `POST /system/claude-usage` and `{ plan?, usage?, error? }`: `usage` is the usage
-endpoint's answer as it is (the board picks the limits and credits out of it), `error` says why it couldn't get one.
+endpoint's answer as it is (the board picks the limits and credits out of it), `error` says why it couldn't get one. A report
+without `usage` keeps the last limits, credits and their `limitsAt`, so one failed read doesn't lift the usage reserve.
 
 **The usage reserve** keeps some of the week, of the current session or both for people's own Claude sessions. It is
 one setting for the whole Claude account, not per board: `PUT /system/claude-usage/reserve` with
 `{ "week": 80, "session": 90, "usageCredits": false }` (each a whole percent, 1-100, or `null` for off; one left out
 stays as it is) answers with the usage above. Once a weekly limit (`Week, all models` or a per-model one such as `Week, Opus`) is at or over
 `week`, or the current session at or over `session`, `claim-next` hands out no new tickets and answers
-`404 usage_reserve_reached`, with the limit and its reserve in `details`. Unless `usageCredits` is true, a limit at 100%
+`429 usage_reserve_reached`, with the limit and its reserve in `details`. Unless `usageCredits` is true, a limit at 100%
 does the same without a reserve (`reservePercent` is then `null`), so agents don't run on the account's usage credits
 once a limit is used up (by default they don't); `reserveReached` says which limit it is (of
-several, the one that resets last, as claiming starts again only once all of them have). It only goes by a fresh
-report, from the last 30 minutes (the supervisor reports every 5), and a limit counts as reset once its `resetsAt` has
-passed: a stale or missing report never holds agents back, so agents don't stop because the supervisor did. Only
+several, the one that resets last, as claiming starts again only once all of them have). It only goes by fresh
+limits, read in the last 30 minutes (`limitsAt`; the supervisor reports every 5), and a limit counts as reset once its
+`resetsAt` has passed: stale or missing limits never hold agents back (they fail open), so agents don't stop because
+the supervisor did, or because it can't read the usage any more. Only
 claiming new tickets stops. Tickets agents already hold still get runs for their feedback, and claiming a given ticket
 (`POST /tickets/:ticketId/claim`) still works, so work under way and pull requests in review aren't left halfway;
 Claude's own limits stop those runs when the session or the week runs out.

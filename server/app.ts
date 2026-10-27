@@ -11,6 +11,7 @@ import { attachmentRoutes } from './routes/attachments.ts'
 import { listAttachmentIds } from './store/attachments.ts'
 import { boardRoutes } from './routes/boards.ts'
 import { columnRoutes } from './routes/columns.ts'
+import { localPullRequestRoutes } from './routes/local-pull-requests.ts'
 import { eventRoutes } from './routes/events.ts'
 import { overviewRoutes } from './routes/overview.ts'
 import { epicRoutes } from './routes/epics.ts'
@@ -46,10 +47,12 @@ export function createApp(services: AppServices) {
     .route('/events', eventRoutes)
     .route('/overview', overviewRoutes)
     .route('/system', systemRoutes(services))
+    .route('/', localPullRequestRoutes)
     .all('*', (c) => c.json(errorBody('not_found', `No route for ${c.req.method} ${c.req.path}`), 404))
 
   return new Hono().route('/api', api).onError((error, c) => {
     if (error instanceof HttpError) {
+      if (error.retryAfter !== undefined) c.header('Retry-After', String(error.retryAfter))
       return c.json(errorBody(error.code, error.message, error.details), error.status)
     }
     if (error instanceof z.ZodError) {

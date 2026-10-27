@@ -91,7 +91,7 @@ clear_build_output() {
 }
 
 # Removes the checkout's ignored files, except the ultrakanban skill agent-board.sh puts there.
-clear_ignored() { git clean -fdXq -e '!/.claude/skills/ultrakanban/SKILL.md'; }
+clear_ignored() { git clean -fdXq -e '!/.claude/skills/ultrakanban/SKILL.md' -e '!/.claude/skills/ultrakanban/WORKER.md'; }
 
 # In a dedicated clone or worktree, clears the checkout's build output when someone asked for it from the board's Disk
 # usage dialog (the board's agentCleanupRequestedAt) since it last did. The loop calls this between runs, never during
@@ -99,7 +99,7 @@ clear_ignored() { git clean -fdXq -e '!/.claude/skills/ultrakanban/SKILL.md'; }
 clear_requested_build_output() {
   local requested marker
   [[ ${AGENT_LOOP_CLEAN:-0} == 1 ]] || return 0
-  requested=$(get "/boards/$BOARD" | jq -r '.board.agentCleanupRequestedAt // empty') || return 0
+  requested=$(board | jq -r '.board.agentCleanupRequestedAt // empty') || return 0
   marker=$(git rev-parse --absolute-git-dir)/ultrakanban-build-cleared || return 0
   [[ -n $requested && $(cat "$marker" 2>/dev/null) < $requested ]] || return 0
   log "clearing the build output, as asked from the board"

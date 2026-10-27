@@ -14,7 +14,8 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { activeFilterCount, NO_FILTER, type TicketFilter } from '@/lib/board-view'
+import { AGENT_EFFORTS, TICKET_SIZES } from '@shared/domain'
+import { activeFilterCount, modelsOf, NO_FILTER, type TicketFilter } from '@/lib/board-view'
 import { swatch } from '@/lib/colors'
 import { PRIORITIES_DESC, PRIORITY_LABELS } from '@/lib/priority'
 import { useBoardContext } from './board-context'
@@ -35,9 +36,13 @@ interface FilterMenuProps {
 }
 
 export function FilterMenu({ filter, onChange, archivedCount, showArchived, onShowArchivedChange }: FilterMenuProps) {
-  const { detail, assignees } = useBoardContext()
+  const { detail, assignees, ticketsById } = useBoardContext()
+  const models = modelsOf([...ticketsById.values()])
   const count = activeFilterCount(filter)
   const epicIds = filter.epicIds ?? []
+  const modelFilter = filter.models ?? []
+  const effortFilter = filter.efforts ?? []
+  const estimateFilter = filter.estimates ?? []
 
   return (
     <div className="flex items-center">
@@ -131,6 +136,51 @@ export function FilterMenu({ filter, onChange, archivedCount, showArchived, onSh
                 >
                   <UserAvatar name={name} size="xs" />
                   <span className="truncate">{name}</span>
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>Model</DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="max-h-80 w-48 overflow-y-auto">
+              {[null, ...models].map((model) => (
+                <DropdownMenuCheckboxItem
+                  key={model ?? 'default'}
+                  checked={modelFilter.includes(model)}
+                  onSelect={keepOpen}
+                  onCheckedChange={() => onChange({ ...filter, models: toggle(modelFilter, model) })}
+                >
+                  <span className="truncate">{model ?? 'Board default'}</span>
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>Effort</DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="w-44">
+              {[null, ...AGENT_EFFORTS].map((effort) => (
+                <DropdownMenuCheckboxItem
+                  key={effort ?? 'default'}
+                  checked={effortFilter.includes(effort)}
+                  onSelect={keepOpen}
+                  onCheckedChange={() => onChange({ ...filter, efforts: toggle(effortFilter, effort) })}
+                >
+                  {effort ?? 'Board default'}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>Estimate</DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="w-44">
+              {[null, ...TICKET_SIZES].map((size) => (
+                <DropdownMenuCheckboxItem
+                  key={size ?? 'none'}
+                  checked={estimateFilter.includes(size)}
+                  onSelect={keepOpen}
+                  onCheckedChange={() => onChange({ ...filter, estimates: toggle(estimateFilter, size) })}
+                >
+                  {size ?? 'No estimate'}
                 </DropdownMenuCheckboxItem>
               ))}
             </DropdownMenuSubContent>

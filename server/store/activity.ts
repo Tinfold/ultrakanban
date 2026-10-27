@@ -1,4 +1,5 @@
 import type { Activity, ActivityType } from '../../shared/domain.ts'
+import type { ListActivityQuery } from '../../shared/schemas.ts'
 import { now, sql } from '../db.ts'
 
 export interface ActivityRow {
@@ -25,8 +26,21 @@ export const toActivity = (row: ActivityRow) =>
     createdAt: row.created_at,
   }) as Activity
 
-export function listActivity(ticketId: string): Activity[] {
-  return sql.all<ActivityRow>('SELECT * FROM activity WHERE ticket_id = ? ORDER BY id', ticketId).map(toActivity)
+/** The ticket's activity, oldest first: only entries after `afterId`, and of the given types, when those are set. */
+export function listActivity(ticketId: string, { afterId, type }: ListActivityQuery = {}): Activity[] {
+  const where = ['ticket_id = ?']
+  const params: (string | number)[] = [ticketId]
+  if (afterId !== undefined) {
+    where.push('id > ?')
+    params.push(afterId)
+  }
+  if (type?.length) {
+    where.push(`type IN (${type.map(() => '?').join(', ')})`)
+    params.push(...type)
+  }
+  return sql
+    .all<ActivityRow>(`SELECT * FROM activity WHERE ${where.join(' AND ')} ORDER BY id`, ...params)
+    .map(toActivity)
 }
 
 export function logActivity<T extends ActivityType>(

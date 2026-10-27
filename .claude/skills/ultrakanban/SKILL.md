@@ -12,7 +12,7 @@ agents can work the same board safely.
 
 - `KANBAN` — the board's base URL, e.g. `http://localhost:8080`. Ask the user if you don't have it.
 - `BOARD` — the board id. List boards with `curl -s $KANBAN/api/boards`; ask the user which one if several.
-- Read the board's description once (`curl -s $KANBAN/api/boards/$BOARD | jq -r .board.description`): it is where
+- Read the board's description once (`curl -s "$KANBAN/api/boards/$BOARD?compact=1" | jq -r .board.description`): it is where
   people put what the board is for and the conventions every ticket on it should follow. Follow them unless a ticket
   says otherwise. The board's agent loop puts it in your prompt, so there you needn't fetch it.
 - Send `-H "X-Actor: <your name>"` on every write so the activity log shows who did what. Use the same name
@@ -59,9 +59,10 @@ agents can work the same board safely.
   it (`POST /api/tickets/$TICKET/release` with `{"agent":"<you>","moveTo":"<the column it came from>"}`).
 - **Keep your context small.** Everything a command prints stays in the conversation and is sent again with every
   later step, so most of a run's tokens are re-reads of old output. Search first (`grep -n`) and read the lines you
-  need (`sed -n 120,180p`) instead of printing whole large files; trim board JSON with `jq` (a board lists every
-  ticket); print only the failures and summary of long test or build output; and look at each screenshot once,
-  cropped to what changed, rather than reading full-page captures again.
+  need (`sed -n 120,180p`) instead of printing whole large files; ask the board for lean JSON (`?compact=1` lists
+  tickets without their descriptions, `?column=` and `?assignee=` filter `/boards/$BOARD/tickets`, `?afterId=` and
+  `?type=comment` trim a ticket's activity) and trim the rest with `jq`; print only the failures and summary of long
+  test or build output; and look at each screenshot once, cropped to what changed, rather than reading full-page captures again.
 
 ## 1. Claim a ticket
 
@@ -74,7 +75,7 @@ curl -s -X POST $KANBAN/api/boards/$BOARD/tickets/claim-next \
 Only one agent can win a ticket. `404 no_ticket_available` means there is nothing to do: stop and report that.
 It skips blocked tickets: tagged `blocked`, waiting for an unfinished ticket (`blocked by #12`, `depends on #12`), or
 with unfinished sub-tickets.
-`404 usage_reserve_reached` means the rest of the week's or the session's Claude usage is kept for people: don't claim
+`429 usage_reserve_reached` means the rest of the week's or the session's Claude usage is kept for people: don't claim
 anything else (not even a specific ticket); stop and report the message.
 To work a specific ticket instead, use `POST /api/tickets/$TICKET/claim` with the same body minus `column`.
 
@@ -82,8 +83,11 @@ To work a specific ticket instead, use `POST /api/tickets/$TICKET/claim` with th
 
 ```sh
 curl -s $KANBAN/api/tickets/$TICKET            # title, description (markdown), tags, due date, pull request
-curl -s $KANBAN/api/tickets/$TICKET/activity   # comments and history, oldest first
+curl -s "$KANBAN/api/tickets/$TICKET/activity?type=comment"   # its comments, oldest first
 ```
+
+Leave out `?type=comment` for its whole history (moves, claims, plans, pull request events). Note the `id` of the
+newest entry you read: `?afterId=<id>` later lists only what came after it.
 
 Follow any checklist (`- [ ] step`) in the description, and check its steps off on the board as you go (see below). Comments often contain corrections that are newer than the
 description — treat the newest instruction as the one that counts. If they conflict with the description or
@@ -106,6 +110,9 @@ work the ticket, and exit: the plan is on the ticket for a person to read, and a
 is your go-ahead. A comment on it meanwhile may ask for a different plan: answer it, post the revised plan, and wait
 again. Never approve your own plan. Post one plan when you start a ticket, not with every run on it; post it again only
 when the plan changes a lot.
+
+When the board holds no tickets for approval (the board's `approvalSize` is null in `GET /api/boards/$BOARD`), nobody
+reads the plan before you start: for a small ticket a one-line plan with the estimate is enough, or skip it.
 
 ## 4. Work, and report as you go
 
@@ -150,7 +157,8 @@ curl -s -X POST $KANBAN/api/tickets/$TICKET/review \
   -d "{\"agent\":\"$ME\",\"pullRequest\":\"$PR_URL\",\"comment\":\"What changed and how it was verified. Screenshots attached.\"}"
 ```
 
-This links the pull request, keeps the ticket yours and moves it to the review column in one step.
+This links the pull request, keeps the ticket yours and moves it to the review column in one step. On a board with a
+local repository, the pull request is a local one on the board instead (see [Local pull requests](#local-pull-requests)).
 
 **Questions need no pull request.** A ticket tagged `question` asks for an answer, not a change: investigate, then
 submit it with the answer as the comment and no `pullRequest` (`{"agent":"<you>","comment":"<the answer>"}`). A
@@ -164,7 +172,7 @@ sub-tickets did what it asked, then submit it with a summary as the comment and 
 After submitting, check both places for feedback until the pull request is merged or you are told to stop.
 
 ```sh
-curl -s $KANBAN/api/tickets/$TICKET/activity   # new ticket comments
+curl -s "$KANBAN/api/tickets/$TICKET/activity?afterId=$LAST_ID&type=comment"   # new ticket comments
 gh pr view $PR_URL --comments                  # pull request conversation
 gh api repos/$OWNER/$REPO/pulls/$NUMBER/comments   # inline review comments on the diff
 gh pr checks $PR_URL                           # failing CI is feedback too
@@ -205,17 +213,50 @@ runners that didn't start or were lost, infrastructure, a flaky test unrelated t
 don't push anything, not even an empty commit to re-trigger CI: explain what you found in a ticket comment and
 stop there. A human has to fix CI.
 
+## Local pull requests
+
+A board with a local repository (its `localRepoPath`, a git repository on the machine; the loop's prompt says so) has
+nothing on GitHub: don't use `gh` for it. That repository is your checkout's `origin`. Push a branch of your own to it
+(a branch checked out there can't be pushed to), then open the pull request on the board, which links it to the ticket:
+
+```sh
+git push -u origin $BRANCH
+curl -s -X POST $KANBAN/api/tickets/$TICKET/local-pull-request \
+  -H 'Content-Type: application/json' -H "X-Actor: $ME" \
+  -d "{\"head\":\"$BRANCH\",\"title\":\"...\",\"body\":\"markdown\"}"   # base: the default branch unless given
+```
+
+Its `url` is `/b/$BOARD/pr/<number>`: submit the ticket for review with it as the `pullRequest`, as above. A person
+reviews it on the board and merges it there, which moves the ticket to the done column; closing it cancels the ticket,
+as on GitHub. There is no CI. Feedback is in its comments; inline ones have a `path`, `line` and `side` (`right` for
+the head's version of the file, `left` for the base's):
+
+```sh
+curl -s $KANBAN/api/boards/$BOARD/pull-requests/$NUMBER | jq '{state, head, base, comments}'
+curl -s $KANBAN/api/boards/$BOARD/pull-requests/$NUMBER/diff     # the diff, file by file
+curl -s -X POST $KANBAN/api/boards/$BOARD/pull-requests/$NUMBER/comments \
+  -H 'Content-Type: application/json' -H "X-Actor: $ME" \
+  -d '{"body":"Done.\n\n<!-- ultrakanban:<your name> -->","path":"src/a.ts","line":12,"side":"right"}'
+```
+
+Reply to a comment on the whole pull request without `path`, `line` and `side`, and to an inline one with the ones it
+has. End every reply with the marker line, as on GitHub. Push fixes to the pull request's branch on `origin`; it follows
+the branch, so it needs nothing else. Merge conflicts make merging it fail: rebase yours onto the base branch, as for
+a GitHub pull request, and push with `git push --force-with-lease`.
+
 ## Handling errors
 
 | Response                      | Meaning                                                                    |
 | ----------------------------- | -------------------------------------------------------------------------- |
 | `409 already_claimed`         | Another agent got there first. Claim a different ticket.                   |
+| `409 blocked`                 | A direct claim of a ticket `claim-next` would skip. Claim another ticket.  |
 | `409 claimed_by_other`        | The ticket isn't yours; don't touch it.                                    |
 | `409 version_conflict`        | Someone edited it meanwhile. Re-read the ticket and redo your edit.        |
 | `409 pull_request_not_merged` | You tried to move a ticket into the done column. Don't; the merge does it. |
 | `409 awaiting_approval`       | The ticket's plan waits for approval. Stop, and don't work it until then.  |
+| `409 pull_request_exists`     | The branch or ticket has an open local pull request: push to its branch.   |
 | `404 no_ticket_available`     | Nothing to claim right now.                                                |
-| `404 usage_reserve_reached`   | Claude usage is kept for people. Stop and report it.                       |
+| `429 usage_reserve_reached`   | Claude usage is kept for people. Stop and report it.                       |
 | `415 unsupported_media_type`  | Attachments must be PNG, JPEG, GIF, WebP, MP4 or WebM.                     |
 
 ## Creating tickets
@@ -233,6 +274,7 @@ setting that can do the work well saves tokens. Omit both (the board's defaults)
 board that routes with Jev (`jevEnabled`, `jevMode` `on`), leave them out: the claim picks the model and effort from
 the ticket, and a setting you name overrides that.
 
+- Model aliases: `fable`, `opus`, `sonnet`, `haiku`.
 - `haiku` at `low`: mechanical edits where the change is fully spelled out (a rename, bumping a version, a typo).
 - `sonnet` at `medium`: routine, well-scoped work: copy and docs, small UI changes, a clear bug with a known cause.
 - `opus` at `medium`: changes across several files or areas that need judgment.

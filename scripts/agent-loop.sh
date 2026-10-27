@@ -7,6 +7,8 @@
 # claude/opus/high. The loop passes that model and effort to claude, so the name always says what did the work.
 # A ticket can ask for its own model and effort level (its agentModel and agentEffort); tickets that don't are worked
 # at the setting the board routes them to, when it routes with Jev (the claim's routed), else with MODEL at EFFORT.
+# Runs started only to fix merge conflicts, or only to fix failing CI, use the board's setting for those instead
+# (agentConflictModel/agentConflictEffort and agentCiModel/agentCiEffort, sonnet at medium when not set).
 # Tickets held under another of the agent's names (another model or effort, or the bare agent name) are its own too:
 # before a run on one, the loop reassigns it to the current worker.
 #
@@ -40,8 +42,8 @@
 # also sends the board a heartbeat for the ticket (POST /tickets/:id/heartbeat): the board counts tickets without one
 # (and without other activity) for 10 minutes as idle, and offers to move them back to the todo column. The heartbeats
 # say what the run is doing (its latest tool call, read from its output every RUN_STEP_SECONDS, or before its first one
-# what it is for: working the ticket, or the feedback it answers), and the loop tells the board when the run ends, so
-# the ticket's card shows the run while it goes on.
+# what it is for: working the ticket, or the feedback it answers) and how many tokens it has used so far, and the loop
+# tells the board when the run ends, so the ticket's card shows the run while it goes on.
 #
 # People can also stop a run without taking the ticket away, to give the agent new instructions (the Stop button,
 # POST /tickets/:id/stop). The same check of the ticket sees that and stops the run, but keeps its session and its
@@ -82,6 +84,7 @@
 # and check name (re-running CI on the same commit doesn't start a run), checks that never ran or failed for billing,
 # runner or approval reasons never start a run (the loop notes them on the ticket once per commit), and after
 # MAX_CI_RUNS runs in a row started only by CI, it stops starting CI runs for the ticket until a human comments.
+# MAX_CONFLICT_RUNS does the same for runs started only by merge conflicts.
 #
 # A run that fails because the account is out of Claude usage doesn't count as a failure. The loop says so on the
 # ticket, quoting claude's message, and starts no runs at all until the time the message says the limit resets
@@ -91,13 +94,18 @@
 #
 # The usage reserve (on the overview, one setting for the whole Claude account) stops agents before that, keeping the
 # rest of the week, of the current session or both for people: once a weekly limit or the current session reaches its
-# reserve, claim-next hands out no new tickets (404 usage_reserve_reached), and the loop says so in its log once and
+# reserve, claim-next hands out no new tickets (429 usage_reserve_reached), and the loop says so in its log once and
 # claims nothing until it lifts. Tickets the agent holds still get runs for their feedback, so work in progress and in
 # review isn't left halfway.
 #
-# Runs that don't finish are resumed, not started over. Each run is a claude session, and a run cut short by the
-# usage limit or by the loop stopping (a restart of the service or the machine, a crash) is continued in that same
-# session (claude --resume), so it keeps everything it already knew and did. With AGENT_LOOP_CLEAN=1, the work such a
+# A ticket's runs carry on one claude session (claude --resume), so each keeps everything the earlier ones knew and
+# did: the run after a plan approval and each run for review feedback continue the conversation of the run before,
+# and get only the new feedback rather than the whole prompt again. Runs only to fix merge conflicts or failing CI
+# start a session of their own instead, so that the fix model doesn't read the ticket's whole conversation again, and
+# the runs after them go back to the ticket's session. Runs that don't finish are resumed, not started over: a run cut
+# short by the usage limit or by the loop stopping (a restart of the service or the machine, a crash) is continued in
+# that same session. A run that failed starts a new one, and so does a run whose session can't be
+# resumed (see run_on_ticket in agent-loop/run.sh). With AGENT_LOOP_CLEAN=1, the work such a
 # run (or a failed one) left in the checkout isn't discarded either: the loop keeps its commits and uncommitted
 # changes under refs/ultrakanban/work/<ticket> and puts them back before the ticket's next run, in whichever checkout.
 #
@@ -117,7 +125,9 @@
 # while such a run works: a conflict loop also hands the ticket it last ran the human feedback that came in meanwhile,
 # and keeps doing so for as long as more comes in during its runs, rather than leaving it for the other loops.
 #
-# Run it from the repository the tickets are about, with the ultrakanban skill installed and gh authenticated:
+# Run it from the repository the tickets are about, with the ultrakanban skill installed and gh authenticated (no gh
+# for a board with a local repository, localRepoPath: it then reads nothing from GitHub, and its runs push their
+# branches to origin and open local pull requests on the board):
 #
 #   KANBAN=http://localhost:4317 BOARD=<board id> scripts/agent-loop.sh
 #
@@ -147,6 +157,12 @@
 #                       back before the time claude's limit message gave (default: 60)
 #   MAX_ATTEMPTS        failed runs in a row before waiting for new feedback (default: 3)
 #   MAX_CI_RUNS         runs in a row started only by failing CI, with no human feedback between (default: 2)
+#   PR_RECHECK_SECONDS  longest the loop goes on using what it last read of an open pull request (its comments, reviews,
+#                       inline comments and checks) while the pull request looks unchanged: same updatedAt and head
+#                       commit, and no checks still running. Each round lists the open pull requests with one call per
+#                       repository and reads GitHub again only for the ones that changed; this catches what doesn't
+#                       change updatedAt, such as a re-run check (default: 600)
+#   MAX_CONFLICT_RUNS   runs in a row started only by merge conflicts, with no human feedback between (default: 2)
 #   CLAIM_LIMIT         most new tickets claimed whose first run hasn't finished yet (it is going, failed or stopped),
 #                       across the loops sharing STATE_DIR: no loop claims another while that many are pending, so
 #                       runs that fail right away don't drag the whole todo column into progress (default: 1;
@@ -186,8 +202,8 @@
 #                       run, so it can be started again with the new version (agent-board.sh sets it to the installed
 #                       scripts and skill)
 #
-# Requires curl, jq, gh, timeout (coreutils), flock and uuidgen (util-linux) and claude. Logs go to stdout. Stop it with
-# Ctrl-C or SIGTERM.
+# Requires curl, jq, gh (except for a board with a local repository), timeout (coreutils), flock and uuidgen
+# (util-linux) and claude. Logs go to stdout. Stop it with Ctrl-C or SIGTERM.
 
 set -uo pipefail
 
@@ -216,6 +232,8 @@ RETRY_SECONDS=${RETRY_SECONDS:-600}
 USAGE_CHECK_SECONDS=${USAGE_CHECK_SECONDS:-60}
 MAX_ATTEMPTS=${MAX_ATTEMPTS:-3}
 MAX_CI_RUNS=${MAX_CI_RUNS:-2}
+PR_RECHECK_SECONDS=${PR_RECHECK_SECONDS:-600}
+MAX_CONFLICT_RUNS=${MAX_CONFLICT_RUNS:-2}
 MAX_BUILD_GB=${MAX_BUILD_GB:-20}
 CLAIM_LIMIT=${CLAIM_LIMIT:-1}
 CONFLICTS_ONLY=${CONFLICTS_ONLY:-0}
@@ -248,7 +266,7 @@ fi
 DOCKER_IMAGE=${DOCKER_IMAGE:-ultrakanban-agent}
 export CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS=${CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS:-10000}
 export BASH_MAX_OUTPUT_LENGTH=${BASH_MAX_OUTPUT_LENGTH:-15000}
-mkdir -p "$STATE_DIR" || exit 1
+mkdir -p "$STATE_DIR/github" || exit 1
 
 # The rest of the loop is split into parts by what they do, so that changing one means reading only that part.
 parts=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/agent-loop
@@ -266,24 +284,43 @@ pause() {
   sleeper=
 }
 
-# Waits the given number of seconds, or less when someone wakes the board's agent up (a `wake` event on the board's
-# event stream, sent for a person's feedback on a ticket the agent holds, and by buttons such as the review column's
-# "fix conflicts"). Waits them out anyway if the stream can't be read.
-idle() {
-  local line end=$((SECONDS + $1)) events
-  exec {events}< <(exec curl -sfN --max-time "$1" "$KANBAN/api/events?board=$BOARD" 2>/dev/null)
-  listener=$!
-  while IFS= read -r line <&"$events"; do
-    [[ $line == 'event: wake' ]] && break
+# Where wake-ups are recorded: a file that exists when the board woke the loop up since idle last looked. A listener
+# runs for the whole life of the loop, so a wake-up that arrives during triage or a run is kept, not lost.
+WAKE_FILE=$STATE_DIR/wake.$$
+
+# Reads the board's event stream and sets the wake flag on each `wake` event (sent for a person's feedback on a ticket
+# the agent holds, and by buttons such as the review column's "fix conflicts"). Reconnects when the stream ends.
+listen_for_wakes() {
+  local line
+  while true; do
+    while IFS= read -r line; do
+      [[ $line == 'event: wake' ]] && : >"$WAKE_FILE"
+    done < <(exec curl -sfN "$KANBAN/api/events?board=$BOARD" 2>/dev/null)
+    sleep 5
   done
-  exec {events}<&-
+}
+
+# Waits the given number of seconds, or less when the wake flag is set (or gets set meanwhile); clears the flag, and
+# doesn't wait at all when it was already set. Waits them out anyway if the stream can't be read.
+idle() {
+  local end=$((SECONDS + $1))
+  while ((SECONDS < end)); do
+    if [[ -e $WAKE_FILE ]]; then
+      rm -f "$WAKE_FILE"
+      log "woken up from the board"
+      return
+    fi
+    pause 1
+  done
+}
+
+# Stops the wake listener, if it runs: its curl first, which would otherwise go on reading the stream.
+stop_listener() {
+  [[ -n $listener ]] || return 0
+  pkill -P "$listener" 2>/dev/null
   kill "$listener" 2>/dev/null
   listener=
-  if [[ $line == 'event: wake' ]]; then
-    log "woken up from the board"
-  elif ((end > SECONDS)); then
-    pause "$((end - SECONDS))"
-  fi
+  rm -f "$WAKE_FILE"
 }
 
 sleeper=
@@ -299,10 +336,18 @@ claim_held=
 reserve_held=
 # In a conflict loop, the ticket it last ran: its new human feedback is this loop's to handle (see handle_feedback).
 followup=
+# The GitHub account the agent posts from, once read (see read_pr_feedback).
+gh_login=
 # The run in progress and the process watching its ticket (see run_claude), if any.
 running=
 watcher=
-trap 'log "stopped"; kill $sleeper $listener $running $watcher 2>/dev/null; exit 0' INT TERM
+# Set by the trap: a run in progress is stopped, then run_claude ends and records it as loop_stopped (end_run,
+# stop_leftovers, record_run), and run_on_ticket keeps when it ran (the state's runs) before the loop exits.
+stopping=
+trap 'log "stopped"; stop_listener; kill $sleeper $watcher 2>/dev/null
+  if [[ -n $running ]]; then stopping=1; kill $running 2>/dev/null; else exit 0; fi' INT TERM
+# However the loop exits (a signal, its scripts being updated, an error), the listener goes with it.
+trap stop_listener EXIT
 
 # `agent-loop.sh save-work` only keeps the work of an unfinished run in the current checkout (see save_work):
 # agent-board.sh does this before it removes a worktree.
@@ -310,6 +355,10 @@ if [[ ${1:-} == save-work ]]; then
   save_work
   exit
 fi
+
+rm -f "$WAKE_FILE"
+listen_for_wakes &
+listener=$!
 
 # The files in WATCH_FILES as they are now, to tell when one of them is replaced or changed.
 watched() {
@@ -340,6 +389,7 @@ while true; do
     log "the agent scripts were updated; stopping to start again with the new ones"
     exit 75
   fi
+  refresh_board
   clear_requested_build_output
   handle_feedback || claim_next || idle "$IDLE_SECONDS"
 done

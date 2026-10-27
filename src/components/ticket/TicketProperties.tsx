@@ -20,6 +20,7 @@ import { PRIORITY_LABELS } from '@/lib/priority'
 import { cn } from '@/lib/utils'
 import { useSetup } from '@/hooks/queries'
 import { useBoardContext } from '../board/board-context'
+import { AgentSuggestionButton } from './AgentSuggestionButton'
 import { JevSuggestionButton } from './JevSuggestionButton'
 import {
   AssigneePicker,
@@ -145,6 +146,14 @@ export function TicketProperties({ ticket }: { ticket: Ticket }) {
 
       {detail.board.agentEnabled && detail.board.jevEnabled && hasTypesafeKey && (
         <Property label="Jev">
+          <AgentSuggestionButton
+            title={ticket.title}
+            description={ticket.description}
+            tagIds={ticket.tagIds}
+            agentModel={ticket.agentModel}
+            agentEffort={ticket.agentEffort}
+            onApply={(agentModel, agentEffort) => actions.updateTicket(ticket.id, { agentModel, agentEffort })}
+          />
           <JevSuggestionButton
             title={ticket.title}
             description={ticket.description}

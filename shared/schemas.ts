@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import {
+  ACTIVITY_TYPES,
   AGENT_EFFORTS,
   AGENT_MODELS,
   AGENT_LOGIN_KINDS,
@@ -8,8 +9,11 @@ import {
   JEV_COMBINES,
   JEV_MODES,
   MERGE_METHODS,
+  DIFF_SIDES,
+  LOCAL_PULL_REQUEST_STATES,
   OVERVIEW_RANGES,
   type OverviewRange,
+  parseLocalPullRequestUrl,
   parsePullRequestUrl,
   PRIORITIES,
   PULL_REQUEST_STATES,
@@ -29,17 +33,38 @@ const wipLimit = z.int().min(1).nullable()
 const isoDate = z.iso.date().nullable()
 /** Either an entity id or its (case-insensitive) name. */
 const ref = z.string().trim().min(1)
-const pullRequestUrl = z
+const githubPullRequestUrl = z
   .string()
   .trim()
   .refine(
     (url) => parsePullRequestUrl(url),
     'Must be a GitHub pull request URL, e.g. https://github.com/owner/repo/pull/123',
   )
+/** A GitHub pull request, or a local one (see `LocalPullRequest`). */
+const pullRequestUrl = z
+  .string()
+  .trim()
+  .refine(
+    (url) => parsePullRequestUrl(url) ?? parseLocalPullRequestUrl(url),
+    'Must be a GitHub pull request URL, e.g. https://github.com/owner/repo/pull/123, or a local one, /b/<board>/pr/<number>',
+  )
+/** A branch name: letters, digits and `_./+-`, not starting with `-` or `.` (git checks the rest). */
+const branch = z
+  .string()
+  .trim()
+  .max(250)
+  .regex(/^\w[\w./+-]*$/, 'Must be a branch name: letters, digits and _./+- only, starting with a letter or digit')
 const githubRepo = z
   .string()
   .trim()
   .regex(/^[\w.-]+\/[\w.-]+$/, 'Must be a GitHub repository as owner/name')
+  .nullable()
+/** A git repository on the host: an absolute path, or one in the home directory (`~/...`). */
+const localRepoPath = z
+  .string()
+  .trim()
+  .max(1000)
+  .regex(/^(\/|~\/)\S/, 'Must be an absolute path or one starting with ~/')
   .nullable()
 const agentName = z
   .string()
@@ -54,6 +79,7 @@ const agentModel = z
   .regex(/^[\w.:[\]-]+(\/[\w.:[\]-]+)*$/, 'Use a model alias or name, e.g. opus, claude-opus-5-5 or qwen3-coder:30b')
   .nullable()
 const agentEffort = z.enum(AGENT_EFFORTS).nullable()
+const agentMaxTurns = z.int().min(1).max(10_000).nullable()
 const agentConcurrency = z.int().min(1).max(AGENT_MAX_CONCURRENCY).nullable()
 const agentConflictConcurrency = z.int().min(0).max(AGENT_MAX_CONCURRENCY).nullable()
 const archiveDoneDays = z.int().min(1).max(3650).nullable()
@@ -80,12 +106,18 @@ export const createBoardSchema = z.object({
   reviewColumn: ref.optional(),
   doneColumn: ref.optional(),
   githubRepo: githubRepo.optional(),
+  localRepoPath: localRepoPath.optional(),
   agentEnabled: z.boolean().optional(),
   agentName: agentName.optional(),
   agentModel: agentModel.optional(),
   agentEffort: agentEffort.optional(),
   agentConcurrency: agentConcurrency.optional(),
+  agentMaxTurns: agentMaxTurns.optional(),
   agentConflictConcurrency: agentConflictConcurrency.optional(),
+  agentConflictModel: agentModel.optional(),
+  agentConflictEffort: agentEffort.optional(),
+  agentCiModel: agentModel.optional(),
+  agentCiEffort: agentEffort.optional(),
   agentBacklog: z.boolean().optional(),
   agentAllSkills: z.boolean().optional(),
   agentDocker: z.boolean().optional(),
@@ -109,12 +141,18 @@ export const updateBoardSchema = z.object({
   reviewColumn: ref.nullable().optional(),
   doneColumn: ref.nullable().optional(),
   githubRepo: githubRepo.optional(),
+  localRepoPath: localRepoPath.optional(),
   agentEnabled: z.boolean().optional(),
   agentName: agentName.optional(),
   agentModel: agentModel.optional(),
   agentEffort: agentEffort.optional(),
   agentConcurrency: agentConcurrency.optional(),
+  agentMaxTurns: agentMaxTurns.optional(),
   agentConflictConcurrency: agentConflictConcurrency.optional(),
+  agentConflictModel: agentModel.optional(),
+  agentConflictEffort: agentEffort.optional(),
+  agentCiModel: agentModel.optional(),
+  agentCiEffort: agentEffort.optional(),
   agentBacklog: z.boolean().optional(),
   agentAllSkills: z.boolean().optional(),
   agentDocker: z.boolean().optional(),
@@ -164,7 +202,10 @@ export const updateColumnSchema = z.object({
 
 export const moveColumnSchema = z.object({ position })
 
-export const deleteColumnSchema = z.object({ moveTicketsTo: ref.optional() })
+export const deleteColumnSchema = z.object({
+  moveTicketsTo: ref.optional(),
+  deleteTickets: z.enum(['true']).optional(),
+})
 
 export const createTagSchema = z.object({ name, color: color.optional() })
 
@@ -251,6 +292,9 @@ export const bulkTicketsSchema = z
     addTags: z.array(ref).max(50).optional(),
     removeTags: z.array(ref).max(50).optional(),
     epic: ref.nullable().optional(),
+    /** The model and effort the board's agent works them with; `null` follows the board's setting. */
+    agentModel: agentModel.optional(),
+    agentEffort: agentEffort.optional(),
     delete: z.literal(true).optional(),
   })
   .refine(
@@ -260,13 +304,23 @@ export const bulkTicketsSchema = z
       input.addTags?.length ||
       input.removeTags?.length ||
       input.epic !== undefined ||
+      input.agentModel !== undefined ||
+      input.agentEffort !== undefined ||
       input.delete,
-    { message: 'Say what to do: moveTo, priority, addTags, removeTags, epic or delete' },
+    { message: 'Say what to do: moveTo, priority, addTags, removeTags, epic, agentModel, agentEffort or delete' },
   )
   .refine(
     (input) =>
       !input.delete ||
-      !(input.moveTo || input.priority || input.addTags || input.removeTags || input.epic !== undefined),
+      !(
+        input.moveTo ||
+        input.priority ||
+        input.addTags ||
+        input.removeTags ||
+        input.epic !== undefined ||
+        input.agentModel !== undefined ||
+        input.agentEffort !== undefined
+      ),
     { message: 'delete cannot be combined with other changes' },
   )
 
@@ -306,6 +360,7 @@ export const releaseTicketSchema = z.object({
 
 export const heartbeatSchema = z.object({
   step: z.string().trim().max(200).optional(),
+  tokens: z.int().min(0).optional(),
 })
 
 export const releaseIdleSchema = z.object({
@@ -475,6 +530,7 @@ export const recordRunSchema = z
     exitCode: z.int().nullable().default(null),
     durationMs: tokens.nullable().default(null),
     turns: tokens.nullable().default(null),
+    tokens: tokens.nullable().default(null),
     costUsd: cost,
     apiKey: z.boolean().default(false),
     message: clipped(RUN_MESSAGE_MAX).default(''),
@@ -510,6 +566,37 @@ export const commentSchema = z.object({
   notify: z.boolean().optional(),
 })
 
+/** Opens a local pull request for a ticket (POST /tickets/:id/local-pull-request). */
+export const openLocalPullRequestSchema = z.object({
+  /** The branch to merge. */
+  head: branch,
+  /** The branch to merge it into; the local repository's default branch (its `HEAD`) when left out. */
+  base: branch.optional(),
+  /** The ticket's title when left out. */
+  title: z.string().trim().min(1).max(300).optional(),
+  body: z.string().trim().max(60_000).default(''),
+})
+
+export const listLocalPullRequestsQuerySchema = z.object({
+  state: z.enum(LOCAL_PULL_REQUEST_STATES).optional(),
+})
+
+/** A comment on a local pull request: on the whole of it, or inline with `path` and `line` (and `side`). */
+export const localPullRequestCommentSchema = z
+  .object({
+    body: z.string().trim().min(1).max(20_000),
+    path: z.string().trim().min(1).max(1000).optional(),
+    line: z.int().min(1).optional(),
+    /** Which version of the file `line` is numbered in: `right` (the head's, the default) or `left` (the base's). */
+    side: z.enum(DIFF_SIDES).optional(),
+  })
+  .refine((input) => (input.path === undefined) === (input.line === undefined), {
+    message: 'An inline comment needs both path and line',
+  })
+  .refine((input) => input.side === undefined || input.line !== undefined, {
+    message: 'side goes with path and line',
+  })
+
 export const listTicketsQuerySchema = z.object({
   column: ref.optional(),
   assignee: name.optional(),
@@ -519,6 +606,8 @@ export const listTicketsQuerySchema = z.object({
   /** An epic's id or title, or `none` for tickets in no epic. */
   epic: ref.optional(),
   q: z.string().trim().min(1).optional(),
+  /** List `CompactTicket`s. */
+  compact: z.stringbool().optional(),
 })
 
 /** What is known of a ticket about to be created, to suggest a model and effort for it. */
@@ -528,6 +617,8 @@ export const agentSuggestionQuerySchema = z.object({
   tag: z.array(z.string().max(100)).max(50).default([]),
   /** How many checklist steps its description has; leave it out when unknown. */
   steps: z.coerce.number().int().min(0).max(1000).optional(),
+  /** The size its agent estimated it at in its plan; leave it out before it posted one. */
+  estimate: ticketSize.optional(),
 })
 
 /** What Jev is asked to route on demand: a ticket as it is being written, or edited and not saved yet. */
@@ -541,6 +632,14 @@ export const jevSuggestionSchema = z.object({
 
 export const boardDetailQuerySchema = z.object({
   archived: z.stringbool().default(false),
+  /** List the tickets as `CompactTicket`s. */
+  compact: z.stringbool().default(false),
+})
+
+export const listActivityQuerySchema = z.object({
+  /** Only entries newer than this one (activity ids only grow). */
+  afterId: z.coerce.number().int().min(0).optional(),
+  type: z.array(z.enum(ACTIVITY_TYPES)).optional(),
 })
 
 export const overviewQuerySchema = z.object({
@@ -581,7 +680,8 @@ export const boardExportSchema = z.object({
       agentDocker: z.boolean().nullable().default(null),
       pullRequest: z
         .object({
-          url: pullRequestUrl,
+          // Local pull requests live on the board they were opened on, and aren't exported (see exportBoard).
+          url: githubPullRequestUrl,
           state: z.enum(PULL_REQUEST_STATES).default('unknown'),
           title: z.string().nullable().default(null),
         })
@@ -630,7 +730,10 @@ export type ApprovePlanInput = z.input<typeof approvePlanSchema>
 export type ClaimNextInput = z.input<typeof claimNextSchema>
 export type MergeRunInput = z.input<typeof mergeRunSchema>
 export type MergeTicketInput = z.input<typeof mergeTicketSchema>
+export type OpenLocalPullRequestInput = z.input<typeof openLocalPullRequestSchema>
+export type LocalPullRequestCommentInput = z.output<typeof localPullRequestCommentSchema>
 export type ListTicketsQuery = z.output<typeof listTicketsQuerySchema>
+export type ListActivityQuery = z.output<typeof listActivityQuerySchema>
 export type AgentSuggestionQuery = z.output<typeof agentSuggestionQuerySchema>
 export type JevSuggestionInput = z.input<typeof jevSuggestionSchema>
 export type RecordUsage = z.output<typeof recordUsageSchema>

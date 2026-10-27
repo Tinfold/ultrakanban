@@ -473,6 +473,111 @@ export const MIGRATIONS = [
   -- How Jev's pick and the history suggestion combine (see BoardSummary.jevCombine; JEV_DEFAULTS when NULL).
   ALTER TABLE boards ADD COLUMN jev_combine TEXT;
   `,
+  `
+  -- The most turns a run of the board's agent may take (see BoardSummary.agentMaxTurns); NULL for no limit.
+  ALTER TABLE boards ADD COLUMN agent_max_turns INTEGER;
+  `,
+  `
+  -- Deleting a ticket keeps its runs (their ticket becomes NULL), so its spend stays in the board's totals. Dropping
+  -- the old table cascades to token_usage_models (foreign keys are on), so the model split is set aside and put back.
+  CREATE TEMP TABLE token_usage_models_kept AS SELECT * FROM token_usage_models;
+  CREATE TABLE token_usage_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+    ticket_id TEXT REFERENCES tickets(id) ON DELETE SET NULL,
+    agent TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    cache_read_tokens INTEGER NOT NULL,
+    cache_write_tokens INTEGER NOT NULL,
+    cost_usd REAL,
+    duration_ms INTEGER,
+    created_at TEXT NOT NULL,
+    routing_source TEXT,
+    routing_confidence REAL,
+    jev_model TEXT,
+    jev_effort TEXT,
+    jev_confidence REAL,
+    api_key INTEGER NOT NULL DEFAULT 0
+  );
+  INSERT INTO token_usage_new
+    SELECT id, board_id, ticket_id, agent, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+      cost_usd, duration_ms, created_at, routing_source, routing_confidence, jev_model, jev_effort, jev_confidence,
+      api_key
+    FROM token_usage;
+  DROP TABLE token_usage;
+  ALTER TABLE token_usage_new RENAME TO token_usage;
+  CREATE INDEX token_usage_ticket ON token_usage(ticket_id, id);
+  CREATE INDEX token_usage_board ON token_usage(board_id, id);
+  CREATE INDEX token_usage_created ON token_usage(created_at);
+  INSERT INTO token_usage_models SELECT * FROM token_usage_models_kept;
+  DROP TABLE token_usage_models_kept;
+  `,
+  `
+  -- For the overview's queries over recent activity, by time and by actor (see overview.ts).
+  CREATE INDEX activity_created_at ON activity(created_at);
+  CREATE INDEX activity_actor ON activity(actor, id);
+  `,
+  `
+  -- When the Claude usage limits were last read (see ClaudeUsage.limitsAt): a report with only an error keeps them.
+  ALTER TABLE claude_usage ADD COLUMN limits_at TEXT;
+  UPDATE claude_usage SET limits_at = reported_at;
+  `,
+  `
+  -- Tokens the run working the ticket has used so far, as its heartbeats say, and those a run record's run used.
+  ALTER TABLE tickets ADD COLUMN run_tokens INTEGER;
+  ALTER TABLE run_records ADD COLUMN tokens INTEGER;
+  `,
+  `
+  -- Model and effort for the board agent's runs that only fix merge conflicts, and those that only fix failing CI (see
+  -- BoardSummary). AGENT_DEFAULTS' conflictModel, conflictEffort, ciModel and ciEffort when NULL.
+  ALTER TABLE boards ADD COLUMN agent_conflict_model TEXT;
+  ALTER TABLE boards ADD COLUMN agent_conflict_effort TEXT;
+  ALTER TABLE boards ADD COLUMN agent_ci_model TEXT;
+  ALTER TABLE boards ADD COLUMN agent_ci_effort TEXT;
+  `,
+  `
+  -- Path of a git repository on the host the board works on instead of a GitHub one (see BoardSummary).
+  ALTER TABLE boards ADD COLUMN local_repo_path TEXT;
+  `,
+  `
+  -- Pull requests on the board itself, for boards with a local repository (see LocalPullRequest), numbered per board.
+  -- head_sha and base_sha are kept once merged or closed, so the diff stays readable after the branches move on.
+  CREATE TABLE local_pull_requests (
+    id TEXT PRIMARY KEY,
+    board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+    number INTEGER NOT NULL,
+    ticket_id TEXT REFERENCES tickets(id) ON DELETE SET NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL DEFAULT '',
+    head_branch TEXT NOT NULL,
+    base_branch TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'merged', 'closed')),
+    author TEXT NOT NULL,
+    head_sha TEXT,
+    base_sha TEXT,
+    merge_sha TEXT,
+    closed_by TEXT,
+    closed_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (board_id, number)
+  );
+  CREATE INDEX local_pull_requests_ticket ON local_pull_requests(ticket_id);
+  -- Comments on them: on the whole pull request, or inline on a line of a file's diff (path, line and side).
+  CREATE TABLE local_pull_request_comments (
+    id TEXT PRIMARY KEY,
+    pull_request_id TEXT NOT NULL REFERENCES local_pull_requests(id) ON DELETE CASCADE,
+    body TEXT NOT NULL,
+    author TEXT NOT NULL,
+    path TEXT,
+    line INTEGER,
+    side TEXT CHECK (side IN ('left', 'right')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX local_pull_request_comments_pull_request ON local_pull_request_comments(pull_request_id, created_at);
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

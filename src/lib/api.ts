@@ -15,6 +15,10 @@ import type {
   BoardSummary,
   Column,
   Epic,
+  LocalCommit,
+  LocalPullRequestDetail,
+  LocalPullRequestComment,
+  LocalPullRequestDiff,
   MergeMethod,
   MergePlan,
   MergeRun,
@@ -34,6 +38,7 @@ import type {
   CreateGitHubRepoInput,
   CreateTagInput,
   CreateTicketInput,
+  LocalPullRequestCommentInput,
   MoveTicketInput,
   SetAgentApiKeyInput,
   SetUsageReserveInput,
@@ -49,11 +54,14 @@ import { readActor } from './actor'
 export class ApiError extends Error {
   readonly status: number
   readonly code: string
+  /** More about the error, e.g. the ticket as it is now on a `version_conflict`. */
+  readonly details?: unknown
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, details?: unknown) {
     super(message)
     this.status = status
     this.code = code
+    this.details = details
   }
 }
 
@@ -68,7 +76,12 @@ async function request<T>(method: string, path: string, body?: unknown, keepaliv
   })
   if (!response.ok) {
     const data = (await response.json().catch(() => null)) as ApiErrorBody | null
-    throw new ApiError(response.status, data?.error.code ?? 'http_error', data?.error.message ?? response.statusText)
+    throw new ApiError(
+      response.status,
+      data?.error.code ?? 'http_error',
+      data?.error.message ?? response.statusText,
+      data?.error.details,
+    )
   }
   return response.status === 204 ? (undefined as T) : response.json()
 }
@@ -97,7 +110,10 @@ export const api = {
   moveColumn: (columnId: string, position: number) =>
     request<Column>('POST', `/columns/${columnId}/move`, { position }),
   deleteColumn: (columnId: string, moveTicketsTo?: string) =>
-    request<void>('DELETE', `/columns/${columnId}${query({ moveTicketsTo })}`),
+    request<void>(
+      'DELETE',
+      `/columns/${columnId}${query({ moveTicketsTo, deleteTickets: moveTicketsTo ? undefined : 'true' })}`,
+    ),
   idleTickets: (columnId: string) => request<Ticket[]>('GET', `/columns/${columnId}/idle-tickets`),
   releaseIdleTickets: (columnId: string, moveTo: string) =>
     request<Ticket[]>('POST', `/columns/${columnId}/release-idle`, { moveTo }),
@@ -151,6 +167,19 @@ export const api = {
   requestAgentCleanup: (boardId: string) => request<BoardSummary>('POST', `/boards/${boardId}/agent-cleanup`),
   addComment: (ticketId: string, body: string, pullRequest = false) =>
     request<Activity>('POST', `/tickets/${ticketId}/comments`, { body, pullRequest }),
+  /** A local pull request (see `LocalPullRequest`), with its comments. */
+  getLocalPullRequest: (boardId: string, number: number) =>
+    request<LocalPullRequestDetail>('GET', `/boards/${boardId}/pull-requests/${number}`),
+  localPullRequestDiff: (boardId: string, number: number) =>
+    request<LocalPullRequestDiff>('GET', `/boards/${boardId}/pull-requests/${number}/diff`),
+  localPullRequestCommits: (boardId: string, number: number) =>
+    request<LocalCommit[]>('GET', `/boards/${boardId}/pull-requests/${number}/commits`),
+  commentOnLocalPullRequest: (boardId: string, number: number, input: LocalPullRequestCommentInput) =>
+    request<LocalPullRequestComment>('POST', `/boards/${boardId}/pull-requests/${number}/comments`, input),
+  mergeLocalPullRequest: (boardId: string, number: number) =>
+    request<LocalPullRequestDetail>('POST', `/boards/${boardId}/pull-requests/${number}/merge`),
+  closeLocalPullRequest: (boardId: string, number: number) =>
+    request<LocalPullRequestDetail>('POST', `/boards/${boardId}/pull-requests/${number}/close`),
   mergePlan: (boardId: string) => request<MergePlan>('GET', `/boards/${boardId}/merge-plan`),
   mergeRun: (boardId: string) => request<MergeRun | null>('GET', `/boards/${boardId}/merge-run`),
   startMergeRun: (boardId: string, method: MergeMethod) =>

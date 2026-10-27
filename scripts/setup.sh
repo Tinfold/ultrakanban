@@ -7,12 +7,12 @@
 #   scripts/setup.sh --agents=container   the agents in the container, on Linux too
 #   scripts/setup.sh --no-docker  without containers: install, build and start it with Node.js 22.13+ in the foreground
 #
-# With docker it creates .env from .env.example, with your GitHub token from gh if gh is logged in. It asks nothing: the
-# rest is on the board's Setup page (/setup), which it opens: the board's GitHub token, the agents' GitHub and Claude
-# logins, wherever they run, and the optional TypeSafe key for Jev. It is safe to run again: it keeps an existing .env,
-# and rebuilds the board. Where there are no systemd user services (Windows, macOS) it also starts the updater container
-# (with docker compose, not podman), which updates the board from the app's update button; on Linux the agent services
-# do that.
+# With docker it creates .env from .env.example and fills in what it can find itself: your GitHub token from gh if gh is
+# logged in, and your home directory. It asks nothing; the rest is on the board's Setup page (/setup), which it opens:
+# the board's GitHub token, the agents' GitHub and Claude logins, wherever they run, and the optional TypeSafe key for
+# Jev. It is safe to run again: it keeps your .env, adding new settings to it, and rebuilds the board. Where there are no
+# systemd user services (Windows, macOS) it also starts the updater container (with docker compose, not podman), which
+# updates the board from the app's update button; on Linux the agent services do that.
 
 set -euo pipefail
 
@@ -110,12 +110,23 @@ if ((!docker)); then
   exec npm start
 fi
 
-# .env: settings for docker compose (port, GitHub token)
+# .env: settings for docker compose. It starts as .env.example, an older one gets the settings added there since, and
+# setup fills in what it can find out itself. It asks nothing: keys and logins go on the Setup page.
 env_get() { sed -n "s/^$1=//p" .env | tail -n 1; }
 env_set() { sed -i.bak "s|^$1=.*|$1=$2|" .env && rm -f .env.bak; }
 if [[ ! -f .env ]]; then
   cp .env.example .env
   echo "Created .env."
+else
+  # Each setting .env lacks, with the comment above it in .env.example
+  added=$(awk -F= 'NR == FNR { if (/^[A-Z0-9_]+=/) have[$1] = 1; next }
+    /^#/ { comment = comment $0 "\n"; next }
+    /^[A-Z0-9_]+=/ && !($1 in have) { printf "%s%s%s\n", comment ? "\n" : "", comment, $0; comment = ""; next }
+    /^$/ { comment = "" }' .env .env.example)
+  if [[ -n $added ]]; then
+    printf '%s\n' "$added" >>.env
+    echo "Added the new settings to .env: $(grep -o '^[A-Z0-9_]*=' <<<"$added" | tr -d = | xargs)"
+  fi
 fi
 # The board follows pull requests with the GitHub token; in the container the agents also push with it. Without gh,
 # it is set on the Setup page instead.
@@ -123,6 +134,12 @@ if [[ -z $(env_get GITHUB_TOKEN) ]] && command -v gh >/dev/null && token=$(gh au
   [[ -n $token ]]; then
   env_set GITHUB_TOKEN "$token"
   echo "Put your GitHub token from gh in .env."
+fi
+# Your home directory, which the board's container mounts so boards can have local repositories in it. Not on Windows,
+# where HOME is Git Bash's path.
+if [[ -z $(env_get ULTRAKANBAN_HOME) && $(uname -s) =~ ^(Linux|Darwin)$ ]]; then
+  env_set ULTRAKANBAN_HOME "$HOME"
+  echo "Put your home directory in .env, for boards with a local repository: $HOME"
 fi
 port=$(env_get ULTRAKANBAN_PORT)
 port=${port:-4317}

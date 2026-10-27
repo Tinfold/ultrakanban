@@ -1,3 +1,4 @@
+import { basename } from 'node:path'
 import {
   AGENT_IDLE_MINUTES,
   type AgentEffort,
@@ -11,6 +12,8 @@ import {
   IN_PROGRESS_COLUMN,
   isWeeklyLimit,
   JEV_AGENT,
+  type LocalPullRequestState,
+  parseLocalPullRequestUrl,
   parsePullRequestUrl,
   PRIORITIES,
   type Priority,
@@ -19,6 +22,7 @@ import {
   needsApproval,
   QUESTION_TAG,
   reserveFor,
+  type CompactTicket,
   type Ticket,
   type TicketSize,
 } from '../../shared/domain.ts'
@@ -78,6 +82,7 @@ interface TicketRow {
   agent_seen_at: string | null
   run_started_at: string | null
   run_step: string | null
+  run_tokens: number | null
   stop_requested_at: string | null
   stop_requested_by: string | null
   estimate: TicketSize | null
@@ -110,7 +115,10 @@ interface TicketRow {
  * column, and its pull request wasn't closed). Null when it isn't waiting. Needs the ticket as `t`.
  */
 export const WAITING_SINCE = `
-  (SELECT CASE WHEN a.actor = t.assignee AND (a.type = 'comment' OR t.approval = 'pending') THEN a.created_at END
+  (SELECT CASE WHEN (a.actor = t.assignee OR a.actor = substr(t.assignee, 1, instr(t.assignee || '/', '/') - 1)
+                         OR a.actor = substr(t.assignee, 1, instr(t.assignee || '/', '/') - 1) || '-loop'
+                         OR a.actor LIKE substr(t.assignee, 1, instr(t.assignee || '/', '/') - 1) || '/%')
+                        AND (a.type = 'comment' OR t.approval = 'pending') THEN a.created_at END
    FROM activity a JOIN boards b ON b.id = t.board_id
    WHERE a.ticket_id = t.id AND a.type IN ('comment', 'plan')
      AND t.column_id IS NOT b.review_column_id AND t.column_id IS NOT b.done_column_id AND t.pr_state != 'closed'
@@ -149,8 +157,17 @@ const SELECT_TICKETS = `
 
 const BOARD_ORDER = 'ORDER BY (SELECT position FROM columns WHERE id = t.column_id), t.position'
 
+/** A local pull request's `repo`: `local/` and the folder name of its board's local repository. */
+function localRepoName(boardId: string) {
+  const board = sql.get<{ local_repo_path: string | null }>('SELECT local_repo_path FROM boards WHERE id = ?', boardId)
+  return `local/${(board?.local_repo_path && basename(board.local_repo_path)) || 'repository'}`
+}
+
 function toPullRequest(url: string, row: TicketRow): PullRequest {
-  const { repo, number } = parsePullRequestUrl(url)!
+  const local = parseLocalPullRequestUrl(url)
+  const { repo, number } = local
+    ? { repo: localRepoName(row.board_id), number: local.number }
+    : parsePullRequestUrl(url)!
   return {
     url,
     repo,
@@ -166,15 +183,15 @@ function toPullRequest(url: string, row: TicketRow): PullRequest {
 
 type RunRow = Pick<
   TicketRow,
-  'agent_seen_at' | 'run_started_at' | 'run_step' | 'stop_requested_at' | 'stop_requested_by'
+  'agent_seen_at' | 'run_started_at' | 'run_step' | 'run_tokens' | 'stop_requested_at' | 'stop_requested_by'
 >
 
 /** The run working a ticket: one has started, hasn't ended, and sent a heartbeat within `AGENT_IDLE_MINUTES`. */
 function runOf(row: RunRow): AgentRun | null {
-  const { agent_seen_at: seenAt, run_started_at: startedAt, run_step: step } = row
+  const { agent_seen_at: seenAt, run_started_at: startedAt, run_step: step, run_tokens: tokens } = row
   if (!startedAt || !seenAt || Date.parse(seenAt) < Date.now() - AGENT_IDLE_MINUTES * 60_000) return null
   const { stop_requested_at: at, stop_requested_by: by } = row
-  return { startedAt, seenAt, step, stopRequested: at && by ? { at, by } : null }
+  return { startedAt, seenAt, step, tokens, stopRequested: at && by ? { at, by } : null }
 }
 
 /**
@@ -324,19 +341,60 @@ export function listTickets(boardId: string, query: ListTicketsQuery = {}): Tick
     params.push(...query.priority.map(priorityRank))
   }
   if (query.q) {
-    where.push("(t.title LIKE ? OR t.description LIKE ? OR ('#' || t.number) = ?)")
-    params.push(`%${query.q}%`, `%${query.q}%`, query.q.startsWith('#') ? query.q : `#${query.q}`)
+    // Escape LIKE's wildcards (and the escape character itself) so the search text matches literally
+    const pattern = `%${query.q.replace(/[\\%_]/g, (char) => `\\${char}`)}%`
+    where.push("(t.title LIKE ? ESCAPE '\\' OR t.description LIKE ? ESCAPE '\\' OR ('#' || t.number) = ?)")
+    params.push(pattern, pattern, query.q.startsWith('#') ? query.q : `#${query.q}`)
   }
 
   return sql.all<TicketRow>(`${SELECT_TICKETS} WHERE ${where.join(' AND ')} ${BOARD_ORDER}`, ...params).map(toTicket)
 }
 
-function assertVersion(ticket: Ticket, ifVersion: number | undefined) {
+/** The ticket as `?compact=true` lists it (see `CompactTicket`). */
+export const compactTicket = (ticket: Ticket): CompactTicket => ({
+  id: ticket.id,
+  number: ticket.number,
+  columnId: ticket.columnId,
+  title: ticket.title,
+  priority: ticket.priority,
+  assignee: ticket.assignee,
+  tagIds: ticket.tagIds,
+  epicId: ticket.epicId,
+  parentId: ticket.parentId,
+  version: ticket.version,
+  estimate: ticket.estimate,
+  approval: ticket.approval,
+  waitingSince: ticket.waitingSince,
+  archived: ticket.archived,
+  subtickets: ticket.subtickets,
+  commentCount: ticket.commentCount,
+  agentModel: ticket.agentModel,
+  agentEffort: ticket.agentEffort,
+  pullRequest: ticket.pullRequest && {
+    url: ticket.pullRequest.url,
+    repo: ticket.pullRequest.repo,
+    number: ticket.pullRequest.number,
+    state: ticket.pullRequest.state,
+    checks: ticket.pullRequest.checks,
+    conflicts: ticket.pullRequest.conflicts,
+  },
+})
+
+/** What a 409 says about the ticket: enough to retry, without the whole ticket. */
+function conflictState(ticket: Pick<Ticket, 'version' | 'assignee' | 'columnId'>) {
+  return { version: ticket.version, assignee: ticket.assignee, columnId: ticket.columnId }
+}
+
+/**
+ * With `withDescription`, the 409 also carries the description as it is now, so that a description save can tell
+ * whether the description changed meanwhile or only other fields did.
+ */
+function assertVersion(ticket: Ticket, ifVersion: number | undefined, withDescription = false) {
   if (ifVersion !== undefined && ticket.version !== ifVersion) {
     throw conflict(
       'version_conflict',
       `Ticket was modified concurrently (current version ${ticket.version}, expected ${ifVersion})`,
-      { ticket },
+      withDescription ? { ...conflictState(ticket), description: ticket.description } : conflictState(ticket),
     )
   }
 }
@@ -382,7 +440,7 @@ function isAgentOf(assignee: string, actor: string) {
  * feedback in a ticket's activity (`TRIAGE` in scripts/agent-loop/triage.sh): a comment, an approved plan, and a move
  * into the in-progress column, by anyone but the agent itself.
  */
-function wakeForFeedback(ticket: Pick<Ticket, 'boardId' | 'assignee'>, actor: string) {
+export function wakeForFeedback(ticket: Pick<Ticket, 'boardId' | 'assignee'>, actor: string) {
   if (ticket.assignee && !isAgentOf(ticket.assignee, actor)) wakeAgent(ticket.boardId)
 }
 
@@ -414,7 +472,6 @@ function assertCanEnter(
     ticket.pullRequest
       ? `Tickets enter "${target.name}" when their pull request is merged; ${ticket.pullRequest.url} is ${ticket.pullRequest.state}. It will move automatically once merged.`
       : `Tickets enter "${target.name}" only with a merged pull request, or without one as questions (tagged "${QUESTION_TAG}") or once all their sub-tickets are finished. Link one with POST /api/tickets/:id/review.`,
-    { ticket },
   )
 }
 
@@ -437,9 +494,30 @@ function assign(ticket: Ticket, assignee: string | null, actor: string) {
   if (assignee) logActivity(ticket.id, actor, 'claimed', { assignee })
 }
 
-/** Links (or with `null` unlinks) a pull request. Returns whether the link changed. */
+/**
+ * The state and title of a local pull request opened for the ticket (see `LocalPullRequest`); throws if the board has
+ * no such pull request, or it was opened for another ticket.
+ */
+function localPullRequestOf(ticket: Ticket, url: string) {
+  const { boardId, number } = parseLocalPullRequestUrl(url)!
+  const row = sql.get<{ state: LocalPullRequestState; title: string; ticket_id: string | null }>(
+    'SELECT state, title, ticket_id FROM local_pull_requests WHERE board_id = ? AND number = ?',
+    boardId,
+    number,
+  )
+  if (!row || boardId !== ticket.boardId) throw badRequest(`This board has no local pull request ${url}`)
+  if (row.ticket_id !== ticket.id) throw badRequest(`Local pull request ${url} was opened for another ticket`)
+  return row
+}
+
+/**
+ * Links (or with `null` unlinks) a pull request. A local one (see `LocalPullRequest`) must have been opened for the
+ * ticket, and takes its state from it rather than from GitHub. Returns whether the link changed.
+ */
 function linkPullRequest(ticket: Ticket, url: string | null, actor: string) {
-  const next = url === null ? null : parsePullRequestUrl(url)!.url
+  const local = url === null ? null : parseLocalPullRequestUrl(url)
+  const localState = local && localPullRequestOf(ticket, local.url)
+  const next = url === null ? null : (local?.url ?? parsePullRequestUrl(url)!.url)
   const current = ticket.pullRequest?.url ?? null
   if (next === current) return false
   sql.run(
@@ -451,6 +529,7 @@ function linkPullRequest(ticket: Ticket, url: string | null, actor: string) {
   )
   if (current) logActivity(ticket.id, actor, 'pull_request', { url: current, event: 'unlinked' })
   if (next) logActivity(ticket.id, actor, 'pull_request', { url: next, event: 'linked' })
+  if (localState) setPullRequestStatus(ticket.id, localState)
   return true
 }
 
@@ -505,7 +584,7 @@ export function createTicket(boardId: string, input: CreateTicketInput, actor: s
 
 export function updateTicket(id: string, input: UpdateTicketInput, actor: string): Ticket {
   const ticket = getTicket(id)
-  assertVersion(ticket, input.ifVersion)
+  assertVersion(ticket, input.ifVersion, input.description !== undefined)
   touchBoard(ticket.boardId)
 
   const changed: string[] = EDITABLE_FIELDS.filter(
@@ -609,7 +688,11 @@ export function bulkUpdateTickets(boardId: string, input: BulkTicketsInput, acto
   const epic = input.epic === undefined ? undefined : resolveEpic(boardId, input.epic, { create: true })
   return tickets.map((ticket) => {
     const tagIds = [...new Set([...ticket.tagIds, ...added])].filter((tagId) => !removed.includes(tagId))
-    updateTicket(ticket.id, { priority: input.priority, tags: tagIds, epic }, actor)
+    updateTicket(
+      ticket.id,
+      { priority: input.priority, tags: tagIds, epic, agentModel: input.agentModel, agentEffort: input.agentEffort },
+      actor,
+    )
     if (target && target.id !== ticket.columnId) {
       moveTicket(ticket.id, { column: target.id, force: input.force }, actor)
     }
@@ -621,8 +704,10 @@ export function claimTicket(id: string, input: ClaimTicketInput): Ticket {
   const ticket = getTicket(id)
   assertVersion(ticket, input.ifVersion)
   if (ticket.assignee && ticket.assignee !== input.agent) {
-    throw conflict('already_claimed', `Ticket is already claimed by "${ticket.assignee}"`, { ticket })
+    throw conflict('already_claimed', `Ticket is already claimed by "${ticket.assignee}"`, conflictState(ticket))
   }
+  // A ticket the agent already holds stays its own, whatever has come up since.
+  if (ticket.assignee !== input.agent) assertClaimable(ticket)
   touchBoard(ticket.boardId)
   assign(ticket, input.agent, input.agent)
   if (input.moveTo) relocate(ticket, input.moveTo, undefined, input.agent)
@@ -630,10 +715,40 @@ export function claimTicket(id: string, input: ClaimTicketInput): Ticket {
   return getTicket(id)
 }
 
+/**
+ * The checks `claimNextTicket` applies when it picks a ticket, for claiming a specific one: no new claims while the
+ * usage reserve holds agents back (429 `usage_reserve_reached`), and none on a ticket that is blocked (409 `blocked`):
+ * tagged `blocked`, waiting for an unfinished ticket (`blocked by #12`), or with unfinished sub-tickets.
+ */
+function assertClaimable(ticket: Ticket) {
+  assertBelowUsageReserve()
+  const tagged = sql.get(
+    `SELECT 1 FROM ticket_tags tt JOIN tags g ON g.id = tt.tag_id WHERE tt.ticket_id = ? AND lower(g.name) = ?`,
+    ticket.id,
+    BLOCKED_TAG,
+  )
+  const unfinishedSubtickets = sql.get(
+    `SELECT 1 FROM tickets t WHERE t.id = ? AND EXISTS (SELECT 1 ${SUBTICKETS} AND NOT ${SUBTICKET_DONE})`,
+    ticket.id,
+  )
+  const reason = tagged
+    ? `tagged "${BLOCKED_TAG}"; a person has to remove the tag`
+    : waitsForOpenTicket(ticket.boardId, ticket)
+      ? 'it waits for a ticket it says it is blocked by, which is not finished yet'
+      : unfinishedSubtickets
+        ? 'its sub-tickets are not all finished yet'
+        : null
+  if (reason) throw conflict('blocked', `Ticket is blocked: ${reason}`, conflictState(ticket))
+}
+
 export function releaseTicket(id: string, input: ReleaseTicketInput): Ticket {
   const ticket = getTicket(id)
   if (ticket.assignee && ticket.assignee !== input.agent && !input.force) {
-    throw conflict('claimed_by_other', `Ticket is claimed by "${ticket.assignee}", not "${input.agent}"`, { ticket })
+    throw conflict(
+      'claimed_by_other',
+      `Ticket is claimed by "${ticket.assignee}", not "${input.agent}"`,
+      conflictState(ticket),
+    )
   }
   touchBoard(ticket.boardId)
   assign(ticket, null, input.agent)
@@ -644,7 +759,7 @@ export function releaseTicket(id: string, input: ReleaseTicketInput): Ticket {
 
 const getRunRow = (id: string) => {
   const row = sql.get<RunRow & { board_id: string }>(
-    `SELECT board_id, agent_seen_at, run_started_at, run_step, stop_requested_at, stop_requested_by
+    `SELECT board_id, agent_seen_at, run_started_at, run_step, run_tokens, stop_requested_at, stop_requested_by
      FROM tickets WHERE id = ?`,
     id,
   )
@@ -654,8 +769,9 @@ const getRunRow = (id: string) => {
 
 /**
  * Notes that an agent is working on the ticket right now, starting a run unless one is going on (see `AgentRun`), and
- * what the run is doing if the agent says (it keeps its step otherwise). Not a change to the ticket: nothing is logged
- * or bumped, but boards are told when a run starts or its step changes, so they show it. A new run starts without a
+ * what the run is doing and the tokens it has used if the agent says (it keeps them otherwise). Not a change to the
+ * ticket: nothing is logged or bumped, but boards are told when a run starts or its step or tokens change, so they
+ * show it. A new run starts without a
  * stop request, even if the run before it went quiet with one.
  */
 export function recordHeartbeat(id: string, input: HeartbeatInput) {
@@ -663,18 +779,21 @@ export function recordHeartbeat(id: string, input: HeartbeatInput) {
   const run = runOf(row)
   const at = now()
   const step = input.step === undefined ? (run?.step ?? null) : input.step || null
+  const tokens = input.tokens ?? run?.tokens ?? null
   sql.run(
-    `UPDATE tickets SET agent_seen_at = ?, run_started_at = ?, run_step = ?, stop_requested_at = ?,
+    `UPDATE tickets SET agent_seen_at = ?, run_started_at = ?, run_step = ?, run_tokens = ?, stop_requested_at = ?,
        stop_requested_by = ?
      WHERE id = ?`,
     at,
     run?.startedAt ?? at,
     step,
+    tokens,
     run?.stopRequested?.at ?? null,
     run?.stopRequested?.by ?? null,
     id,
   )
-  if (!run || step !== run.step) publish({ boardId: row.board_id })
+  if (!run || step !== run.step || tokens !== run.tokens) publish({ boardId: row.board_id })
+  return { stopRequested: run?.stopRequested ?? null }
 }
 
 /** Ends the run working the ticket, if any: the agent says it has stopped. Its stop request, if any, goes with it. */
@@ -682,7 +801,8 @@ export function endRun(id: string) {
   const row = getRunRow(id)
   if (!row.run_started_at) return
   sql.run(
-    `UPDATE tickets SET run_started_at = NULL, run_step = NULL, stop_requested_at = NULL, stop_requested_by = NULL
+    `UPDATE tickets SET run_started_at = NULL, run_step = NULL, run_tokens = NULL, stop_requested_at = NULL,
+       stop_requested_by = NULL
      WHERE id = ?`,
     id,
   )
@@ -728,18 +848,25 @@ export function listIdleTickets(columnId: string): Ticket[] {
     .map(toTicket)
 }
 
-/** Unassigns a column's idle tickets (see `listIdleTickets`) and moves them to another column. Returns them. */
+/** Unassigns a column's idle tickets (see `listIdleTickets`) and moves them to another column. Returns them. Tickets that can't enter the target (e.g. no merged pull request for the done column) stay as they are. */
 export function releaseIdleTickets(columnId: string, input: ReleaseIdleInput, actor: string): Ticket[] {
   const column = getColumn(columnId)
   const target = resolveColumn(column.boardId, input.moveTo)
   if (target.id === column.id) throw badRequest('Idle tickets must move to another column')
-  return listIdleTickets(columnId).map((ticket) => {
+  const released: Ticket[] = []
+  for (const ticket of listIdleTickets(columnId)) {
+    try {
+      assertCanEnter(ticket, target)
+    } catch {
+      continue
+    }
     touchBoard(ticket.boardId)
     assign(ticket, null, actor)
     relocate(ticket, target.id, undefined, actor)
     bumpVersion(ticket.id)
-    return getTicket(ticket.id)
-  })
+    released.push(getTicket(ticket.id))
+  }
+  return released
 }
 
 /**
@@ -759,10 +886,16 @@ function assertBelowUsageReserve() {
         `(agents may spend them if the usage reserve allows it, or go on on their API key if that is allowed). `
       : `Agents claim no new tickets while the rest of ${kept} is kept for people's own work: ` +
         `${limit.label} is at ${Math.round(limit.percent)}%, and its usage reserve starts at ${reservePercent}%. `
-  throw new HttpError(404, 'usage_reserve_reached', `${why}Tickets agents already hold can still be worked.${resets}`, {
-    limit,
-    reservePercent,
-  })
+  const untilReset = limit.resetsAt ? Math.ceil((Date.parse(limit.resetsAt) - Date.now()) / 1000) : NaN
+  const error = new HttpError(
+    429,
+    'usage_reserve_reached',
+    `${why}Tickets agents already hold can still be worked.${resets}`,
+    { limit, reservePercent },
+  )
+  // Until the limit resets; an unknown or past reset time falls back to five minutes.
+  error.retryAfter = untilReset > 0 ? untilReset : 300
+  throw error
 }
 
 /**
@@ -819,7 +952,11 @@ export function submitForReview(id: string, input: SubmitForReviewInput): Ticket
   const ticket = getTicket(id)
   assertVersion(ticket, input.ifVersion)
   if (ticket.assignee && ticket.assignee !== input.agent) {
-    throw conflict('claimed_by_other', `Ticket is claimed by "${ticket.assignee}", not "${input.agent}"`, { ticket })
+    throw conflict(
+      'claimed_by_other',
+      `Ticket is claimed by "${ticket.assignee}", not "${input.agent}"`,
+      conflictState(ticket),
+    )
   }
   assertNotHeld(ticket)
   const { review } = workflowColumns(ticket.boardId)
@@ -848,7 +985,7 @@ function assertNotHeld(ticket: Ticket) {
     throw conflict(
       'awaiting_approval',
       "The ticket's plan waits for approval; don't work it until someone approves it (POST /tickets/:id/approve)",
-      { ticket },
+      conflictState(ticket),
     )
   }
 }
@@ -861,7 +998,11 @@ function assertNotHeld(ticket: Ticket) {
 export function postPlan(id: string, input: PostPlanInput): Ticket {
   const ticket = getTicket(id)
   if (ticket.assignee && ticket.assignee !== input.agent) {
-    throw conflict('claimed_by_other', `Ticket is claimed by "${ticket.assignee}", not "${input.agent}"`, { ticket })
+    throw conflict(
+      'claimed_by_other',
+      `Ticket is claimed by "${ticket.assignee}", not "${input.agent}"`,
+      conflictState(ticket),
+    )
   }
   const { approval_size: approvalSize } = sql.get<{ approval_size: TicketSize | null }>(
     'SELECT approval_size FROM boards WHERE id = ?',
@@ -882,10 +1023,10 @@ export function approvePlan(id: string, input: ApprovePlanInput, actor: string):
   const ticket = getTicket(id)
   assertVersion(ticket, input.ifVersion)
   if (ticket.approval !== 'pending') {
-    throw conflict('not_awaiting_approval', "The ticket's plan doesn't wait for approval", { ticket })
+    throw conflict('not_awaiting_approval', "The ticket's plan doesn't wait for approval", conflictState(ticket))
   }
-  if (ticket.assignee && actor === ticket.assignee) {
-    throw conflict('own_plan', "The ticket's agent can't approve its own plan; a person has to", { ticket })
+  if (ticket.assignee && isAgentOf(ticket.assignee, actor)) {
+    throw conflict('own_plan', "The ticket's agent can't approve its own plan; a person has to", conflictState(ticket))
   }
   touchBoard(ticket.boardId)
   updateRow('tickets', id, { approval: 'approved' })
@@ -898,7 +1039,9 @@ export function approvePlan(id: string, input: ApprovePlanInput, actor: string):
 /** Tickets whose pull request may still change state. */
 export function listPendingPullRequests() {
   return sql.all<{ ticketId: string; url: string }>(
-    "SELECT id AS ticketId, pr_url AS url FROM tickets WHERE pr_url IS NOT NULL AND pr_state IN ('unknown', 'open', 'draft')",
+    // Local pull requests (`/b/<board>/pr/<number>`) aren't on GitHub: the board sets their state itself.
+    `SELECT id AS ticketId, pr_url AS url FROM tickets
+     WHERE pr_url IS NOT NULL AND pr_url NOT LIKE '/%' AND pr_state IN ('unknown', 'open', 'draft')`,
   )
 }
 
@@ -972,10 +1115,16 @@ export function pullRequestChecks(ticketId: string): { headSha: string | null; f
 }
 
 /**
- * Records the latest GitHub state of a ticket's pull request. When it gets merged, the ticket moves to the
- * board's done column. Ignored if the ticket was linked to another pull request in the meantime.
+ * Records the latest GitHub state of a ticket's pull request, or a local one's (`actor` is who merged or closed it).
+ * When it gets merged, the ticket moves to the board's done column. Ignored if the ticket was linked to another pull
+ * request in the meantime.
  */
-export function applyPullRequestStatus(ticketId: string, url: string, status: PullRequestStatus): Ticket {
+export function applyPullRequestStatus(
+  ticketId: string,
+  url: string,
+  status: PullRequestStatus,
+  actor = GITHUB_ACTOR,
+): Ticket {
   const ticket = getTicket(ticketId)
   const previous = ticket.pullRequest
   // Merged is final on GitHub, so a different state can only be a stale response from an overlapping check.
@@ -997,11 +1146,11 @@ export function applyPullRequestStatus(ticketId: string, url: string, status: Pu
   // A first check finding the PR open or draft isn't news; merges and closes always are.
   const firstCheck = previous.state === 'unknown'
   if (previous.state !== status.state && (!firstCheck || status.state === 'merged' || status.state === 'closed')) {
-    logActivity(ticketId, GITHUB_ACTOR, 'pull_request', { url, event: status.state })
+    logActivity(ticketId, actor, 'pull_request', { url, event: status.state })
   }
   const done = workflowColumns(ticket.boardId).done
   if (status.state === 'merged' && done && ticket.columnId !== done.id) {
-    relocate(ticket, done.id, undefined, GITHUB_ACTOR, true)
+    relocate(ticket, done.id, undefined, actor, true)
   }
   bumpVersion(ticketId)
   return getTicket(ticketId)

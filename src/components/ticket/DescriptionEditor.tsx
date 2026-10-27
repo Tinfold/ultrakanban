@@ -3,7 +3,7 @@ import { Placeholder } from '@tiptap/extensions'
 import { Markdown } from '@tiptap/markdown'
 import { EditorContent, Extension, InputRule, useEditor } from '@tiptap/react'
 import { StarterKit } from '@tiptap/starter-kit'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { CodeBlockWithCopy } from './code-block'
 import { EditorToolbar } from './EditorToolbar'
@@ -32,6 +32,10 @@ interface DescriptionEditorProps {
   value: string
   onChange: (markdown: string) => void
   onBlur?: () => void
+  /** Called whenever the editor shows `value`, rather than unsaved edits. */
+  onSync?: (markdown: string) => void
+  /** Whether the editor's text has edits that aren't saved yet: changes to `value` don't replace them meanwhile. */
+  hasUnsavedEdits?: () => boolean
   placeholder?: string
   autoFocus?: boolean
   className?: string
@@ -42,6 +46,8 @@ export function DescriptionEditor({
   value,
   onChange,
   onBlur,
+  onSync,
+  hasUnsavedEdits,
   placeholder = 'Add a description…',
   autoFocus,
   className,
@@ -68,10 +74,20 @@ export function DescriptionEditor({
     onBlur: () => onBlur?.(),
   })
 
-  // Apply changes made elsewhere (other tabs, agents) unless the user is editing.
+  // Apply changes made elsewhere (other tabs, agents) unless the user is editing or has edits that aren't saved.
+  const onSyncRef = useRef(onSync)
+  const hasUnsavedEditsRef = useRef(hasUnsavedEdits)
   useEffect(() => {
-    if (editor.isFocused || editor.getMarkdown() === value) return
-    editor.commands.setContent(value, { contentType: 'markdown', emitUpdate: false })
+    onSyncRef.current = onSync
+    hasUnsavedEditsRef.current = hasUnsavedEdits
+  })
+  useEffect(() => {
+    if (hasUnsavedEditsRef.current?.()) return
+    if (editor.getMarkdown() !== value) {
+      if (editor.isFocused) return
+      editor.commands.setContent(value, { contentType: 'markdown', emitUpdate: false })
+    }
+    onSyncRef.current?.(value)
   }, [editor, value])
 
   return (

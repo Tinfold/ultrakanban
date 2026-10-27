@@ -61,7 +61,12 @@ export function routingState(ticket: Ticket) {
       : ticket.description
   const tagNames = ticket.tagIds.flatMap((id) => tags.find((tag) => tag.id === id)?.name ?? [])
   const steps = parseChecklist(ticket.description).length
-  const similar = suggestAgent(ticket.boardId, { title: ticket.title, tag: ticket.tagIds, steps })
+  const similar = suggestAgent(ticket.boardId, {
+    title: ticket.title,
+    tag: ticket.tagIds,
+    steps,
+    estimate: ticket.estimate ?? undefined,
+  })
     .options.flatMap(({ model, effort, similar }) =>
       similar.map((past) => ({
         title: past.title,

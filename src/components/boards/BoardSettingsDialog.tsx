@@ -353,6 +353,61 @@ function JevFieldset({
   )
 }
 
+type FixRuns = Pick<BoardSummary, 'agentConflictModel' | 'agentConflictEffort' | 'agentCiModel' | 'agentCiEffort'>
+
+/** Model and effort fields for one kind of fix run (merge conflicts or failing CI); empty is the default. */
+function FixRunFields({
+  id,
+  label,
+  model,
+  effort,
+  defaults,
+  onChange,
+}: {
+  id: string
+  label: string
+  model: string | null
+  effort: AgentEffort | null
+  defaults: { model: string; effort: AgentEffort }
+  onChange: (model: string | null, effort: AgentEffort | null) => void
+}) {
+  return (
+    <>
+      <div className="grid gap-2">
+        <Label htmlFor={`board-settings-${id}-model`}>{label} model</Label>
+        <Input
+          id={`board-settings-${id}-model`}
+          value={model ?? ''}
+          placeholder={defaults.model}
+          pattern="[\w.:\[\]\-]+(/[\w.:\[\]\-]+)*"
+          maxLength={100}
+          title="A model alias or name, e.g. sonnet, claude-sonnet-5-5 or qwen3-coder:30b"
+          onChange={(event) => onChange(event.target.value.trim() || null, effort)}
+        />
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor={`board-settings-${id}-effort`}>{label} effort</Label>
+        <Select
+          value={effort ?? DEFAULT_EFFORT}
+          onValueChange={(value) => onChange(model, value === DEFAULT_EFFORT ? null : (value as AgentEffort))}
+        >
+          <SelectTrigger id={`board-settings-${id}-effort`} className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={DEFAULT_EFFORT}>Default ({defaults.effort})</SelectItem>
+            {AGENT_EFFORTS.map((level) => (
+              <SelectItem key={level} value={level}>
+                {level}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </>
+  )
+}
+
 /** Mounted with the dialog's content, so it starts from the saved settings each time the dialog opens. */
 function BoardSettingsForm({ onClose }: { onClose: () => void }) {
   const { detail, actions } = useBoardContext()
@@ -364,7 +419,13 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
   const [agentEnabled, setAgentEnabled] = useState(detail.board.agentEnabled)
   const [agentConcurrency, setAgentConcurrency] = useState(detail.board.agentConcurrency)
   const [agentConflictConcurrency, setAgentConflictConcurrency] = useState(detail.board.agentConflictConcurrency)
+  const [fixRuns, setFixRuns] = useState<FixRuns>(() => {
+    const { agentConflictModel, agentConflictEffort, agentCiModel, agentCiEffort } = detail.board
+    return { agentConflictModel, agentConflictEffort, agentCiModel, agentCiEffort }
+  })
   const [githubRepo, setGithubRepo] = useState(detail.board.githubRepo ?? '')
+  const [localRepo, setLocalRepo] = useState(!!detail.board.localRepoPath)
+  const [localRepoPath, setLocalRepoPath] = useState(detail.board.localRepoPath ?? `~/Projects/${detail.board.name}`)
   const [notifyUrl, setNotifyUrl] = useState(detail.board.notifyUrl ?? '')
   const [creatingRepo, setCreatingRepo] = useState(false)
   const signedIn = !!useGitHubStatus().data?.auth
@@ -436,6 +497,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
     }
     const text = (field: string) => String(data.get(field) ?? '').trim() || null
     const archiveDays = Number(text('archiveDoneDays'))
+    const maxTurns = Number(text('agentMaxTurns'))
     const approvalSize = String(data.get('approvalSize') ?? NONE)
     // Left alone without a key, as the settings aren't shown then.
     const jevPatch: BoardPatch = hasTypesafeKey ? jev : {}
@@ -445,12 +507,16 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
       description: String(data.get('description') ?? ''),
       reviewColumnId: columnId('reviewColumn'),
       doneColumnId: columnId('doneColumn'),
-      githubRepo: text('githubRepo'),
+      // A board has a GitHub repository or a local one: the toggle says which, and the other is cleared.
+      githubRepo: localRepo ? null : text('githubRepo'),
+      localRepoPath: localRepo ? text('localRepoPath') : null,
       agentName: text('agentName'),
       agentModel: text('agentModel'),
       agentEffort: agent.agentEffort,
       agentConcurrency,
+      agentMaxTurns: maxTurns >= 1 ? Math.round(maxTurns) : null,
       agentConflictConcurrency,
+      ...fixRuns,
       agentEnabled: data.get('agentEnabled') === 'on',
       agentBacklog: data.get('agentBacklog') === 'on',
       agentAllSkills: data.get('agentAllSkills') === 'on',
@@ -531,29 +597,53 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
           >
             <div className="grid gap-2">
               <div className="flex items-center justify-between gap-2">
-                <Label htmlFor="board-settings-repo">GitHub repository</Label>
-                <Button
-                  type="button"
-                  variant="link"
-                  size="xs"
-                  className="h-auto p-0"
-                  disabled={!signedIn}
-                  title={signedIn ? 'Create a repository on GitHub for this board' : 'Sign in to GitHub first'}
-                  onClick={() => setCreatingRepo(true)}
-                >
-                  <PlusIcon />
-                  New
-                </Button>
+                <Label htmlFor="board-settings-repo">{localRepo ? 'Local repository path' : 'GitHub repository'}</Label>
+                {!localRepo && (
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="xs"
+                    className="h-auto p-0"
+                    disabled={!signedIn}
+                    title={signedIn ? 'Create a repository on GitHub for this board' : 'Sign in to GitHub first'}
+                    onClick={() => setCreatingRepo(true)}
+                  >
+                    <PlusIcon />
+                    New
+                  </Button>
+                )}
               </div>
-              <Input
-                id="board-settings-repo"
-                name="githubRepo"
-                value={githubRepo}
-                onChange={(event) => setGithubRepo(event.target.value)}
-                placeholder="owner/name"
-                pattern="[\w.\-]+/[\w.\-]+"
-                title="owner/name"
-              />
+              {localRepo ? (
+                <Input
+                  id="board-settings-repo"
+                  name="localRepoPath"
+                  value={localRepoPath}
+                  onChange={(event) => setLocalRepoPath(event.target.value)}
+                  placeholder="~/Projects/name"
+                  pattern="\s*(/|~/)\S.*"
+                  maxLength={1000}
+                  title="An absolute path, or one starting with ~/"
+                />
+              ) : (
+                <Input
+                  id="board-settings-repo"
+                  name="githubRepo"
+                  value={githubRepo}
+                  onChange={(event) => setGithubRepo(event.target.value)}
+                  placeholder="owner/name"
+                  pattern="[\w.\-]+/[\w.\-]+"
+                  title="owner/name"
+                />
+              )}
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={localRepo}
+                  onChange={(event) => setLocalRepo(event.target.checked)}
+                  className="size-4 accent-primary"
+                />
+                Local repository
+              </label>
               <Hint>The agent works in its own clone of this repository and opens its pull requests there.</Hint>
               <GitHubStatus />
             </div>
@@ -721,6 +811,19 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
                   </Hint>
                 </div>
                 <div className="grid content-start gap-2">
+                  <Label htmlFor="board-settings-agent-max-turns">Max turns per run</Label>
+                  <Input
+                    id="board-settings-agent-max-turns"
+                    name="agentMaxTurns"
+                    type="number"
+                    min={1}
+                    max={10000}
+                    step={1}
+                    defaultValue={detail.board.agentMaxTurns ?? ''}
+                    placeholder="no limit"
+                  />
+                </div>
+                <div className="grid content-start gap-2">
                   <Label htmlFor="board-settings-agent-conflict-concurrency">Parallel conflict fixes</Label>
                   <Select
                     value={String(agentConflictConcurrency ?? DEFAULT_CONCURRENCY)}
@@ -749,6 +852,30 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
                   </Hint>
                 </div>
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <FixRunFields
+                  id="conflict"
+                  label="Conflict fix"
+                  model={fixRuns.agentConflictModel}
+                  effort={fixRuns.agentConflictEffort}
+                  defaults={{ model: AGENT_DEFAULTS.conflictModel, effort: AGENT_DEFAULTS.conflictEffort }}
+                  onChange={(model, effort) =>
+                    setFixRuns({ ...fixRuns, agentConflictModel: model, agentConflictEffort: effort })
+                  }
+                />
+                <FixRunFields
+                  id="ci"
+                  label="CI fix"
+                  model={fixRuns.agentCiModel}
+                  effort={fixRuns.agentCiEffort}
+                  defaults={{ model: AGENT_DEFAULTS.ciModel, effort: AGENT_DEFAULTS.ciEffort }}
+                  onChange={(model, effort) => setFixRuns({ ...fixRuns, agentCiModel: model, agentCiEffort: effort })}
+                />
+              </div>
+              <Hint>
+                Runs started only to fix merge conflicts, or only to fix failing CI, use these instead of the ticket's
+                model and effort, as they rarely need it. A run that also answers someone's feedback keeps the ticket's.
+              </Hint>
             </Group>
 
             <Group title="Picking tickets">

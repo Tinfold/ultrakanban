@@ -36,6 +36,7 @@ import {
   bulkUpdateTickets,
   claimNextTicket,
   createTicket,
+  compactTicket,
   getTicketByNumber,
   listTickets,
   requestConflictFixes,
@@ -63,8 +64,12 @@ export const boardRoutes = ({ pullRequests, mergeQueue, attachmentFiles }: AppSe
       )
     })
     .get('/:boardId', (c) => {
-      const query = boardDetailQuerySchema.parse({ archived: c.req.query('archived') })
-      return c.json(getBoardDetail(c.req.param('boardId'), query))
+      const query = boardDetailQuerySchema.parse({
+        archived: c.req.query('archived'),
+        compact: c.req.query('compact'),
+      })
+      const detail = getBoardDetail(c.req.param('boardId'), query)
+      return c.json(query.compact ? { ...detail, tickets: detail.tickets.map(compactTicket) } : detail)
     })
     .patch('/:boardId', async (c) => {
       const input = await readJson(c, updateBoardSchema)
@@ -126,8 +131,10 @@ export const boardRoutes = ({ pullRequests, mergeQueue, attachmentFiles }: AppSe
         priority: c.req.queries('priority'),
         epic: c.req.query('epic'),
         q: c.req.query('q'),
+        compact: c.req.query('compact'),
       })
-      return c.json(listTickets(boardId, query))
+      const tickets = listTickets(boardId, query)
+      return c.json(query.compact ? tickets.map(compactTicket) : tickets)
     })
     .get('/:boardId/tickets/:number{[0-9]+}', (c) =>
       c.json(getTicketByNumber(c.req.param('boardId'), Number(c.req.param('number')))),
@@ -182,6 +189,7 @@ export const boardRoutes = ({ pullRequests, mergeQueue, attachmentFiles }: AppSe
         title: c.req.query('title'),
         tag: c.req.queries('tag'),
         steps: c.req.query('steps'),
+        estimate: c.req.query('estimate'),
       })
       const boardId = c.req.param('boardId')
       return c.json({ ...suggestAgent(boardId, query), routing: compareRouting([boardId]) })

@@ -1,9 +1,10 @@
 import { Hono } from 'hono'
 import { deleteColumnSchema, moveColumnSchema, releaseIdleSchema, updateColumnSchema } from '../../shared/schemas.ts'
 import { transaction } from '../db.ts'
+import { HttpError } from '../errors.ts'
 import { actorOf, readJson } from '../http.ts'
-import { deleteColumn, moveColumn, updateColumn } from '../store/columns.ts'
-import { listIdleTickets, moveAllTickets, releaseIdleTickets } from '../store/tickets.ts'
+import { deleteColumn, getColumn, moveColumn, updateColumn } from '../store/columns.ts'
+import { listIdleTickets, listTickets, moveAllTickets, releaseIdleTickets } from '../store/tickets.ts'
 
 export const columnRoutes = new Hono()
   .patch('/:columnId', async (c) => {
@@ -21,8 +22,18 @@ export const columnRoutes = new Hono()
   })
   .delete('/:columnId', (c) => {
     const columnId = c.req.param('columnId')
-    const { moveTicketsTo } = deleteColumnSchema.parse({ moveTicketsTo: c.req.query('moveTicketsTo') })
+    const { moveTicketsTo, deleteTickets } = deleteColumnSchema.parse({
+      moveTicketsTo: c.req.query('moveTicketsTo'),
+      deleteTickets: c.req.query('deleteTickets'),
+    })
     transaction(() => {
+      if (!moveTicketsTo && !deleteTickets && listTickets(getColumn(columnId).boardId, { column: columnId }).length) {
+        throw new HttpError(
+          409,
+          'column_not_empty',
+          'The column has tickets: pass moveTicketsTo to move them, or deleteTickets=true to delete them',
+        )
+      }
       if (moveTicketsTo) moveAllTickets(columnId, moveTicketsTo, actorOf(c))
       deleteColumn(columnId)
     })
