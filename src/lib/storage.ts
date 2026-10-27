@@ -40,6 +40,7 @@ export const storageKeys = {
   actor: 'ultrakanban:actor',
   lastBoard: 'ultrakanban:last-board',
   mergeMethod: 'ultrakanban:merge-method',
+  overviewIdleAgents: 'ultrakanban:overview-idle-agents',
   overviewRange: 'ultrakanban:overview-range',
   theme: 'ultrakanban:theme',
   view: (boardId: string) => `ultrakanban:view:${boardId}`,
