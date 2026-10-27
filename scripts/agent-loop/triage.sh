@@ -4,10 +4,10 @@
 # Finds a ticket's new feedback. Input: its activity, open pull request (gh pr view, or a local one in its shape with
 # its link as `url`) or null, the classified checks of its head commit (ci_status) or null, pull request comments,
 # reviews and inline comments (GitHub REST), a local pull request's comments (GET /boards/:id/pull-requests/:number,
-# inline ones included), and its saved state. Prints the snapshot to save after a successful run, the items to hand
-# over, their fingerprint, whether to run now (backoff after failures), whether there is human feedback among them,
-# whether the pull request has merge conflicts now, and which notes to leave (CI not running, CI run cap or conflict
-# run cap reached).
+# inline ones included), and its saved state; $inreview says whether the ticket is in the review column. Prints the
+# snapshot to save after a successful run, the items to hand over, their fingerprint, whether to run now (backoff after
+# failures), whether there is human feedback among them, whether the pull request has merge conflicts now, and which
+# notes to leave (CI not running, CI run cap or conflict run cap reached).
 #
 # The board wakes the loop up for the same ticket activity this counts as human feedback (comments, moves into the
 # in-progress column and approved plans by anyone but the agent; see wakeForFeedback in server/store/tickets.ts), and
@@ -29,7 +29,9 @@ def bot: (.user.type // "") == "Bot" or ((.user.login // "") | endswith("[bot]")
 def feedback: (bot | not) and ((.body // "") | contains($marker) | not);
 # A short acknowledgement ("thanks", "LGTM", a lone emoji) asks for nothing, so it doesn't start a run. One without
 # words is all punctuation and symbols (emoji, with the marks and joiners they are made of): a short comment in another
-# script, such as "Исправь опечатку", is feedback.
+# script, such as "Исправь опечатку", is feedback. On the ticket, a short comment may answer the agent instead ("done"
+# to "please add the secret", "ok" to a question), so there it is only taken for one while the ticket is in review and
+# the agent's newest ticket comment before it didn't ask anything (see asked).
 def ack: (.body // "") | gsub("^[\\s[:punct:]]+|[\\s[:punct:]]+$"; "") | ascii_downcase
   | (length <= 40) and (test("^([\\s\\p{P}\\p{S}\\p{M}\\p{Cf}]*|(thanks?|thank you|thx|ty|lgtm|looks good( to me)?|nice|great|perfect|awesome|cool|ok(ay)?|done|"
     + "good|approved?|\\+1|ship it|merged?|sounds good|great work|good job|nice work)( (you|so much|a lot|everyone|all))?)$"));
@@ -46,10 +48,13 @@ def clip: if length > 2000 then .[:2000] + " [...]" else . end;
 | (($ci.code // []) - $handedOver) as $newFailures
 | (if $p.mergeable == "CONFLICTING" or $p.mergeStateStatus == "DIRTY" then "\($p.headRefOid):\($p.baseRefOid)"
    else "" end) as $conflict
+# Whether the agent's newest ticket comment before the activity entry with the given id asks something.
+| def asked($id): [$activity[] | select(.type == "comment" and .id < $id and (.actor | ours))] | max_by(.id) // {}
+    | .data.body // "" | contains("?");
 # The human feedback above the given watermarks (a snapshot's activity, issue, review and inline ids).
-| def human($w): [
+def human($w): [
     ($activity[] | select(.type == "comment" and .id > ($w.activity // 0) and (.actor | ours | not))
-      | select(.data | ack | not)
+      | select(($inreview | not) or asked(.id) or (.data | ack | not))
       | {key: "t\(.id)", text: "Ticket comment from \(.actor):\n\(.data.body // "" | clip)"}),
     ($activity[] | select(.type == "moved" and .id > ($w.activity // 0) and (.actor | ours | not))
       | select((.data.to // "" | ascii_downcase) == ($working | ascii_downcase))

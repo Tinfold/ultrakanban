@@ -7,12 +7,12 @@ source "$here/triage.sh"
 
 fail=0
 # run <name> <expected item keys> <activity json> <issue json> <reviews json> <inline json> [state json] [local pull
-# request comments json]
+# request comments json]; the ticket is in review unless inreview=false.
 run() {
   local got
   got=$(jq -cs --arg agent me --arg loop loop --arg marker '<!-- m -->' --arg working 'In progress' \
-    --argjson now 1000 --argjson retry 60 --argjson max 3 --argjson maxci 3 --argjson maxconflict 3 "$TRIAGE" \
-    <<<"$3 null null $4 $5 $6 ${8:-[]} ${7:-{\}}" | jq -r '.fingerprint')
+    --argjson inreview "${inreview:-true}" --argjson now 1000 --argjson retry 60 --argjson max 3 --argjson maxci 3 \
+    --argjson maxconflict 3 "$TRIAGE" <<<"$3 null null $4 $5 $6 ${8:-[]} ${7:-{\}}" | jq -r '.fingerprint')
   if [ "$got" = "$2" ]; then echo "ok   $1"; else echo "FAIL $1: expected '$2', got '$got'"; fail=1; fi
 }
 user='"user":{"login":"bob","type":"User"}'
@@ -38,6 +38,12 @@ run "ticket comment real" "t1" "$(c 'Use the other endpoint instead')" "[]" "[]"
 run "ticket comment ok" "" "$(c 'ok!')" "[]" "[]" "[]"
 run "ticket comment in Russian" "t1" "$(c 'Исправь опечатку')" "[]" "[]" "[]"
 run "ticket comment starting with ok but real" "t1" "$(c 'ok, but also rename it')" "[]" "[]" "[]"
+inreview=false run "ticket comment done while in progress" "t1" "$(c 'done')" "[]" "[]" "[]"
+# t() <agent's comment> <a person's reply>
+t() { echo "[{\"type\":\"comment\",\"id\":1,\"actor\":\"me/opus/high\",\"data\":{\"body\":\"$1\"}},
+  {\"type\":\"comment\",\"id\":2,\"actor\":\"bob\",\"data\":{\"body\":\"$2\"}}]"; }
+run "ticket comment ok answering the agent's question" "t2" "$(t 'Should I rename it too?' 'ok')" "[]" "[]" "[]"
+run "ticket comment thanks after the agent's summary" "" "$(t 'Renamed it.' 'Thanks!')" "[]" "[]" "[]"
 l() { echo "[{\"id\":\"a\",\"author\":\"$1\",\"body\":\"$2\"}]"; }
 run "local PR comment real" "l1" "[]" "[]" "[]" "[]" "{}" "$(l bob 'Please rename it')"
 run "local PR comment thanks" "" "[]" "[]" "[]" "[]" "{}" "$(l bob 'Thanks!')"

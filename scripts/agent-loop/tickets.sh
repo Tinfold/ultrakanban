@@ -226,6 +226,7 @@ handle_feedback() {
     activity=$(get "/tickets/$id/activity?afterId=$after") || { log "can't read the activity of $id"; continue; }
     triage=$(printf '%s\n' "$activity" "$pr" "$ci" "$issue" "$reviews" "$inline" "$comments" "$state" |
       jq -cs --arg agent "$AGENT" --arg loop "$LOOP_ACTOR" --arg marker "$MARKER" --arg working "$IN_PROGRESS_COLUMN" \
+        --argjson inreview "$([[ -n $review && $column == "$review" ]] && echo true || echo false)" \
         --argjson now "$(date +%s)" --argjson retry "$RETRY_SECONDS" --argjson max "$MAX_ATTEMPTS" \
         --argjson maxci "$MAX_CI_RUNS" --argjson maxconflict "$MAX_CONFLICT_RUNS" "$TRIAGE") ||
       { log "can't triage $id"; continue; }
