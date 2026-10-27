@@ -631,7 +631,7 @@ $task$( ((steps)) && unchecked_steps "$id")$notes"
     write_state "$id" "$(read_state "$id" | jq -c --argjson snapshot "$snapshot" --arg why "$claude_stop_requested \
 stopped it to give you new instructions: read the newest comments on the ticket (and on its pull request, if it has \
 one) first, and follow them where they differ from what you were doing" '.session.why = $why
-      | .stopped = ($snapshot | {activity, issue, review, inline} | with_entries(select(.value != null)))')"
+      | .stopped = ($snapshot | {activity, issue, review, inline, local} | with_entries(select(.value != null)))')"
     log "ticket $id: its run stopped at $claude_stop_requested's request; resuming it once there is new feedback"
     note "$id" "Stopped the agent's run at $claude_stop_requested's request. It resumes, where it left off, once \
 there is new feedback, such as a comment."

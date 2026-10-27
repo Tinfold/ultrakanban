@@ -59,9 +59,26 @@ run "review during a run" "" "[]" "[]" "$(at 2 submitted_at 2026-01-01T10:00:00Z
 run "inline comment during a run" "" "[]" "[]" "[]" "$(at 4 created_at 2026-01-01T10:10:00.123Z)" "$runs"
 run "inline comment after a run" "c4" "[]" "[]" "[]" "$(at 4 created_at 2026-01-01T10:10:01Z)" "$runs"
 run "ticket comment during a run" "t1" "$(c 'Use the other endpoint instead' | sed 's/"id"/"createdAt":"2026-01-01T10:05:00Z","id"/')" "[]" "[]" "[]" "$runs"
-got=$(jq -cs --arg agent me --arg loop loop --arg marker '<!-- m -->' --arg working 'In progress' \
-  --argjson now 1000 --argjson retry 60 --argjson max 3 --argjson maxci 3 --argjson maxconflict 3 "$TRIAGE" \
-  <<<"[] null null [] [] [] [] $runs" | jq -c '.snapshot.runs')
+# triage <pull request json> <local pull request comments json> <state json> <jq filter for the result>
+triage() {
+  jq -cs --arg agent me --arg loop loop --arg marker '<!-- m -->' --arg working 'In progress' --argjson inreview true \
+    --argjson now 1000 --argjson retry 60 --argjson max 3 --argjson maxci 3 --argjson maxconflict 3 "$TRIAGE" \
+    <<<"[] $1 null [] [] [] $2 $3" | jq -c "$4"
+}
+got=$(triage null '[]' "$runs" .snapshot.runs)
 if [ "$got" = '[[1767261600,1767262200]]' ]; then echo "ok   snapshot keeps the runs"; else
   echo "FAIL snapshot keeps the runs: got '$got'"; fail=1; fi
+
+# A person stopped a run that was handed the second comment on a local pull request (`stopped`, its snapshot): no new
+# run until there is a third.
+pr='{"state":"OPEN","url":"/b/x/pr/1"}'
+two='[{"id":"a","author":"bob","body":"Please rename it"},{"id":"b","author":"bob","body":"And the test"}]'
+stopped='{"local":{"pr":"/b/x/pr/1","seen":1},"stopped":{"activity":0,"local":{"pr":"/b/x/pr/1","seen":2}}}'
+got=$(triage "$pr" "$two" "$stopped" .run)
+if [ "$got" = false ]; then echo "ok   stopped run on a local pull request waits"; else
+  echo "FAIL stopped run on a local pull request waits: got '$got'"; fail=1; fi
+three=$(jq -c '. + [{"id":"c","author":"bob","body":"Go on, but keep the old name"}]' <<<"$two")
+got=$(triage "$pr" "$three" "$stopped" '[.run, .fingerprint]')
+if [ "$got" = '[true,"l2 l3"]' ]; then echo "ok   stopped run on a local pull request resumes on a new comment"; else
+  echo "FAIL stopped run on a local pull request resumes on a new comment: got '$got'"; fail=1; fi
 exit $fail
