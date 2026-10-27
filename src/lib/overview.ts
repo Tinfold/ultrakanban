@@ -4,6 +4,7 @@ import {
   type BoardDiskUsage,
   noUsage,
   type Overview,
+  type OverviewActivity,
   type OverviewAgent,
   type OverviewCompletion,
   type OverviewEventKind,
@@ -236,4 +237,110 @@ export function usageByTag(tickets: OverviewTicketUsage[], sort: UsageSort): Tag
         b.tickets - a.tickets ||
         (a.tag?.name ?? '').localeCompare(b.tag?.name ?? ''),
     )
+}
+
+const PULL_REQUEST_EVENTS = {
+  linked: 'linked a pull request to',
+  unlinked: 'unlinked the pull request of',
+  open: 'reports the pull request open for',
+  draft: 'reports the pull request back in draft for',
+  merged: 'reports the pull request merged for',
+  closed: 'reports the pull request closed for',
+} as const
+
+/** What an activity entry did, worded to go between its actor and its ticket. */
+export function activityVerb(entry: OverviewActivity) {
+  switch (entry.type) {
+    case 'created':
+      return 'created'
+    case 'updated':
+      return 'edited'
+    case 'checked':
+      return entry.data.checked ? 'checked off an item of' : 'unchecked an item of'
+    case 'moved':
+      return `moved to ${entry.data.to}`
+    case 'claimed':
+      return entry.actor === entry.data.assignee ? 'claimed' : `assigned ${entry.data.assignee} to`
+    case 'released':
+      return entry.actor === entry.data.assignee ? 'released' : `unassigned ${entry.data.assignee} from`
+    case 'comment':
+      return 'commented on'
+    case 'plan':
+      return entry.data.held ? 'posted a plan, waiting for approval, for' : 'posted a plan for'
+    case 'approved':
+      return 'approved the plan of'
+    case 'stopped':
+      return "stopped the agent's run on"
+    case 'attachment':
+      return 'attached a file to'
+    case 'pull_request':
+      return PULL_REQUEST_EVENTS[entry.data.event]
+  }
+}
+
+/** How close together a ticket's events have to be to show as one entry of the feed. */
+export const MERGE_ACTIVITY_MS = 2 * 60 * 1000
+
+/** Activity entries on one ticket shown as one line: "claude/opus/high picked up #83 · In progress". */
+export interface ActivityGroup {
+  /** The newest event's id. */
+  id: number
+  actor: string
+  verb: string
+  /** The column the ticket ended up in, when the group moved it and `verb` doesn't already say so. */
+  column: string | null
+  ticketId: string
+  ticket: OverviewActivity['ticket']
+  /** The newest event's time. */
+  createdAt: string
+  /** The raw events, oldest first. */
+  events: OverviewActivity[]
+}
+
+const joinWords = (words: string[]) =>
+  words.length < 3 ? words.join(' and ') : `${words.slice(0, -1).join(', ')} and ${words.at(-1)}`
+
+/** Words a group of events as one line. */
+function describeGroup(events: OverviewActivity[]): Pick<ActivityGroup, 'actor' | 'verb' | 'column'> {
+  const newest = (list: OverviewActivity[]) => list.at(-1)
+  const moved = newest(events.filter((event) => event.type === 'moved'))
+  const column = moved?.type === 'moved' ? moved.data.to : null
+  if (events.length === 1) return { actor: events[0].actor, verb: activityVerb(events[0]), column: null }
+
+  const merged = events.find((event) => event.type === 'pull_request' && event.data.event === 'merged')
+  if (merged) return { actor: merged.actor, verb: 'merged', column }
+  // The agent loop claims a ticket, moves it, then hands it to the agent that runs it: unassign, assign.
+  const assignment = newest(events.filter((event) => event.type === 'claimed' || event.type === 'released'))
+  if (assignment?.type === 'claimed') return { actor: assignment.data.assignee, verb: 'picked up', column }
+
+  const rest = events.filter((event) => event.type !== 'moved')
+  if (!rest.length) return { actor: moved!.actor, verb: activityVerb(moved!), column: null }
+  return { actor: newest(rest)!.actor, verb: joinWords([...new Set(rest.map(activityVerb))]), column }
+}
+
+/**
+ * Merges the feed's near-duplicates: a ticket's events within `MERGE_ACTIVITY_MS` of the newest one become one
+ * entry, even with other tickets' events in between. Takes and returns the newest first.
+ */
+export function mergeActivity(activity: OverviewActivity[], windowMs = MERGE_ACTIVITY_MS): ActivityGroup[] {
+  const groups: { newest: OverviewActivity; events: OverviewActivity[] }[] = []
+  const open = new Map<string, (typeof groups)[number]>()
+  for (const event of activity) {
+    const group = open.get(event.ticketId)
+    if (group && Date.parse(group.newest.createdAt) - Date.parse(event.createdAt) <= windowMs) {
+      group.events.unshift(event)
+      continue
+    }
+    const added = { newest: event, events: [event] }
+    groups.push(added)
+    open.set(event.ticketId, added)
+  }
+  return groups.map(({ newest, events }) => ({
+    id: newest.id,
+    ...describeGroup(events),
+    ticketId: newest.ticketId,
+    ticket: newest.ticket,
+    createdAt: newest.createdAt,
+    events,
+  }))
 }

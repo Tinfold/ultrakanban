@@ -25,6 +25,7 @@ import { RoutingTable } from '@/components/overview/RoutingTable'
 import { SettingsTable } from '@/components/overview/SettingsTable'
 import { TicketUsageTable, type UsageGrouping } from '@/components/overview/TicketUsageTable'
 import { Button } from '@/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { queryKeys, useClaudeUsage, useOverview } from '@/hooks/queries'
 import { useNow } from '@/hooks/use-now'
@@ -82,6 +83,12 @@ function overviewTab(tab: string | undefined): OverviewTab {
 }
 
 const tabHref = (tab: OverviewTab) => (tab === 'summary' ? '/overview' : `/overview/${tab}`)
+
+/** How many entries of the activity feed Summary shows; the Activity tab has the rest. */
+const SUMMARY_ACTIVITY = 8
+
+/** The Activity tab's board filter value for every board. */
+const ALL_BOARDS = 'all'
 
 /** Tabs whose numbers don't depend on the 7/14/30-day range, so the range toggle isn't shown on them. */
 const ALL_TIME_TABS: ReadonlySet<OverviewTab> = new Set(['routing'])
@@ -229,6 +236,7 @@ export function OverviewPage({ tab: tabParam }: { tab?: string }) {
   const main = useRef<HTMLElement>(null)
   const [days, setDays] = useStoredState<OverviewRange>(storageKeys.overviewRange, 14)
   const [usageGrouping, setUsageGrouping] = useState<UsageGrouping>('tickets')
+  const [activityBoard, setActivityBoard] = useState(ALL_BOARDS)
   const { data: overview, error, isPlaceholderData } = useOverview(days)
   const { data: claudeUsage } = useClaudeUsage()
   const now = useNow()
@@ -365,230 +373,12 @@ export function OverviewPage({ tab: tabParam }: { tab?: string }) {
             />
           </Section>
           {claudeUsage && <ClaudeUsageSummary usage={claudeUsage} now={now} href={tabHref('usage')} />}
-          <Section title="Recent activity">
-            <RecentActivity activity={overview.recent} />
-          </Section>
-        </>
-      ),
-      agents: (
-        <Section
-          title="Agents"
-          actions={
-            <>
-              {hiddenAgents.length > 0 && (
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  title={`Cleared: ${hiddenAgents.join(', ')}`}
-                  className="text-muted-foreground"
-                  onClick={() => changeHidden(api.showHiddenAgents())}
-                >
-                  Show {hiddenAgents.length} cleared
-                </Button>
-              )}
-              {stale.length > 0 && (
-                <Button
-                  variant="outline"
-                  size="xs"
-                  title="Clear idle agents that don’t run a board until they do something again"
-                  onClick={() => changeHidden(api.hideAgents(stale))}
-                >
-                  Clear idle
-                </Button>
-              )}
-            </>
-          }
-        >
-          <AgentList
-            agents={agents}
-            boards={overview.boards}
-            worked={worked}
-            now={now}
-            hidden={hiddenAgents.length}
-            onHide={(names) => changeHidden(api.hideAgents(names))}
-          />
-        </Section>
-      ),
-      boards: (
-        <>
-          <StatRow>
-            <Stat label="Unclaimed" value={unclaimed} detail="Open, unassigned" />
-          </StatRow>
-          <Section title="Boards" actions={<DiskTotal overview={overview} />}>
-            <BoardTable boards={overview.boards} />
-          </Section>
-        </>
-      ),
-      usage: (
-        <>
-          {claudeUsage && <ClaudeUsage usage={claudeUsage} now={now} />}
-          <StatRow>
-            <Stat
-              label="Tokens used"
-              value={formatTokens(totalTokens(usage))}
-              detail={planCost === null ? runs(usage.runs) : `${formatCost(planCost)} est., ${runs(usage.runs)}`}
-              more={apiKeyCost > 0 && `${formatCost(apiKeyCost)} on the API key`}
-            />
-            <Stat
-              label="Per completed ticket"
-              value={completedCost ? formatCost(completedCost.costUsd) : '—'}
-              detail={completedCost ? `Est., ${tickets(completedCost.tickets)}` : 'None reported a cost'}
-            />
-          </StatRow>
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            <ColumnChart
-              title="Token usage"
-              description="Tokens agent runs used per day, as reported by the agent loop"
-              series={[...TOKEN_SERIES]}
-              columns={daily.map((day, i) => ({
-                ...columns[i],
-                values: TOKEN_SERIES.map((series) => day.usage[series.key]),
-              }))}
-              formatValue={(value) => value.toLocaleString()}
-              formatTick={formatTokens}
-              minStep={1}
-            />
-            <ColumnChart
-              title="Tokens by model"
-              description="Tokens per day by the model that used them, subagents included"
-              series={models}
-              columns={daily.map((day, i) => ({
-                ...columns[i],
-                values: models.map((series) => seriesTokens(day.usage, series)),
-              }))}
-              formatValue={(value) => value.toLocaleString()}
-              formatTick={formatTokens}
-              minStep={1}
-              footer={models.length > 0 && <ModelTotals usage={usage} />}
-            />
-          </div>
           <Section
-            title="Ticket usage"
+            title="Recent activity"
             actions={
-              <ToggleGroup
-                type="single"
-                variant="outline"
-                size="sm"
-                value={usageGrouping}
-                onValueChange={(value) => value && setUsageGrouping(value as UsageGrouping)}
-                aria-label="Group by"
-              >
-                <ToggleGroupItem value="tickets" className="px-3">
-                  Tickets
-                </ToggleGroupItem>
-                <ToggleGroupItem value="tags" className="px-3">
-                  By tag
-                </ToggleGroupItem>
-              </ToggleGroup>
+              <Button variant="ghost" size="sm" asChild>
+                <Link href={tabHref('activity')}>All activity</Link>
+              </Button>
             }
           >
-            <p className="-mt-1 text-xs text-muted-foreground">
-              Tickets agents ran on in the last {days} days, with all their runs
-            </p>
-            <TicketUsageTable tickets={overview.tickets} grouping={usageGrouping} />
-          </Section>
-        </>
-      ),
-      routing: (
-        <>
-          <Section title="Routing">
-            <p className="-mt-1 text-xs text-muted-foreground">
-              Cost per finished ticket had each source picked every ticket’s model and effort, on all boards since
-              routing was recorded
-            </p>
-            <RoutingTable routing={overview.routing} />
-          </Section>
-          <Section title="Model and effort">
-            <p className="-mt-1 text-xs text-muted-foreground">
-              How tickets went at the model and effort that did most of their work, on all boards over all time
-            </p>
-            <SettingsTable settings={overview.settings} />
-          </Section>
-        </>
-      ),
-      activity: (
-        <>
-          <StatRow>
-            <Stat label="Time worked" value={formatDuration(workedMs)} detail="All agents" />
-            <Stat
-              label="Median cycle time"
-              value={formatMedian(cycleTimes)}
-              detail={`Over ${tickets(cycleTimes.length)}`}
-            />
-            <Stat
-              label="Median review wait"
-              value={formatMedian(reviewTimes)}
-              detail={`Over ${tickets(reviewTimes.length)}`}
-            />
-            <Stat label="Backlog" value={backlog} detail={`${created} new, ${completed} done`} />
-          </StatRow>
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            <ColumnChart
-              title="Activity"
-              description={`Board events per day, across ${totals.boards} ${totals.boards === 1 ? 'board' : 'boards'}`}
-              series={[...ACTIVITY_SERIES]}
-              columns={daily.map((day, i) => ({
-                ...columns[i],
-                values: ACTIVITY_SERIES.map((series) => day.events[series.kind]),
-              }))}
-              formatValue={(value) => value.toLocaleString()}
-              minStep={1}
-            />
-            <ColumnChart
-              title="Time worked"
-              description="Hours agents spent on claimed tickets per day, until review"
-              series={WORK_SERIES}
-              columns={daily.map((day, i) => ({ ...columns[i], values: [day.workedMs / HOUR_MS] }))}
-              formatValue={(hours) => formatDuration(hours * HOUR_MS)}
-              formatTick={(hours) => `${+hours.toFixed(1)}h`}
-            />
-          </div>
-        </>
-      ),
-    }
-
-    badges = {
-      summary: <CountBadge count={attentionCount} />,
-      agents: <CountBadge count={totals.activeAgents} />,
-    }
-    content = (
-      <div className={cn('grid grid-cols-1 gap-6 transition-opacity', isPlaceholderData && 'opacity-60')}>
-        {panels[tab]}
-      </div>
-    )
-  } else if (error) {
-    content = <p className="text-sm text-muted-foreground">Couldn’t load the overview: {error.message}</p>
-  }
-
-  const ids = sideTabIds(ID_PREFIX, tab)
-  return (
-    <>
-      <AppHeader />
-      <main ref={main} className="flex-1 overflow-y-auto">
-        <div className="mx-auto grid max-w-7xl grid-cols-1 gap-5 p-4 sm:p-6">
-          <div className="flex min-h-8 flex-wrap items-center justify-between gap-3">
-            <div>
-              <h1 className="text-lg font-semibold tracking-tight">Overview</h1>
-              <p className="text-sm text-muted-foreground">What’s happening across all boards.</p>
-            </div>
-            {!ALL_TIME_TABS.has(tab) && range}
-          </div>
-          <div className="flex flex-col gap-5 sm:flex-row sm:gap-6">
-            <SideTabs
-              tabs={TABS}
-              active={tab}
-              onSelect={(id) => navigate(tabHref(id))}
-              idPrefix={ID_PREFIX}
-              label="Overview sections"
-              badges={badges}
-              className="-mx-4 px-4 sm:sticky sm:top-6 sm:mx-0 sm:self-start sm:border-r-0 sm:p-0"
-            />
-            <div id={ids.panel} role="tabpanel" aria-labelledby={ids.tab} className="min-w-0 flex-1">
-              {content}
-            </div>
-          </div>
-        </div>
-      </main>
-    </>
-  )
-}
+            <RecentActivity activity={overview.recent} limit={SUMMARY_ACTIVITY} />
