@@ -27,9 +27,15 @@ run "CHANGES_REQUESTED with body" "r2" "[]" "[]" "$(r CHANGES_REQUESTED 'Fix the
 run "PR comment LGTM" "" "[]" "$(i 'LGTM')" "[]" "[]"
 run "PR comment thanks" "" "[]" "$(i 'Thanks!')" "[]" "[]"
 run "PR comment emoji" "" "[]" "$(i '👍')" "[]" "[]"
+run "PR comment emoji with a skin tone" "" "[]" "$(i '👍🏽')" "[]" "[]"
+run "PR comment emoji with a variation selector" "" "[]" "$(i '❤️')" "[]" "[]"
+run "PR comment joined emoji" "" "[]" "$(i '🎉 👨‍💻!')" "[]" "[]"
+run "PR comment in Chinese" "i3" "[]" "$(i '请修复这个错误')" "[]" "[]"
 run "PR comment real" "i3" "[]" "$(i 'Please also handle the empty case')" "[]" "[]"
 run "ticket comment thank you" "" "$(c 'Thank you!')" "[]" "[]" "[]"
 run "ticket comment real" "t1" "$(c 'Use the other endpoint instead')" "[]" "[]" "[]"
+run "ticket comment ok" "" "$(c 'ok!')" "[]" "[]" "[]"
+run "ticket comment in Russian" "t1" "$(c 'Исправь опечатку')" "[]" "[]" "[]"
 run "ticket comment starting with ok but real" "t1" "$(c 'ok, but also rename it')" "[]" "[]" "[]"
 
 # The agent's runs: one from 2026-01-01T10:00:00Z to 10:10:00Z.
