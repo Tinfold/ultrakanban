@@ -336,6 +336,8 @@ claim_held=
 reserve_held=
 # In a conflict loop, the ticket it last ran: its new human feedback is this loop's to handle (see handle_feedback).
 followup=
+# The GitHub account the agent posts from, once read (see read_pr_feedback).
+gh_login=
 # The run in progress and the process watching its ticket (see run_claude), if any.
 running=
 watcher=

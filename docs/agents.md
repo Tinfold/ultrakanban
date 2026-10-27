@@ -339,9 +339,10 @@ that ran and failed, merge conflicts, or someone moving the ticket back into In 
 ask for more work). The prompt lists exactly what is new, and every prompt includes the board's description (Board
 settings), so put conventions for all of the board's tickets there. Bots and the agent's own replies
 don't count: the agent posts from the same GitHub account as you, so the skill makes it end every pull request
-comment with `<!-- ultrakanban:<agent> -->`, which the loop ignores. Pull request comments and reviews posted while
-one of the agent's runs on the ticket was going don't count either, in case the agent left the marker out (so one you
-post during a run doesn't start a new one: say it on the ticket instead). A pull request closed without merging moves
+comment with `<!-- ultrakanban:<agent> -->`, which the loop ignores. Pull request comments and reviews posted from the
+agent's GitHub account while one of its runs on the ticket was going don't count either, in case the agent left the
+marker out (so if you review from that account, one you post during a run doesn't start a new one: say it on the ticket
+instead). Other accounts' feedback always counts. A pull request closed without merging moves
 its ticket to the `Cancelled` column (`CANCELLED_COLUMN`; add it to the board, the loop won't fall back to Todo)
 and unassigns it, so it is never picked up again. When none of its tickets needs work, it claims a new Todo ticket,
 and when there is nothing to do at all it waits `IDLE_SECONDS` (60 under the supervisor), or until the board wakes it

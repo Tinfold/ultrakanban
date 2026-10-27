@@ -11,8 +11,9 @@ fail=0
 run() {
   local got
   got=$(jq -cs --arg agent me --arg loop loop --arg marker '<!-- m -->' --arg working 'In progress' \
-    --argjson inreview "${inreview:-true}" --argjson now 1000 --argjson retry 60 --argjson max 3 --argjson maxci 3 \
-    --argjson maxconflict 3 "$TRIAGE" <<<"$3 null null $4 $5 $6 ${8:-[]} ${7:-{\}}" | jq -r '.fingerprint')
+    --argjson inreview "${inreview:-true}" --arg ghlogin "${ghlogin:-}" --argjson now 1000 --argjson retry 60 \
+    --argjson max 3 --argjson maxci 3 --argjson maxconflict 3 "$TRIAGE" <<<"$3 null null $4 $5 $6 ${8:-[]} ${7:-{\}}" |
+    jq -r '.fingerprint')
   if [ "$got" = "$2" ]; then echo "ok   $1"; else echo "FAIL $1: expected '$2', got '$got'"; fail=1; fi
 }
 user='"user":{"login":"bob","type":"User"}'
@@ -58,10 +59,17 @@ run "PR comment before a run" "i3" "[]" "$(at 3 created_at 2026-01-01T09:59:59Z)
 run "review during a run" "" "[]" "[]" "$(at 2 submitted_at 2026-01-01T10:00:00Z | sed 's/"id"/"state":"COMMENTED","id"/')" "[]" "$runs"
 run "inline comment during a run" "" "[]" "[]" "[]" "$(at 4 created_at 2026-01-01T10:10:00.123Z)" "$runs"
 run "inline comment after a run" "c4" "[]" "[]" "[]" "$(at 4 created_at 2026-01-01T10:10:01Z)" "$runs"
+ghlogin=agent-account run "PR comment from another account during a run" "i3" "[]" \
+  "$(at 3 created_at 2026-01-01T10:05:00Z)" "[]" "[]" "$runs"
+ghlogin=bob run "PR comment from the agent's account during a run" "" "[]" "$(at 3 created_at 2026-01-01T10:05:00Z)" \
+  "[]" "[]" "$runs"
+ghlogin=agent-account run "review from another account during a run" "r2" "[]" "[]" \
+  "$(at 2 submitted_at 2026-01-01T10:00:00Z | sed 's/"id"/"state":"COMMENTED","id"/')" "[]" "$runs"
 run "ticket comment during a run" "t1" "$(c 'Use the other endpoint instead' | sed 's/"id"/"createdAt":"2026-01-01T10:05:00Z","id"/')" "[]" "[]" "[]" "$runs"
 # triage <pull request json> <local pull request comments json> <state json> <jq filter for the result>
 triage() {
   jq -cs --arg agent me --arg loop loop --arg marker '<!-- m -->' --arg working 'In progress' --argjson inreview true \
+    --arg ghlogin "" \
     --argjson now 1000 --argjson retry 60 --argjson max 3 --argjson maxci 3 --argjson maxconflict 3 "$TRIAGE" \
     <<<"[] $1 null [] [] [] $2 $3" | jq -c "$4"
 }

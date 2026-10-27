@@ -19,11 +19,12 @@
 # there is human feedback that run wasn't handed: a comment, a move or an approval on the ticket, or pull request
 # feedback, newer than the snapshot. Then it hands over everything new as usual, that feedback included.
 #
-# The agent posts on GitHub from the same account as the people reviewing it, so a pull request comment, review or
+# The agent posts on GitHub from the same account as the people reviewing it may, so a pull request comment, review or
 # inline comment it posted without the marker would look like feedback and start its next run. So pull request feedback
-# created while one of the agent's runs was going on the ticket (the state's `runs`, [start, end] in epoch seconds, kept
-# by run_on_ticket) doesn't count: what a person writes on the pull request meanwhile is skipped too, but the run that
-# was going may well have seen it, and ticket comments, which carry their actor, still count.
+# from the agent's GitHub account ($ghlogin, or any account when that isn't known) created while one of the agent's
+# runs was going on the ticket (the state's `runs`, [start, end] in epoch seconds, kept by run_on_ticket) doesn't count.
+# What a person writes from that account meanwhile is skipped too, though the run that was going may well have seen it;
+# other accounts' feedback and ticket comments, which carry their actor, still count.
 read -r -d '' TRIAGE <<'JQ'
 def bot: (.user.type // "") == "Bot" or ((.user.login // "") | endswith("[bot]"));
 def feedback: (bot | not) and ((.body // "") | contains($marker) | not);
@@ -39,6 +40,8 @@ def ours: . == $agent or . == $loop or startswith($agent + "/");
 # Whether a pull request comment or review was created during one of the given runs ([start, end] in epoch seconds).
 def during($runs): ((.submitted_at // .created_at // "") | try (sub("\\.[0-9]+"; "") | fromdateiso8601) catch null) as $at
   | $at != null and any($runs[]; .[0] <= $at and $at <= .[1]);
+# Whether pull request feedback may be the agent's own: from its GitHub account, or from any when that isn't known.
+def maybeours: $ghlogin == "" or (.user.login // "") == $ghlogin;
 def clip: if length > 2000 then .[:2000] + " [...]" else . end;
 . as [$activity, $pr, $ci, $issue, $reviews, $inline, $comments, $s]
 | ($s.runs | if type == "array" then . else [] end) as $runs
@@ -64,13 +67,14 @@ def human($w): [
     ($activity[] | select(.type == "approved" and .id > ($w.activity // 0) and (.actor | ours | not))
       | {key: "t\(.id)", text: ("\(.actor) approved your plan:\n"
          + "Go on with the work you planned, and take the ticket through to review.")}),
-    ($issue[] | select(.id > ($w.issue // 0) and feedback and (ack | not) and (during($runs) | not))
+    ($issue[] | select(.id > ($w.issue // 0) and feedback and (ack | not) and ((during($runs) and maybeours) | not))
       | {key: "i\(.id)", text: "Pull request comment from \(.user.login) (\(.html_url)):\n\(.body // "" | clip)"}),
-    ($reviews[] | select(.id > ($w.review // 0) and feedback and .state != "PENDING" and (during($runs) | not))
+    ($reviews[] | select(.id > ($w.review // 0) and feedback and .state != "PENDING"
+      and ((during($runs) and maybeours) | not))
       | select((.body // "") != "" and (ack | not))
       | {key: "r\(.id)",
          text: "Pull request review (\(.state)) from \(.user.login) (\(.html_url)):\n\(.body // "" | clip)"}),
-    ($inline[] | select(.id > ($w.inline // 0) and feedback and (ack | not) and (during($runs) | not))
+    ($inline[] | select(.id > ($w.inline // 0) and feedback and (ack | not) and ((during($runs) and maybeours) | not))
       | {key: "c\(.id)", text: ("Inline review comment from \(.user.login) "
          + "on \(.path):\(.line // .original_line // "?") (\(.html_url)):\n\(.body // "" | clip)")}),
     ($comments | to_entries[] | (.key + 1) as $n | .value

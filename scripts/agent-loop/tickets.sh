@@ -108,6 +108,8 @@ read_pr_feedback() {
     ci=$(jq -c .ci <<<"$cached")
     return 0
   fi
+  # The account the agent posts from (see TRIAGE), read once.
+  [[ -n $gh_login ]] || gh_login=$(gh api user --jq .login </dev/null 2>/dev/null) || gh_login=
   issue=$(gh_list "repos/$repo/issues/$number/comments?per_page=100") &&
     reviews=$(gh_list "repos/$repo/pulls/$number/reviews?per_page=100") &&
     inline=$(gh_list "repos/$repo/pulls/$number/comments?per_page=100") ||
@@ -227,6 +229,7 @@ handle_feedback() {
     triage=$(printf '%s\n' "$activity" "$pr" "$ci" "$issue" "$reviews" "$inline" "$comments" "$state" |
       jq -cs --arg agent "$AGENT" --arg loop "$LOOP_ACTOR" --arg marker "$MARKER" --arg working "$IN_PROGRESS_COLUMN" \
         --argjson inreview "$([[ -n $review && $column == "$review" ]] && echo true || echo false)" \
+        --arg ghlogin "$gh_login" \
         --argjson now "$(date +%s)" --argjson retry "$RETRY_SECONDS" --argjson max "$MAX_ATTEMPTS" \
         --argjson maxci "$MAX_CI_RUNS" --argjson maxconflict "$MAX_CONFLICT_RUNS" "$TRIAGE") ||
       { log "can't triage $id"; continue; }
