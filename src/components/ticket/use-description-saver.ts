@@ -86,11 +86,20 @@ export function useDescriptionSaver(ticket: Ticket, actions: BoardActions) {
     [debounced],
   )
 
+  /**
+   * The person has text that isn't saved yet: being typed or saved, or kept after a conflict. The editor keeps showing
+   * it rather than the ticket's description meanwhile, which a failed save rolls back and a conflict replaces.
+   */
+  const hasUnsavedEdits = useCallback(() => unsaved.current !== null || saving.current || conflicted.current, [])
+
   /** The editor shows the ticket's description: edits from here on are based on its current version. */
-  const onSync = useCallback((markdown: string) => {
-    if (unsaved.current !== null || saving.current || conflicted.current) return
-    base.current = { version: latest.current.version, description: markdown }
-  }, [])
+  const onSync = useCallback(
+    (markdown: string) => {
+      if (hasUnsavedEdits()) return
+      base.current = { version: latest.current.version, description: markdown }
+    },
+    [hasUnsavedEdits],
+  )
 
   const copy = async (text: string) => {
     const copied = await copyMine(text)
@@ -123,6 +132,7 @@ export function useDescriptionSaver(ticket: Ticket, actions: BoardActions) {
     onChange,
     onBlur: debounced.flush,
     onSync,
+    hasUnsavedEdits,
     editorKey,
     /** The person's text that couldn't be saved because the description changed meanwhile. */
     conflict,

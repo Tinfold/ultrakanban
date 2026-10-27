@@ -211,6 +211,7 @@ function TicketDetail({ ticket, onClose }: { ticket: Ticket; onClose: () => void
                 onChange={description.onChange}
                 onBlur={description.onBlur}
                 onSync={description.onSync}
+                hasUnsavedEdits={description.hasUnsavedEdits}
                 className="-mx-3"
               />
             </div>

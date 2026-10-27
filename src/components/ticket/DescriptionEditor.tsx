@@ -34,6 +34,8 @@ interface DescriptionEditorProps {
   onBlur?: () => void
   /** Called whenever the editor shows `value`, rather than unsaved edits. */
   onSync?: (markdown: string) => void
+  /** Whether the editor's text has edits that aren't saved yet: changes to `value` don't replace them meanwhile. */
+  hasUnsavedEdits?: () => boolean
   placeholder?: string
   autoFocus?: boolean
   className?: string
@@ -45,6 +47,7 @@ export function DescriptionEditor({
   onChange,
   onBlur,
   onSync,
+  hasUnsavedEdits,
   placeholder = 'Add a description…',
   autoFocus,
   className,
@@ -71,12 +74,15 @@ export function DescriptionEditor({
     onBlur: () => onBlur?.(),
   })
 
-  // Apply changes made elsewhere (other tabs, agents) unless the user is editing.
+  // Apply changes made elsewhere (other tabs, agents) unless the user is editing or has edits that aren't saved.
   const onSyncRef = useRef(onSync)
+  const hasUnsavedEditsRef = useRef(hasUnsavedEdits)
   useEffect(() => {
     onSyncRef.current = onSync
+    hasUnsavedEditsRef.current = hasUnsavedEdits
   })
   useEffect(() => {
+    if (hasUnsavedEditsRef.current?.()) return
     if (editor.getMarkdown() !== value) {
       if (editor.isFocused) return
       editor.commands.setContent(value, { contentType: 'markdown', emitUpdate: false })
