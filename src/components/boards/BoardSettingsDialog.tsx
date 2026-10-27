@@ -7,11 +7,12 @@ import {
   PlusIcon,
   Settings2Icon,
 } from 'lucide-react'
-import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react'
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { Link } from 'wouter'
 import { useBoardContext } from '@/components/board/board-context'
 import { CreateGitHubRepoDialog } from '@/components/boards/CreateGitHubRepoDialog'
+import { SideTabs } from '@/components/common/SideTabs'
 import { ColorDot } from '@/components/common/TagChip'
 import { Button } from '@/components/ui/button'
 import {
@@ -28,6 +29,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { useGitHubStatus, useSetup } from '@/hooks/queries'
 import type { BoardPatch } from '@/lib/board-updates'
+import { sideTabIds } from '@/lib/side-tabs'
 import { cn } from '@/lib/utils'
 import {
   AGENT_DEFAULTS,
@@ -128,9 +130,9 @@ function Section({
   // Every section stays mounted, so the form saves the fields of the hidden ones too.
   return (
     <div
-      id={`board-settings-panel-${id}`}
+      id={sideTabIds('board-settings', id).panel}
       role="tabpanel"
-      aria-labelledby={`board-settings-tab-${id}`}
+      aria-labelledby={sideTabIds('board-settings', id).tab}
       data-section={id}
       hidden={id !== active}
       className="grid gap-5"
@@ -435,17 +437,12 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
     const { jevEnabled, jevModels, jevThreshold, jevOnlyLower, jevCombine, jevMode } = detail.board
     return { jevEnabled, jevModels, jevThreshold, jevOnlyLower, jevCombine, jevMode }
   })
-  const tabs = useRef<(HTMLButtonElement | null)[]>([])
   const form = useRef<HTMLFormElement>(null)
   const content = useRef<HTMLDivElement>(null)
 
-  // Each section starts at its top, and on narrow screens its tab scrolls into view.
+  // Each section starts at its top.
   useEffect(() => {
     content.current?.scrollTo({ top: 0 })
-    tabs.current[SECTIONS.findIndex(({ id }) => id === section)]?.scrollIntoView({
-      block: 'nearest',
-      inline: 'nearest',
-    })
   }, [section])
 
   // A field the browser finds invalid on Save may be in a hidden section, where it can't show why: switch to the
@@ -468,22 +465,6 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
   const badges: Partial<Record<SectionId, ReactNode>> = {
     agent: <StatusBadge on={agentEnabled} />,
     notifications: <StatusBadge on={!!notifyUrl.trim()} />,
-  }
-
-  const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
-    const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key]
-    const next =
-      event.key === 'Home'
-        ? 0
-        : event.key === 'End'
-          ? SECTIONS.length - 1
-          : step
-            ? (index + step + SECTIONS.length) % SECTIONS.length
-            : null
-    if (next === null) return
-    event.preventDefault()
-    setSection(SECTIONS[next].id)
-    tabs.current[next]?.focus()
   }
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -534,37 +515,14 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
   return (
     <form ref={form} onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
-        <nav
-          role="tablist"
-          aria-label="Settings sections"
-          aria-orientation="vertical"
-          className="flex shrink-0 gap-1 overflow-x-auto border-b p-2 sm:w-48 sm:flex-col sm:overflow-x-visible sm:border-r sm:border-b-0"
-        >
-          {SECTIONS.map(({ id, label, icon: Icon }, index) => (
-            <button
-              key={id}
-              ref={(element) => {
-                tabs.current[index] = element
-              }}
-              id={`board-settings-tab-${id}`}
-              type="button"
-              role="tab"
-              aria-selected={section === id}
-              aria-controls={`board-settings-panel-${id}`}
-              tabIndex={section === id ? 0 : -1}
-              onClick={() => setSection(id)}
-              onKeyDown={(event) => onTabKeyDown(event, index)}
-              className={cn(
-                'flex shrink-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm whitespace-nowrap text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50',
-                section === id && 'bg-muted font-medium text-foreground',
-              )}
-            >
-              <Icon className="size-4 shrink-0" />
-              <span className="flex-1">{label}</span>
-              {badges[id]}
-            </button>
-          ))}
-        </nav>
+        <SideTabs
+          tabs={SECTIONS}
+          active={section}
+          onSelect={setSection}
+          idPrefix="board-settings"
+          label="Settings sections"
+          badges={badges}
+        />
 
         <div ref={content} className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
           <Section id="general" active={section} title="General">
