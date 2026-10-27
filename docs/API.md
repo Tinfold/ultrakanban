@@ -706,10 +706,10 @@ time passes the ticket's own.
 - **Tokens are weighted by kind** about as Claude prices them, relative to uncached input: output 5, cache writes
   1.25, cache reads 0.1. Cache reads make up most of a run's raw total.
 - **The suggestion** is the setting that costs least per _finished_ ticket (its average cost over its success rate, so
-  each finished ticket also pays for the ones given up on; by weighted tokens when runs reported no cost) among those
-  whose weighted success rate is within 0.2 of the best one's. Only settings at least 2 similar decided tickets were
-  worked at can be suggested; the others still show in `options`. It is `null` when none of those finished a similar
-  ticket.
+  each finished ticket also pays for the ones given up on; all by weighted tokens when any of them has no cost) among
+  those whose weighted success rate is within 0.2 of the best one's. Only settings at least 2 similar decided tickets
+  were worked at can be suggested; the others still show in `options`. It is `null` when none of those finished a
+  similar ticket.
 
 ```ts
 interface AgentSuggestion {

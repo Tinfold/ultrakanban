@@ -623,7 +623,7 @@ export interface AgentSettingStats {
   costUsd: number | null
   /**
    * Cost per finished ticket: `costUsd` over `successRate`, as each finished ticket also pays for the ones given up on.
-   * Null when none reported a cost or none was finished. Settings are compared by it.
+   * Null when none reported a cost or none was finished. Settings are compared by it when all of them have a `costUsd`.
    */
   costPerFinishedUsd: number | null
   /** Tokens per ticket, averaged by similarity. */
@@ -632,7 +632,7 @@ export interface AgentSettingStats {
   weightedTokens: number
   /**
    * Weighted tokens per finished ticket, `weightedTokens` over `successRate`; null when none was finished. Settings are
-   * compared by it when they don't both have a `costPerFinishedUsd`.
+   * compared by it when any of them has no `costUsd`.
    */
   weightedTokensPerFinished: number | null
   /** Those tickets, most similar first (at most 5). */

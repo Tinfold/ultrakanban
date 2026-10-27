@@ -248,16 +248,18 @@ function statsFor(tickets: PastTicket[]): AgentSettingStats {
 }
 
 /**
- * Whether `a` costs less per finished ticket than `b`: by cost when both reported one, else by weighted tokens. A
- * setting that finished nothing costs the most.
+ * Compares two of `settings` by what a finished ticket costs at them, the cheaper first: by cost when every one of them
+ * reported one, else all by weighted tokens. Comparing some pairs by cost and others by tokens wouldn't be an order, so
+ * the sort would depend on the order they came in. A setting that finished nothing costs the most.
  */
-function cheaper(a: AgentSettingStats, b: AgentSettingStats) {
-  const byCost = a.costPerFinishedUsd !== null && b.costPerFinishedUsd !== null
-  const [x, y] = byCost
-    ? [a.costPerFinishedUsd, b.costPerFinishedUsd]
-    : [a.weightedTokensPerFinished, b.weightedTokensPerFinished]
-  const [first, second] = [x ?? Infinity, y ?? Infinity]
-  return first === second ? 0 : first < second ? -1 : 1
+export function cheaperAmong(settings: AgentSettingStats[]) {
+  const byCost = settings.every((setting) => setting.costUsd !== null)
+  const perFinished = (setting: AgentSettingStats) =>
+    (byCost ? setting.costPerFinishedUsd : setting.weightedTokensPerFinished) ?? Infinity
+  return (a: AgentSettingStats, b: AgentSettingStats) => {
+    const [first, second] = [perFinished(a), perFinished(b)]
+    return first === second ? 0 : first < second ? -1 : 1
+  }
 }
 
 /**
@@ -293,9 +295,9 @@ export function suggestAgent(boardId: string, query: AgentSuggestionQuery): Omit
   // A setting worked at fewer similar tickets says more about those tickets than about the setting.
   const sampled = options.filter((option) => option.tickets >= SUGGESTION_MIN_TICKETS)
   const best = Math.max(0, ...sampled.map((option) => option.successRate))
-  const suggestion = best
-    ? (sampled.filter((option) => option.successRate >= best - SUCCESS_TOLERANCE).sort(cheaper)[0] ?? null)
-    : null
+  const candidates = best ? sampled.filter((option) => option.successRate >= best - SUCCESS_TOLERANCE) : []
+  const suggestion = candidates.sort(cheaperAmong(candidates))[0] ?? null
+  const cheaper = cheaperAmong(options)
   options.sort(
     (a, b) => Number(b === suggestion) - Number(a === suggestion) || b.successRate - a.successRate || cheaper(a, b),
   )
