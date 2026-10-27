@@ -77,6 +77,25 @@ describe('tickets', () => {
     assert.equal(stale.body.error.details.version, 2)
   })
 
+  test('a stale description save says what the description is now', async () => {
+    const ticket = await addTicket({ title: 'A', description: 'one' })
+    await call('PATCH', `/tickets/${ticket.id}`, { description: 'two', ifVersion: 1 })
+    const stale = await call<{ error: { code: string; details: Record<string, unknown> } }>(
+      'PATCH',
+      `/tickets/${ticket.id}`,
+      { description: 'three', ifVersion: 1 },
+    )
+
+    assert.equal(stale.status, 409)
+    assert.equal(stale.body.error.code, 'version_conflict')
+    assert.deepEqual(stale.body.error.details, {
+      version: 2,
+      assignee: null,
+      columnId: ticket.columnId,
+      description: 'two',
+    })
+  })
+
   test('validates input', async () => {
     const res = await call<{ error: { code: string } }>('POST', `/boards/${boardId}/tickets`, { priority: 'meh' })
     assert.equal(res.status, 400)

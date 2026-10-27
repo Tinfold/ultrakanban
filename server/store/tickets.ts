@@ -340,12 +340,16 @@ function conflictState(ticket: Pick<Ticket, 'version' | 'assignee' | 'columnId'>
   return { version: ticket.version, assignee: ticket.assignee, columnId: ticket.columnId }
 }
 
-function assertVersion(ticket: Ticket, ifVersion: number | undefined) {
+/**
+ * With `withDescription`, the 409 also carries the description as it is now, so that a description save can tell
+ * whether the description changed meanwhile or only other fields did.
+ */
+function assertVersion(ticket: Ticket, ifVersion: number | undefined, withDescription = false) {
   if (ifVersion !== undefined && ticket.version !== ifVersion) {
     throw conflict(
       'version_conflict',
       `Ticket was modified concurrently (current version ${ticket.version}, expected ${ifVersion})`,
-      conflictState(ticket),
+      withDescription ? { ...conflictState(ticket), description: ticket.description } : conflictState(ticket),
     )
   }
 }
@@ -513,7 +517,7 @@ export function createTicket(boardId: string, input: CreateTicketInput, actor: s
 
 export function updateTicket(id: string, input: UpdateTicketInput, actor: string): Ticket {
   const ticket = getTicket(id)
-  assertVersion(ticket, input.ifVersion)
+  assertVersion(ticket, input.ifVersion, input.description !== undefined)
   touchBoard(ticket.boardId)
 
   const changed: string[] = EDITABLE_FIELDS.filter(

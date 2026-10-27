@@ -168,21 +168,22 @@ export function useBoardActions(boardId: string) {
       },
       /**
        * Saves the description only if the ticket is still at `ifVersion`, so it can't overwrite changes made meanwhile
-       * (such as checklist steps an agent ticks). On a version conflict it returns the ticket as it is now instead.
+       * (such as checklist steps an agent ticks). On a version conflict it returns the ticket's version and description
+       * as they are now instead.
        */
       saveDescription: async (
         ticketId: string,
         description: string,
         ifVersion: number,
-      ): Promise<{ ticket: Ticket } | { conflict: Ticket } | undefined> => {
-        let conflict: Ticket | undefined
+      ): Promise<{ ticket: Ticket } | { conflict: Pick<Ticket, 'version' | 'description'> } | undefined> => {
+        let conflict: Pick<Ticket, 'version' | 'description'> | undefined
         const ticket = await run(
           () => api.updateTicket(ticketId, { description, ifVersion }),
           (d) => updates.patchTicket(d, ticketId, { description }),
           updates.addTicket,
           (error) => {
             if (!(error instanceof ApiError) || error.code !== 'version_conflict') return false
-            conflict = (error.details as { ticket: Ticket } | undefined)?.ticket
+            conflict = error.details as Pick<Ticket, 'version' | 'description'> | undefined
             return !!conflict
           },
         )

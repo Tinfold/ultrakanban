@@ -15,7 +15,8 @@ JSON over HTTP. Base URL: `http://127.0.0.1:4317/api` (in development the Vite d
   - `409 blocked` - `POST /tickets/:id/claim` on a ticket `claim-next` would skip (tagged `blocked`, waiting for an
     unfinished ticket, or with unfinished sub-tickets). A ticket the agent already holds can still be claimed by it.
   - `409 already_claimed` / `claimed_by_other` - someone else holds the ticket (`details` has its current `version`, `assignee` and `columnId`).
-  - `409 version_conflict` - `ifVersion` did not match (`details` has its current `version`, `assignee` and `columnId`).
+  - `409 version_conflict` - `ifVersion` did not match (`details` has its current `version`, `assignee` and `columnId`,
+    and its `description` too for a `PATCH /tickets/:id` that sets one).
   - `409 tag_exists` - tag names are unique per board (case-insensitive).
   - `409 pull_request_not_merged` - the board's done column only accepts tickets whose pull request is merged.
   - `409 merge_in_progress` - the board's pull requests are already being merged.
