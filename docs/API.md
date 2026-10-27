@@ -563,8 +563,9 @@ from (`ticket` when it names its own `agentModel`/`agentEffort`, else the board'
 would have picked: the [similar-tickets suggestion](#suggested-model-and-effort) when it is built on 3 or more similar tickets,
 and, on a board that routes with Jev (`jevEnabled`, see [docs/JEV.md](JEV.md)), Jev's pick and confidence. Jev is asked
 before the claim returns, and in `dry-run` mode its pick is only recorded, never used. A Jev request that fails is
-left out and never fails the claim. Each Jev request is recorded as a run on the ticket (agent `jev`, model
-`jev-1.14.0`, at $0.042 per million input tokens), so its tokens and cost count in the usage too.
+left out and never fails the claim. Each Jev request is recorded in the ticket's usage (agent `jev`, model
+`jev-1.14.0`, at $0.042 per million input tokens), so its tokens and cost count there too, but not as a run, and Jev isn't
+listed among the overview's agents.
 
 In `on` mode the claim also returns the setting to work the ticket at as `routed`, without writing over the ticket's own
 `agentModel`/`agentEffort`, and the agent loop works the ticket at it. The first source that has a pick wins:

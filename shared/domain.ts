@@ -946,10 +946,14 @@ function addCounts(totals: UsageCounts, counts: TokenCounts & { costUsd: number 
   totals.runs += runs
 }
 
-/** Adds a run's usage to `totals` and returns them. */
-export function addUsage(totals: UsageTotals, run: TokenCounts & { costUsd: number | null; models: ModelUsage[] }) {
-  addCounts(totals, run, 1)
-  for (const model of run.models) addCounts((totals.models[model.model] ??= noCounts()), model, 1)
+/** Adds a run's usage to `totals` and returns them. A Jev request (`JEV_AGENT`) adds its tokens and cost, not a run. */
+export function addUsage(
+  totals: UsageTotals,
+  run: TokenCounts & { agent?: string; costUsd: number | null; models: ModelUsage[] },
+) {
+  const runs = run.agent === JEV_AGENT ? 0 : 1
+  addCounts(totals, run, runs)
+  for (const model of run.models) addCounts((totals.models[model.model] ??= noCounts()), model, runs)
   return totals
 }
 
