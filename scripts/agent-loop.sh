@@ -324,8 +324,8 @@ followup=
 # The run in progress and the process watching its ticket (see run_claude), if any.
 running=
 watcher=
-# Set by the trap: a run in progress is stopped, then run_claude ends and records it (end_run, stop_leftovers,
-# record_run) before the loop exits.
+# Set by the trap: a run in progress is stopped, then run_claude ends and records it as loop_stopped (end_run,
+# stop_leftovers, record_run), and run_on_ticket keeps when it ran (the state's runs) before the loop exits.
 stopping=
 trap 'log "stopped"; stop_listener; kill $sleeper $watcher 2>/dev/null
   if [[ -n $running ]]; then stopping=1; kill $running 2>/dev/null; else exit 0; fi' INT TERM

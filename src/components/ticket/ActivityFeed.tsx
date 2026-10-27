@@ -191,6 +191,7 @@ const OUTCOME_STYLES: Record<RunOutcome, { item: string; label: string }> = {
   killed: { item: 'border-red-500/40 bg-red-500/5', label: 'text-red-600 dark:text-red-400' },
   stopped: { item: '', label: 'text-muted-foreground' },
   stop_requested: { item: '', label: 'text-muted-foreground' },
+  loop_stopped: { item: '', label: 'text-muted-foreground' },
   usage_limit: { item: 'border-amber-500/40 bg-amber-500/5', label: 'text-amber-600 dark:text-amber-400' },
 }
 

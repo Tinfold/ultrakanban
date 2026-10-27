@@ -667,8 +667,10 @@ interface RunRecord {
   // finished: exited successfully; failed: exited with an error; timed_out: ran past the loop's TICKET_TIMEOUT;
   // killed: by a signal (exit status 137 is most likely the kernel, out of memory); stopped: the loop stopped it as
   // someone took the ticket away; stop_requested: the loop stopped it as someone asked (POST /tickets/:id/stop; the
-  // run is resumed with new feedback); usage_limit: the account ran out of Claude usage (the run is resumed later)
-  outcome: 'finished' | 'failed' | 'timed_out' | 'killed' | 'stopped' | 'stop_requested' | 'usage_limit'
+  // run is resumed with new feedback); loop_stopped: the loop itself was stopped, e.g. restarted (the run is resumed
+  // by its next run); usage_limit: the account ran out of Claude usage (the run is resumed later)
+  outcome:
+    'finished' | 'failed' | 'timed_out' | 'killed' | 'stopped' | 'stop_requested' | 'loop_stopped' | 'usage_limit'
   exitCode: number | null
   durationMs: number | null
   turns: number | null // responses of the model

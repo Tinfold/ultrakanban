@@ -837,14 +837,16 @@ export const RUN_OUTCOMES = [
   'killed',
   'stopped',
   'stop_requested',
+  'loop_stopped',
   'usage_limit',
 ] as const
 /**
  * How an agent run ended: `finished` (the agent exited successfully), `failed` (it exited with an error), `timed_out`
  * (it ran longer than the agent loop's TICKET_TIMEOUT), `killed` (by a signal, most likely the kernel's for running out
  * of memory), `stopped` (the loop stopped it because someone took the ticket away from the agent), `stop_requested`
- * (the loop stopped it because someone asked, see `AgentRun.stopRequested`, and resumes it once there is new feedback)
- * or `usage_limit` (the account ran out of Claude usage, so the loop waits for it to reset and then resumes the run).
+ * (the loop stopped it because someone asked, see `AgentRun.stopRequested`, and resumes it once there is new feedback),
+ * `loop_stopped` (the loop itself was stopped, e.g. restarted, and its next run on the ticket resumes it) or
+ * `usage_limit` (the account ran out of Claude usage, so the loop waits for it to reset and then resumes the run).
  */
 export type RunOutcome = (typeof RUN_OUTCOMES)[number]
 

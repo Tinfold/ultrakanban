@@ -109,6 +109,8 @@ export function formatRunOutcome(run: Pick<RunRecord, 'outcome' | 'exitCode'>) {
       return 'stopped: the ticket was taken away'
     case 'stop_requested':
       return 'stopped: someone asked'
+    case 'loop_stopped':
+      return 'stopped: the loop stopped'
     case 'usage_limit':
       return 'stopped: out of Claude usage'
   }
