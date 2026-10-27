@@ -117,8 +117,10 @@ describe('local pull requests', () => {
     assert.equal(review.status, 200)
     assert.equal(review.body.pullRequest?.url, body.url)
 
+    // Stacked on it, for another ticket.
     pushBranch('other', { 'other.txt': 'x\n' })
-    const second = await open({ head: 'other', base: 'feature', title: 'Stacked' })
+    const stacked = await addTicket({ title: 'Build on it' })
+    const second = await open({ head: 'other', base: 'feature', title: 'Stacked' }, stacked.id)
     assert.deepEqual([second.body.number, second.body.base, second.body.title], [2, 'feature', 'Stacked'])
 
     const { body: list } = await call<LocalPullRequest[]>('GET', pr())
@@ -163,6 +165,23 @@ describe('local pull requests', () => {
     assert.match((await open({ head: 'feature' }, elsewhere.id)).body.error.message, /isn't there/)
     await call('PATCH', `/boards/${other.body.id}`, { localRepoPath: root })
     assert.match((await open({ head: 'feature' }, elsewhere.id)).body.error.message, /isn't a git repository/)
+  })
+
+  test('a ticket has one open local pull request at a time', async () => {
+    pushBranch('feature', { 'a.txt': 'a\n' })
+    pushBranch('again', { 'b.txt': 'b\n' })
+    await open({ head: 'feature' })
+    const { status, body } = await open({ head: 'again' })
+    assert.deepEqual([status, body.error.code], [409, 'pull_request_exists'])
+    assert.match(body.error.message, /#1 is open for this ticket already, from "feature"/)
+    assert.equal((body.error.details as { pullRequest: LocalPullRequest }).pullRequest.number, 1)
+    assert.equal((await call<Ticket>('GET', `/tickets/${ticket.id}`)).body.pullRequest?.url, `/b/${boardId}/pr/1`)
+
+    // Once it is closed, another can be opened, and the ticket links that one.
+    await call('POST', pr('/1/close'))
+    const again = await open({ head: 'again' })
+    assert.deepEqual([again.status, again.body.number], [201, 2])
+    assert.equal((await call<Ticket>('GET', `/tickets/${ticket.id}`)).body.pullRequest?.url, again.body.url)
   })
 
   test('the base is the branch HEAD is on when left out, also with a tag named like it', async () => {
@@ -244,7 +263,7 @@ describe('local pull requests', () => {
     git(work, 'add', 'image.bin')
     git(work, 'commit', '-q', '-m', 'Binary')
     git(work, 'push', '-q', 'origin', 'binary')
-    await open({ head: 'binary' })
+    await open({ head: 'binary' }, (await addTicket({ title: 'Add an image' })).id)
     const { body: binary } = await call<LocalPullRequestDiff>('GET', pr('/2/diff'))
     assert.deepEqual(
       binary.files.map((file) => [file.path, file.binary, file.hunks]),

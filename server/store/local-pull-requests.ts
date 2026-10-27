@@ -113,7 +113,8 @@ export function getLocalPullRequest(boardId: string, number: number): LocalPullR
 
 /**
  * Opens a local pull request for the ticket and links it as the ticket's pull request, as `pullRequest` does with a
- * GitHub one. One head branch has one open pull request at a time.
+ * GitHub one. One head branch has one open pull request at a time, and so does one ticket: another would leave the
+ * first open but no longer linked, so merging it would merge its changes without moving the ticket.
  */
 export function openLocalPullRequest(
   ticketId: string,
@@ -121,15 +122,21 @@ export function openLocalPullRequest(
   actor: string,
 ): LocalPullRequestDetail {
   const { boardId } = getTicket(ticketId)
-  const open = sql.get<{ number: number }>(
-    "SELECT number FROM local_pull_requests WHERE board_id = ? AND head_branch = ? AND state = 'open'",
+  const open = sql.get<{ number: number; head_branch: string }>(
+    `SELECT number, head_branch FROM local_pull_requests
+     WHERE board_id = ? AND state = 'open' AND (head_branch = ? OR ticket_id = ?)
+     ORDER BY head_branch = ? DESC`,
     boardId,
+    input.head,
+    ticketId,
     input.head,
   )
   if (open) {
-    throw conflict('pull_request_exists', `Local pull request #${open.number} is open for "${input.head}" already`, {
-      pullRequest: getLocalPullRequest(boardId, open.number),
-    })
+    const message =
+      open.head_branch === input.head
+        ? `Local pull request #${open.number} is open for "${input.head}" already`
+        : `Local pull request #${open.number} is open for this ticket already, from "${open.head_branch}": push to that branch, or close it first`
+    throw conflict('pull_request_exists', message, { pullRequest: getLocalPullRequest(boardId, open.number) })
   }
   const { number } = sql.get<{ number: number }>(
     'SELECT coalesce(max(number), 0) + 1 AS number FROM local_pull_requests WHERE board_id = ?',
