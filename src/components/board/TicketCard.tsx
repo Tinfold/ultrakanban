@@ -19,6 +19,7 @@ import { AutoMergeHint } from '@/components/common/AutoMergeHint'
 import { CheckStatusIcon } from '@/components/common/CheckStatusIcon'
 import { JevBadge } from '@/components/common/JevBadge'
 import { PriorityIcon } from '@/components/common/PriorityIcon'
+import { PullRequestAnchor } from '@/components/common/PullRequestAnchor'
 import { PullRequestIcon } from '@/components/common/PullRequestIcon'
 import { EpicChip } from '@/components/common/EpicChip'
 import { TagChip } from '@/components/common/TagChip'
@@ -186,7 +187,17 @@ export function TicketCard({ ticket, overlay, selecting, selected }: TicketCardP
           )}
           {ticket.pullRequest && (
             <span className="flex items-center gap-1 tabular-nums" title={ticket.pullRequest.title ?? undefined}>
-              <PullRequestIcon state={ticket.pullRequest.state} />#{ticket.pullRequest.number}
+              {/* Straight to the pull request: a click on it doesn't open the ticket, nor a press pick the card up. */}
+              <PullRequestAnchor
+                href={ticket.pullRequest.url}
+                aria-label={`Open pull request #${ticket.pullRequest.number}`}
+                className="flex items-center gap-1 hover:text-foreground hover:underline"
+                onClick={(event) => event.stopPropagation()}
+                onPointerDown={(event) => event.stopPropagation()}
+                onKeyDown={(event) => event.stopPropagation()}
+              >
+                <PullRequestIcon state={ticket.pullRequest.state} />#{ticket.pullRequest.number}
+              </PullRequestAnchor>
               {ticket.pullRequest.checks && (
                 <CheckStatusIcon status={ticket.pullRequest.checks} failingChecks={ticket.pullRequest.failingChecks} />
               )}

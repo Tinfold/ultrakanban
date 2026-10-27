@@ -18,6 +18,7 @@ export type BoardPatch = Partial<
     | 'reviewColumnId'
     | 'doneColumnId'
     | 'githubRepo'
+    | 'localRepoPath'
     | 'agentEnabled'
     | 'agentName'
     | 'agentModel'

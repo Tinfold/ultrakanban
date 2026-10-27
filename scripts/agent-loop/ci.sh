@@ -7,9 +7,14 @@
 # job that was not started, and GitHub Actions jobs in which no step failed (e.g. no step ran at all). Cancelled,
 # skipped, neutral and stale checks are ignored. Legacy commit statuses count as code failures for "failure" and as
 # infra for "error". Prints {sha, code: [names], infra: [{name, why}], pending}, pending being whether any check or
-# status hasn't finished yet (so the result can still change without the pull request changing).
+# status hasn't finished yet (so the result can still change without the pull request changing). Without a GitHub
+# repository (a board with a local one, whose pull requests have no GitHub checks), there are none.
 ci_status() {
   local repo=$1 sha=$2 raw pending runs statuses id name conclusion app count text why job
+  if [[ -z $repo || $repo == - ]]; then
+    jq -nc --arg sha "$sha" '{sha: $sha, code: [], infra: [], pending: false}'
+    return 0
+  fi
   raw=$(gh api --paginate "repos/$repo/commits/$sha/check-runs?filter=latest&per_page=100" </dev/null |
     jq -cs '[.[].check_runs[]] | group_by(.name) | map(max_by(.id))') || return 1
   pending=$(jq 'any(.[]; .status != "completed")' <<<"$raw")

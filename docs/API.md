@@ -22,6 +22,8 @@ JSON over HTTP. Base URL: `http://127.0.0.1:4317/api` (in development the Vite d
   - `409 merge_in_progress` - the board's pull requests are already being merged.
   - `409 awaiting_approval` - the ticket's plan waits for a person's approval (see [Plans and approval](#plans-and-approval)).
   - `409 cannot_merge` - the ticket's pull request can't be merged now (draft, conflicts, builds on another in review).
+  - `409 merge_conflicts` / `merge_failed` - a local pull request can't be merged (see [Local pull requests](#local-pull-requests)).
+  - `502 git_error` - git failed in the board's local repository; the message says how.
   - `413 payload_too_large` / `415 unsupported_media_type` - attachments must be PNG, JPEG, GIF, WebP, MP4 or WebM, up to 25 MB.
 
 Columns, tags and epics can be referenced **by id or by name** (an epic's title) (case-insensitive) wherever a request field says `ref`.
@@ -204,6 +206,116 @@ ticket in the review column whose open pull request has merge conflicts, asking 
 only fix conflicts (`agentConflictConcurrency`) and those that work tickets fix them side by side. It returns
 `{ tickets: Ticket[] }`, the tickets it commented on; `400` if the board has no review column.
 
+### Local pull requests
+
+A board with a local repository (`localRepoPath`, see [Boards](#boards)) has pull requests of its own, so nothing has
+to be on GitHub: the agent pushes its branch to that repository and opens one for its ticket. Opening one links it as
+the ticket's `pullRequest`, with the URL `/b/<board>/pr/<number>` (the page that shows it), and the ticket follows its
+state as it does a GitHub pull request's: merging it moves the ticket to the done column.
+
+| Method | Path                                              | Body                                                          | Returns                                                      |
+| ------ | ------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------ |
+| POST   | `/tickets/:ticketId/local-pull-request`           | `{ head, base?, title?, body? }`                              | `201 LocalPullRequestDetail`, linked to the ticket           |
+| GET    | `/boards/:boardId/pull-requests?state=`           |                                                               | `LocalPullRequest[]`, newest first; `state` filters them     |
+| GET    | `/boards/:boardId/pull-requests/:number`          |                                                               | `LocalPullRequestDetail`, with its comments                  |
+| GET    | `/boards/:boardId/pull-requests/:number/diff`     |                                                               | `LocalPullRequestDiff`: `git diff base...head`, file by file |
+| GET    | `/boards/:boardId/pull-requests/:number/commits`  |                                                               | `LocalCommit[]`: `git log base..head`, oldest first          |
+| POST   | `/boards/:boardId/pull-requests/:number/comments` | `{ body, path?, line?, side?: "right" \| "left" }` (markdown) | `201 LocalPullRequestComment`                                |
+| POST   | `/boards/:boardId/pull-requests/:number/merge`    |                                                               | the merged `LocalPullRequestDetail`; its ticket is now done  |
+| POST   | `/boards/:boardId/pull-requests/:number/close`    |                                                               | the closed `LocalPullRequestDetail`                          |
+
+- **Opening:** `head` is the branch to merge and `base` the one to merge it into, the repository's default branch (its
+  `HEAD`) when left out; `title` is the ticket's when left out. Both branches must be in the local repository, and
+  `head` must have commits `base` doesn't (`400` otherwise, and when the board has no local repository or it isn't a
+  git repository). A branch has one open pull request at a time: `409 pull_request_exists` (its `details.pullRequest`
+  is the open one). The author is the request's `X-Actor`. A ticket can also link a local pull request opened for it
+  through `pullRequest` (on `PATCH /tickets/:ticketId` or `review`); one opened for another ticket is a `400`.
+- **Comments:** without `path` and `line` a comment is on the whole pull request; with them it is inline, on that line
+  of that file's diff, numbered as on its `side`: `right` (the default) the head's version of the file, `left` the
+  base's (for deleted lines). A comment from anyone but the agent holding the ticket wakes the agent, as a ticket
+  comment does. `POST /tickets/:ticketId/comments` with `pullRequest: true` posts on the ticket's local pull request
+  when it has one (`data.pullRequestComment` is `/b/<board>/pr/<number>#comment-<id>`).
+- **Merging** runs `git merge --no-ff` of the head into the base, with the message `Merge pull request #<number> from
+  <head>`, in the worktree that has the base checked out, so its files follow. In a bare repository, or when nobody
+  has the base checked out, the same merge commit is made without a worktree. It is refused, changing nothing, with
+  `409 merge_conflicts` when they conflict (`details.files` lists the files; merge the base into the head and resolve
+  them first), `409 merge_failed` when git refuses (e.g. uncommitted changes in the worktree that the merge would
+  overwrite), `409 branch_missing` and `409 pull_request_not_open`. Merge commits are by the repository's git identity,
+  or `ultrakanban <ultrakanban@localhost>` when it has none. `POST /tickets/:ticketId/merge` merges a ticket's local
+  pull request the same way; "merge all" skips them.
+- **Closing** leaves the branches as they are and the ticket where it is (its `pullRequest.state` is `closed`).
+- Once merged or closed, its diff and commits are read from the commits it had then (`headSha`, `baseSha`), so they
+  stay readable when its branches move on or are deleted, until git prunes them (`409 commit_missing`).
+
+```ts
+interface LocalPullRequest {
+  boardId: string
+  number: number // per board, from 1
+  url: string // /b/<board>/pr/<number>; its ticket's pullRequest.url
+  ticketId: string | null // null once the ticket is deleted
+  ticketNumber: number | null
+  title: string
+  body: string // markdown
+  head: string // branch merged
+  base: string // branch merged into
+  state: 'open' | 'merged' | 'closed'
+  author: string
+  headSha: string | null // the commits it had once merged or closed; null while open
+  baseSha: string | null
+  mergeSha: string | null // the merge commit; null unless merged (or when head was in base already)
+  closedBy: string | null // who merged or closed it
+  closedAt: string | null
+  commentCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+interface LocalPullRequestDetail extends LocalPullRequest {
+  comments: LocalPullRequestComment[] // oldest first
+}
+
+interface LocalPullRequestComment {
+  id: string
+  body: string // markdown
+  author: string
+  path: string | null // inline comments only
+  line: number | null
+  side: 'right' | 'left' | null // right: the head's version of the file, left: the base's
+  createdAt: string
+  updatedAt: string
+}
+
+interface LocalPullRequestDiff {
+  baseSha: string // where head branched off base
+  headSha: string
+  files: {
+    path: string // in the head; in the base for a deleted file
+    oldPath: string | null // renamed or copied from
+    status: 'added' | 'deleted' | 'modified' | 'renamed' | 'copied'
+    binary: boolean // binary files have no hunks
+    additions: number
+    deletions: number
+    hunks: {
+      header: string // @@ -1,4 +1,5 @@ ...
+      oldStart: number
+      oldLines: number
+      newStart: number
+      newLines: number
+      lines: { type: 'context' | 'add' | 'delete'; oldLine: number | null; newLine: number | null; text: string }[]
+    }[]
+  }[]
+}
+
+interface LocalCommit {
+  sha: string
+  author: string
+  email: string
+  date: string // ISO 8601, author date
+  subject: string // first line of the message
+  body: string // the rest of it
+}
+```
+
 ## Types
 
 ```ts
@@ -300,8 +412,8 @@ interface ChecklistItem {
 }
 
 interface PullRequest {
-  url: string // https://github.com/owner/repo/pull/123
-  repo: string // owner/repo
+  url: string // https://github.com/owner/repo/pull/123, or a local pull request's /b/<board>/pr/<number>
+  repo: string // owner/repo; local/<folder name of the board's local repository> for a local pull request
   number: number
   state: 'unknown' | 'open' | 'draft' | 'merged' | 'closed' // unknown until GitHub has been checked
   title: string | null
@@ -324,6 +436,7 @@ interface BoardSummary {
   reviewColumnId: string | null // where POST /tickets/:id/review moves tickets
   doneColumnId: string | null // only accepts tickets with a merged pull request
   githubRepo: string | null // "owner/name" the board's tickets are about
+  localRepoPath: string | null // git repository on the host the board works on instead ("/..." or "~/...")
   agentEnabled: boolean // the host's agent supervisor runs an agent loop for this board
   agentName: string | null // name of that agent, the loop that controls it ("claude" when null)
   agentModel: string | null // model it runs, an alias or full name ("opus" when null)
@@ -362,16 +475,16 @@ interface BoardSummary {
 
 ## Boards
 
-| Method | Path                           | Body / query                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Returns                                                   |
-| ------ | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| GET    | `/boards`                      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | `BoardSummary[]` (most recently updated first)            |
-| POST   | `/boards`                      | `{ name, description?, columns?: string[], reviewColumn?: ref, doneColumn?: ref, githubRepo?, agentEnabled?, agentName?, agentModel?, agentEffort?, agentConcurrency?, agentMaxTurns?, agentConflictConcurrency?, agentConflictModel?, agentConflictEffort?, agentCiModel?, agentCiEffort?, agentBacklog?, agentAllSkills?, agentDocker?, autoMerge?, ignoreBillingFailures?, deleteMergedBranches?, archiveDoneDays?, notifyUrl?, approvalSize? }`                                                                                                                                                                                                                                                                                                                                                 | `BoardSummary`                                            |
-| GET    | `/boards/:boardId`             | `?archived=true&compact=true`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | `{ board, columns, tags, epics, tickets, archivedCount }` |
-| PATCH  | `/boards/:boardId`             | `{ name?, description?, reviewColumn?: ref \| null, doneColumn?: ref \| null, githubRepo?: string \| null, agentEnabled?: boolean, agentName?: string \| null, agentModel?: string \| null, agentEffort?: 'low' \| 'medium' \| 'high' \| 'xhigh' \| 'max' \| null, agentConcurrency?: number \| null, agentMaxTurns?: number \| null, agentConflictConcurrency?: number \| null, agentConflictModel?: string \| null, agentConflictEffort?: string \| null, agentCiModel?: string \| null, agentCiEffort?: string \| null, agentBacklog?: boolean, agentAllSkills?: boolean, agentDocker?: boolean, autoMerge?: boolean, ignoreBillingFailures?: boolean, deleteMergedBranches?: boolean, archiveDoneDays?: number \| null, notifyUrl?: string \| null, approvalSize?: 'S' \| 'M' \| 'L' \| null }` | `BoardSummary`                                            |
-| POST   | `/boards/:boardId/github-repo` | `{ name, owner?, description?, private?: boolean }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `BoardSummary` (201)                                      |
-| DELETE | `/boards/:boardId`             |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | `204`                                                     |
-| GET    | `/boards/:boardId/export`      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | portable board JSON                                       |
-| POST   | `/boards/import`               | portable board JSON                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `BoardSummary`                                            |
+| Method | Path                           | Body / query                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Returns                                                   |
+| ------ | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| GET    | `/boards`                      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | `BoardSummary[]` (most recently updated first)            |
+| POST   | `/boards`                      | `{ name, description?, columns?: string[], reviewColumn?: ref, doneColumn?: ref, githubRepo?, localRepoPath?, agentEnabled?, agentName?, agentModel?, agentEffort?, agentConcurrency?, agentMaxTurns?, agentConflictConcurrency?, agentConflictModel?, agentConflictEffort?, agentCiModel?, agentCiEffort?, agentBacklog?, agentAllSkills?, agentDocker?, autoMerge?, ignoreBillingFailures?, deleteMergedBranches?, archiveDoneDays?, notifyUrl?, approvalSize? }`                                                                                                                                                                                                                                                                                                                                                                 | `BoardSummary`                                            |
+| GET    | `/boards/:boardId`             | `?archived=true&compact=true`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | `{ board, columns, tags, epics, tickets, archivedCount }` |
+| PATCH  | `/boards/:boardId`             | `{ name?, description?, reviewColumn?: ref \| null, doneColumn?: ref \| null, githubRepo?: string \| null, localRepoPath?: string \| null, agentEnabled?: boolean, agentName?: string \| null, agentModel?: string \| null, agentEffort?: 'low' \| 'medium' \| 'high' \| 'xhigh' \| 'max' \| null, agentConcurrency?: number \| null, agentMaxTurns?: number \| null, agentConflictConcurrency?: number \| null, agentConflictModel?: string \| null, agentConflictEffort?: string \| null, agentCiModel?: string \| null, agentCiEffort?: string \| null, agentBacklog?: boolean, agentAllSkills?: boolean, agentDocker?: boolean, autoMerge?: boolean, ignoreBillingFailures?: boolean, deleteMergedBranches?: boolean, archiveDoneDays?: number \| null, notifyUrl?: string \| null, approvalSize?: 'S' \| 'M' \| 'L' \| null }` | `BoardSummary`                                            |
+| POST   | `/boards/:boardId/github-repo` | `{ name, owner?, description?, private?: boolean }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `BoardSummary` (201)                                      |
+| DELETE | `/boards/:boardId`             |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | `204`                                                     |
+| GET    | `/boards/:boardId/export`      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | portable board JSON                                       |
+| POST   | `/boards/import`               | portable board JSON                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `BoardSummary`                                            |
 
 `POST /boards/:boardId/github-repo` creates a repository on GitHub with the server's login and sets it as the board's
 `githubRepo`. It is created under `owner` (a user or organization; the signed-in user when omitted), private unless
@@ -381,7 +494,11 @@ request down (e.g. the name is taken, or the token can't create repositories the
 `502 github_error` when GitHub can't be reached. The token needs the `repo` scope (fine-grained tokens:
 Administration write), and `read:org` plus access to the organization to create one in an organization.
 
-`agentEnabled` can only be switched on once `githubRepo` is set (`400` otherwise). It is read by
+A board has either a GitHub repository or a local one: `localRepoPath` is the path of a git repository on the host
+(absolute, or starting with `~/`), and setting it clears `githubRepo`, as setting `githubRepo` clears it. Setting both
+in one request is a `400`.
+
+`agentEnabled` can only be switched on once `githubRepo` or `localRepoPath` is set (`400` otherwise). It is read by
 `scripts/agent-supervisor.sh`, which runs on the host and keeps one agent loop per enabled board; see `docs/agents.md`.
 The loop runs Claude Code with `agentModel` and `agentEffort` and claims tickets as
 `<agentName>/<agentModel>/<agentEffort>`, e.g. `claude/opus/medium` with nothing set. A ticket's own `agentModel`
@@ -495,7 +612,7 @@ and end the run.
 | GET    | `/tickets/:ticketId/checklist`         |                                                                                                                                                                                                                                                                                                              | `ChecklistItem[]`: the description's task list items (`- [ ]` / `- [x]`), outside code blocks                                                                                                                                                                                                                        |
 | POST   | `/tickets/:ticketId/checklist/:index`  | `{ checked?: boolean, ifVersion? }` (`checked` defaults to `true`)                                                                                                                                                                                                                                           | `Ticket` with the item at `index` (0-based) checked off or unchecked and the rest of the description untouched; `404` if there is no such item                                                                                                                                                                       |
 | GET    | `/tickets/:ticketId/activity`          | `?afterId=id&type=comment` (`type` repeatable)                                                                                                                                                                                                                                                               | `Activity[]` (oldest first)                                                                                                                                                                                                                                                                                          |
-| POST   | `/tickets/:ticketId/comments`          | `{ body, pullRequest?, notify? }` (markdown); `pullRequest: true` also posts it on the ticket's pull request (`data.pullRequestComment` links it); `notify: true` also sends the board's notification                                                                                                        | `Activity`                                                                                                                                                                                                                                                                                                           |
+| POST   | `/tickets/:ticketId/comments`          | `{ body, pullRequest?, notify? }` (markdown); `pullRequest: true` also posts it on the ticket's pull request, on GitHub or a local one (`data.pullRequestComment` links it); `notify: true` also sends the board's notification                                                                              | `Activity`                                                                                                                                                                                                                                                                                                           |
 | GET    | `/tickets/:ticketId/children`          |                                                                                                                                                                                                                                                                                                              | `Ticket[]`: its sub-tickets, in board order                                                                                                                                                                                                                                                                          |
 | POST   | `/tickets/:ticketId/children`          | same as `POST /boards/:boardId/tickets`, without `parent`                                                                                                                                                                                                                                                    | `Ticket`: a sub-ticket of this one, on its board (`201`)                                                                                                                                                                                                                                                             |
 

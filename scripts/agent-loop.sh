@@ -125,7 +125,9 @@
 # while such a run works: a conflict loop also hands the ticket it last ran the human feedback that came in meanwhile,
 # and keeps doing so for as long as more comes in during its runs, rather than leaving it for the other loops.
 #
-# Run it from the repository the tickets are about, with the ultrakanban skill installed and gh authenticated:
+# Run it from the repository the tickets are about, with the ultrakanban skill installed and gh authenticated (no gh
+# for a board with a local repository, localRepoPath: it then reads nothing from GitHub, and its runs push their
+# branches to origin and open local pull requests on the board):
 #
 #   KANBAN=http://localhost:4317 BOARD=<board id> scripts/agent-loop.sh
 #
@@ -200,8 +202,8 @@
 #                       run, so it can be started again with the new version (agent-board.sh sets it to the installed
 #                       scripts and skill)
 #
-# Requires curl, jq, gh, timeout (coreutils), flock and uuidgen (util-linux) and claude. Logs go to stdout. Stop it with
-# Ctrl-C or SIGTERM.
+# Requires curl, jq, gh (except for a board with a local repository), timeout (coreutils), flock and uuidgen
+# (util-linux) and claude. Logs go to stdout. Stop it with Ctrl-C or SIGTERM.
 
 set -uo pipefail
 

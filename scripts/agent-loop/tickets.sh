@@ -125,10 +125,13 @@ read_pr_feedback() {
 # that feedback could wait hours for one of them to be free.
 handle_feedback() {
   local board review cancelled idle tickets file id number column holder version ticket_model ticket_effort pr_url repo pr_number \
-    queued approval conflicts pr branch listed open_prs list after ci issue reviews inline activity state triage items \
-    ci_note next fix_runs fix
+    queued approval conflicts pr pr_state branch listed open_prs list after ci issue reviews inline comments activity \
+    state triage items ci_note next fix_runs fix local_repo \
+    local_pr='^(https?://[^/]+)?/b/([[:alnum:]_-]+)/pr/([0-9]+)([/?#].*)?$'
   claim_lock -s
   board=$(board) || { claim_unlock; log "can't read board $BOARD"; return 1; }
+  # A board with a local repository has nothing on GitHub to read: its pull requests are local ones, on the board.
+  local_repo=$(jq -r '.board.localRepoPath // ""' <<<"$board")
   review=$(jq -r '.board.reviewColumnId // ""' <<<"$board")
   cancelled=$(jq -r --arg name "$CANCELLED_COLUMN" \
     '[.columns[] | select((.name | ascii_downcase) == ($name | ascii_downcase)) | .id][0] // ""' <<<"$board")
@@ -179,8 +182,19 @@ handle_feedback() {
       requeue "$id" "$number" "$holder" "$queued"
       continue
     fi
-    pr=null branch= ci=null issue='[]' reviews='[]' inline='[]'
-    if [[ $pr_url != - ]]; then
+    pr=null pr_state= branch= ci=null issue='[]' reviews='[]' inline='[]' comments='[]'
+    if [[ $pr_url =~ $local_pr ]]; then
+      # A local pull request, on the board rather than on GitHub (a board with a local repository): read from the
+      # board, its comments (inline ones too) count as feedback as GitHub's do. It has no checks.
+      pr=$(get "/boards/${BASH_REMATCH[2]}/pull-requests/${BASH_REMATCH[3]}") || { log "can't read $pr_url"; continue; }
+      pr_state=$(jq -r '.state | ascii_upcase' <<<"$pr")
+      if [[ $pr_state == OPEN ]]; then
+        branch=$(jq -r .head <<<"$pr")
+        comments=$(jq -c .comments <<<"$pr")
+        pr=$(jq -c --arg url "$KANBAN/b/${BASH_REMATCH[2]}/pr/${BASH_REMATCH[3]}" \
+          '{state: "OPEN", headRefName: .head, baseRefName: .base, url: $url}' <<<"$pr")
+      fi
+    elif [[ $pr_url != - && -z $local_repo ]]; then
       if [[ $repo != - && $listed != *$'\n'"$repo"$'\n'* ]]; then
         listed+="$repo"$'\n'
         list=$(gh pr list --repo "$repo" --state open --limit 1000 --json "number,$PR_FIELDS" </dev/null |
@@ -191,32 +205,28 @@ handle_feedback() {
       pr=$(jq -c --arg repo "$repo" --arg number "$pr_number" '.[$repo][$number] // empty' <<<"$open_prs")
       [[ -n $pr ]] || pr=$(gh pr view "$pr_url" --json "$PR_FIELDS" </dev/null) ||
         { log "can't read $pr_url"; continue; }
-      case $(jq -r .state <<<"$pr") in
-        OPEN)
-          branch=$(jq -r .headRefName <<<"$pr")
-          if ! read_pr_feedback "$id" "$pr_url" "$repo" "$pr_number" "$pr"; then continue; fi
-          ;;
-        CLOSED)
-          if [[ $column == "$review" ]]; then
-            cancel "$id" "$number" "$pr_url" "$cancelled" "$holder" && { unlock_ticket; return 0; }
-            continue
-          fi
-          pr=null
-          ;;
-        *) pr=null ;;
-      esac
+      pr_state=$(jq -r .state <<<"$pr")
+      if [[ $pr_state == OPEN ]]; then
+        branch=$(jq -r .headRefName <<<"$pr")
+        if ! read_pr_feedback "$id" "$pr_url" "$repo" "$pr_number" "$pr"; then continue; fi
+      fi
     fi
+    if [[ $pr_state == CLOSED && $column == "$review" ]]; then
+      cancel "$id" "$number" "$pr_url" "$cancelled" "$holder" && { unlock_ticket; return 0; }
+      continue
+    fi
+    [[ $pr_state == OPEN ]] || pr=null
 
     state=$(read_state "$id")
     # Only the activity newer than what the state has already seen (the lower of its snapshot and its stopped run's).
     after=$(jq -r '[.activity // 0, (.stopped | objects | .activity // 0)] | min' <<<"$state")
     activity=$(get "/tickets/$id/activity?afterId=$after") || { log "can't read the activity of $id"; continue; }
-    triage=$(printf '%s\n' "$activity" "$pr" "$ci" "$issue" "$reviews" "$inline" "$state" |
+    triage=$(printf '%s\n' "$activity" "$pr" "$ci" "$issue" "$reviews" "$inline" "$comments" "$state" |
       jq -cs --arg agent "$AGENT" --arg loop "$LOOP_ACTOR" --arg marker "$MARKER" --arg working "$IN_PROGRESS_COLUMN" \
         --argjson now "$(date +%s)" --argjson retry "$RETRY_SECONDS" --argjson max "$MAX_ATTEMPTS" \
         --argjson maxci "$MAX_CI_RUNS" --argjson maxconflict "$MAX_CONFLICT_RUNS" "$TRIAGE") ||
       { log "can't triage $id"; continue; }
-    activity= pr= ci= issue= reviews= inline=
+    activity= pr= ci= issue= reviews= inline= comments=
 
     if [[ $(jq -r '.infraNote != null' <<<"$triage") == true ]]; then
       ci_note=$(jq -r '.infraNote | "CI on \(.sha[:7]) didn'"'"'t run properly, so no agent run was started for it: "

@@ -346,7 +346,8 @@ and unassigns it, so it is never picked up again. When none of its tickets needs
 and when there is nothing to do at all it waits `IDLE_SECONDS` (60 under the supervisor), or until the board wakes it
 up. The board does that as soon as someone gives the agent feedback on one of its tickets: a comment, an approved
 plan, or a move back into In progress, by anyone but the agent itself. So the agent answers a comment within seconds
-rather than after the idle wait; pull request feedback and CI, which the board doesn't see happen, still wait for it.
+rather than after the idle wait; GitHub pull request feedback and CI, which the board doesn't see happen, still wait for
+it (a [local pull request](#boards-with-a-local-repository)'s comments don't: they are on the board).
 The review column's "fix conflicts" button and the Stop button (below) wake it up too.
 
 You can drag the agent's tickets like any other. A ticket you move back to Todo (`TODO_COLUMN`), or to a column
@@ -505,6 +506,55 @@ checkout's ignored files pass `MAX_BUILD_GB` (default 20): then the loop removes
 board's clone and worktree has its own, so a Rust board with several parallel runs could otherwise fill the disk.
 `MAX_BUILD_GB=0` keeps them. To clear them sooner, use **Clear build output** in the board's Disk usage dialog (its
 menu): each of the board's loops then removes its checkout's ignored files between runs, at once when idle.
+
+### Boards with a local repository
+
+A board can work on a git repository on the machine instead of one on GitHub: in its settings, turn on **Local
+repository** and give the repository's path (absolute, or starting with `~/`; `localRepoPath` in the API), then switch
+on **Run the agent on this board**. The supervisor starts its loop as for a GitHub board, and the board's clone is made
+with `git clone <path>` (`~/` is the agents' home directory) rather than `gh repo clone`, worktrees and all. The local
+repository is the clone's `origin`: the loop fetches from it before every run, and the agents push their branches to it,
+so they show up there, and you review and merge them on the board. Changing the path makes a new clone. The default
+branch the runs start from is the one the repository had checked out when the clone was made. With Docker runs on, the
+repository is mounted in each run's container too.
+
+Nothing on such a board goes to GitHub: the loop reads no GitHub pull requests, reviews or CI checks, and each run's
+prompt tells the agent not to use `gh` and how to work local pull requests instead (the skill has them too, under
+**Local pull requests**). The whole flow:
+
+1. **Opening.** The agent works the ticket on a branch of its own, pushes it to the local repository (`origin`) and
+   opens a local pull request for it on the board (`POST /api/tickets/:id/local-pull-request`, see
+   [Local pull requests](API.md#local-pull-requests)), which links it to the ticket. Then it submits the ticket for
+   review, as on a GitHub board.
+2. **Reviewing.** The pull request has a page on the board (`/b/<board>/pr/<number>`, linked from the ticket), laid out
+   like GitHub's: **Conversation** and **Files changed**. Comment on the whole pull request there, or on a line of its
+   diff. A comment from anyone but the agent wakes the loop at once, as a ticket comment does, and starts a run that is
+   handed the new comments (with their file and line for inline ones) along with any new ticket feedback. The run
+   starts on the pull request's branch, pushes its fixes to it, and replies on the pull request (inline replies on the
+   same line), ending each reply with the marker line; the loop also ignores comments by the agent's own name, so its
+   replies never start runs.
+3. **Merging.** **Merge** on the pull request's page merges the branch into the base in the local repository and moves
+   the ticket to the done column. If they conflict, merging fails and changes nothing: say so in a comment, and the
+   agent merges the base into its branch and resolves the conflicts. Local pull requests have no CI checks, and the
+   loop doesn't look for conflicts by itself.
+4. **Closing.** A local pull request closed without merging moves its ticket from the review column to `Cancelled`, as
+   a GitHub one does.
+
+A branch you have checked out in the repository can't be pushed to, so check out an agent's branch to try it in a
+worktree of its own (`git worktree add ../try <branch>`) or detached (`git checkout --detach <branch>`), or the agent
+can't push its fixes.
+
+The agents need git and the repository, nothing else: no GitHub login. In the agents container, the repository has to be
+in the container too: mount it in `docker-compose.yml`'s `agents` service at the path the board names.
+
+The board itself opens, shows and merges the pull requests with git in the repository, so it has to see it too. Run in
+Docker, it sees your home directory: its container mounts `ULTRAKANBAN_HOME` from `.env` at the same path, and `~/` in
+a board's path stands for it. `scripts/setup.sh` sets it to your home directory on Linux and macOS (rerun it, or set it
+yourself, then `docker compose up -d --build`); a repository outside it needs a mount of its own in the `app` service.
+Git in the container trusts the repository whoever owns it (`safe.directory`), so the board shows its pull requests
+even when your uid on the host isn't the container's. The container runs as uid 1000, though, so merging, which writes
+to the repository, needs it to be writable by uid 1000: on Linux, if `id -u` isn't 1000, give uid 1000 write access to
+it, or run the board [without Docker](running.md#without-docker).
 
 ### Other models
 

@@ -558,9 +558,9 @@ reconcile() {
       echo "can't read the agents switch from $KANBAN; going by its last answer (paused: $paused)"
       ;;
   esac
-  [[ $paused == true ]] || wanted=$(jq -r '.[] | select(.agentEnabled and .githubRepo != null)
-    | [.id, .githubRepo, .agentName // "claude", .agentModel // "opus", .agentEffort // "medium", .agentConcurrency // 1,
-       .agentConflictConcurrency // ""]
+  [[ $paused == true ]] || wanted=$(jq -r '.[] | select(.agentEnabled and (.githubRepo // .localRepoPath) != null)
+    | [.id, .githubRepo // .localRepoPath, .agentName // "claude", .agentModel // "opus", .agentEffort // "medium",
+       .agentConcurrency // 1, .agentConflictConcurrency // ""]
     | @tsv' <<<"$boards")
 
   while IFS=$'\t' read -r id repo agent model effort concurrency conflicts; do

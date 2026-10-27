@@ -240,8 +240,9 @@ export interface FailingCheck {
 }
 
 export interface PullRequest {
+  /** A GitHub pull request's URL, or a local pull request's link (`/b/<board>/pr/<number>`, see `LocalPullRequest`). */
   url: string
-  /** `owner/name` */
+  /** `owner/name`; for a local pull request `local/<the folder name of the board's local repository>`. */
   repo: string
   number: number
   state: PullRequestState
@@ -272,6 +273,140 @@ export function parsePullRequestUrl(url: string) {
     repo: `${owner}/${name}`,
     number: Number(number),
   }
+}
+
+const LOCAL_PULL_REQUEST_URL = /^(?:https?:\/\/[^/]+)?\/b\/([\w-]+)\/pr\/(\d+)(?:[/?#].*)?$/
+
+/**
+ * Parses the link of a local pull request (see `LocalPullRequest`), `/b/<board>/pr/<number>`, also with the board's
+ * host in front (`http://localhost:4317/b/...`) or a sub-page after it.
+ */
+export function parseLocalPullRequestUrl(url: string) {
+  const match = LOCAL_PULL_REQUEST_URL.exec(url.trim())
+  if (!match) return null
+  const [, boardId, number] = match
+  return { url: localPullRequestUrl(boardId, Number(number)), boardId, number: Number(number) }
+}
+
+export const localPullRequestUrl = (boardId: string, number: number) => `/b/${boardId}/pr/${number}`
+
+export const LOCAL_PULL_REQUEST_STATES = ['open', 'merged', 'closed'] as const
+export type LocalPullRequestState = (typeof LOCAL_PULL_REQUEST_STATES)[number]
+
+/**
+ * A pull request that lives on the board rather than on GitHub, for a board with a local repository
+ * (`BoardSummary.localRepoPath`): its head branch is merged into its base branch in that repository. The ticket it was
+ * opened for links it as its `pullRequest`, by `url`.
+ */
+export interface LocalPullRequest {
+  boardId: string
+  /** Numbered per board, from 1. */
+  number: number
+  /** `/b/<board>/pr/<number>`, the page that shows it, and its ticket's `pullRequest.url`. */
+  url: string
+  /** The ticket it was opened for; null once that ticket is deleted. */
+  ticketId: string | null
+  ticketNumber: number | null
+  title: string
+  /** Markdown. */
+  body: string
+  /** The branch whose commits it merges. */
+  head: string
+  /** The branch it merges them into. */
+  base: string
+  state: LocalPullRequestState
+  /** Who opened it (their `X-Actor`). */
+  author: string
+  /**
+   * The head and base commits once it is merged or closed, so its diff and commits stay readable after its branches
+   * move on or are deleted; null while open (its branches' commits count then) or when a branch was gone.
+   */
+  headSha: string | null
+  baseSha: string | null
+  /** The merge commit; null unless merged, or when its commits were in the base already. */
+  mergeSha: string | null
+  /** Who merged or closed it, and when. */
+  closedBy: string | null
+  closedAt: string | null
+  commentCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export const DIFF_SIDES = ['left', 'right'] as const
+/** The side of a diff a line is on, as on GitHub: `left` the base's version (old), `right` the head's (new). */
+export type DiffSide = (typeof DIFF_SIDES)[number]
+
+/** A comment on a local pull request: on the whole of it, or inline on one line of a file's diff. */
+export interface LocalPullRequestComment {
+  id: string
+  /** Markdown. */
+  body: string
+  author: string
+  /** The file an inline comment is on; null for a comment on the whole pull request. */
+  path: string | null
+  /** The line it is on, numbered as on its `side` (the old file's lines on the left, the new one's on the right). */
+  line: number | null
+  side: DiffSide | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface LocalPullRequestDetail extends LocalPullRequest {
+  /** Oldest first. */
+  comments: LocalPullRequestComment[]
+}
+
+/** A line of a diff hunk, with its number in the old file (unless added) and in the new one (unless deleted). */
+export interface DiffLine {
+  type: 'context' | 'add' | 'delete'
+  oldLine: number | null
+  newLine: number | null
+  /** The line without its leading `+`, `-` or space. */
+  text: string
+}
+
+export interface DiffHunk {
+  /** The `@@ -1,4 +1,5 @@ ...` line. */
+  header: string
+  oldStart: number
+  oldLines: number
+  newStart: number
+  newLines: number
+  lines: DiffLine[]
+}
+
+export interface DiffFile {
+  /** The file's path in the head; in the base for a deleted file. */
+  path: string
+  /** Its path in the base when it was renamed or copied; null otherwise. */
+  oldPath: string | null
+  status: 'added' | 'deleted' | 'modified' | 'renamed' | 'copied'
+  /** Binary files have no hunks. */
+  binary: boolean
+  additions: number
+  deletions: number
+  hunks: DiffHunk[]
+}
+
+/** What a local pull request changes: `git diff base...head`, file by file. */
+export interface LocalPullRequestDiff {
+  /** The commits compared: where head branched off base, and head. */
+  baseSha: string
+  headSha: string
+  files: DiffFile[]
+}
+
+/** A commit of a local pull request (`git log base..head`). */
+export interface LocalCommit {
+  sha: string
+  author: string
+  email: string
+  /** ISO 8601, the author date. */
+  date: string
+  /** The message's first line, and the rest of it. */
+  subject: string
+  body: string
 }
 
 export const MERGE_METHODS = ['merge', 'squash', 'rebase'] as const
@@ -379,6 +514,11 @@ export interface BoardSummary {
   doneColumnId: string | null
   /** GitHub repository (`owner/name`) the board's tickets are about. */
   githubRepo: string | null
+  /**
+   * Path of a git repository on the host (absolute, or starting with `~/`) the board works on instead of a GitHub
+   * one. A board has one or the other: setting either clears the other.
+   */
+  localRepoPath: string | null
   /** Whether the host's agent supervisor runs an agent loop for this board (see scripts/agent-supervisor.sh). */
   agentEnabled: boolean
   /** Name of the board's agent (its controller); `claude` when not set. Its workers are named by `agentWorkerName`. */
