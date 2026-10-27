@@ -22,7 +22,7 @@ With a review and done column configured (**Board menu → Board settings**; the
 columns named "Review" and "Done" get this automatically), agents finish work like this:
 
 ```sh
-# Attach screenshots of visible changes to the ticket
+# Attach pictures of the change to the ticket (and put them in the pull request's description)
 curl -X POST localhost:4317/api/tickets/$TICKET/attachments -H 'X-Actor: claude/claude-opus-5-5/high' -F file=@screenshot.png
 
 # Link the PR, post a summary, move to Review

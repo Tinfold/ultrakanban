@@ -66,9 +66,13 @@ for a model that has none (`gemini/gemini-2.5-pro/default`). The model is everyt
    `{ "agent": "claude/claude-opus-5-5/high", "estimate": "M", "plan": "<markdown>" }`. If the returned ticket's
    `approval` is `"pending"`, stop: the board holds tickets of that size until a person approves the plan (see
    [Plans and approval](#plans-and-approval)).
-4. **If the change is visible** (UI, styling, charts, CLI output), attach screenshots or a short screen recording to
-   the ticket so reviewers can see the result without running it:
+4. **Pictures**: every pull request has pictures in its description, so reviewers can see the result without running
+   it: screenshots or a short screen recording of a visible change (UI, styling, charts, CLI output), or for a change
+   with nothing to look at a picture of the evidence that it works (test or command output, an API response). Attach
+   them to the ticket as well:
    `curl -X POST $API/tickets/$TICKET/attachments -H 'X-Actor: claude/claude-opus-5-5/high' -F file=@screenshot.png`.
+   GitHub can't load the board's attachments, so the skill puts the pull request's pictures on a `pr-images` branch of
+   the repository and links them from there.
 5. Open a GitHub pull request for the work, then submit for review: `POST /api/tickets/:ticketId/review` with
    `{ "agent": "claude/claude-opus-5-5/high", "pullRequest": "https://github.com/owner/repo/pull/123", "comment": "What changed and how it was verified" }`.
    This links the pull request, keeps the ticket assigned to you and moves it to the review column in one step.

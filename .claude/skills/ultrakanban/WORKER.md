@@ -51,8 +51,36 @@ curl -s -X POST $KANBAN/api/tickets/$TICKET/checklist/0 -H 'Content-Type: applic
 ```
 
 Post a comment on a notable decision or when blocked: `POST /api/tickets/$TICKET/comments` with `{"body":"<markdown>"}`.
-Attach screenshots of visible changes: `POST /api/tickets/$TICKET/attachments -F file=@shot.png` (PNG, JPEG, GIF, WebP,
-MP4, WebM, up to 25 MB).
+Every pull request has pictures in its description: screenshots or a recording of a visible change, or for a change
+with nothing to look at a picture of the evidence that it works (test or command output, an API response). Attach them
+to the ticket (`POST /api/tickets/$TICKET/attachments -F file=@shot.png`: PNG, JPEG, GIF, WebP, MP4, WebM, up to
+25 MB). GitHub can't load the board's attachments: for the pull request put the files on origin's `pr-images` branch
+with this function and paste the markdown it prints into the body (recordings as GIF). On a board with a local
+repository, put `![](/api/attachments/<id>)` in the local pull request's body instead.
+
+```sh
+pr_images() {  # pr_images FILE...: puts the files on origin's pr-images branch, prints markdown for each
+  local repo parent commit f try entries=
+  repo=$(git config remote.origin.url | sed -E 's#\.git$##; s#^.*github\.com[:/]##')
+  for f in "$@"; do
+    entries+="100644 blob $(git hash-object -w "$f")	$(basename "$f" | tr -c 'A-Za-z0-9._\n-' -)"$'\n'
+  done
+  for try in 1 2 3; do  # again when another push got in first
+    parent=$(git ls-remote origin refs/heads/pr-images | cut -f1)
+    if [[ -n $parent ]]; then
+      git fetch -q origin pr-images && commit=$(printf "$entries" | git mktree | xargs git commit-tree -p "$parent" -m Pictures)
+    else
+      commit=$(printf "$entries" | git mktree | xargs git commit-tree -m Pictures)
+    fi || return
+    git push -q origin "${commit}:refs/heads/pr-images" || continue
+    for f in "$@"; do
+      echo "![](https://github.com/$repo/blob/$commit/$(basename "$f" | tr -c 'A-Za-z0-9._\n-' -)?raw=true)"
+    done
+    return
+  done
+  return 1
+}
+```
 
 ## Submit for review
 
