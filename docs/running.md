@@ -28,8 +28,12 @@ something acts on it: the agent services on Linux, or elsewhere the updater cont
 [Agents](agents.md#running-agents-unattended)). Changes to `deploy/nginx.conf` take effect after
 `docker compose up -d --build` too, since it is built into the nginx image.
 
-There is no authentication, so only publish it on a network you trust. To put it on the internet, terminate
-TLS in front of nginx (or add a `listen 443 ssl` server block with your certificates in `deploy/nginx.conf`).
+There is no authentication, so only publish it on a network you trust. Anyone who can reach it can do what the board
+can, and that includes pointing a board's local repository path at any git repository the server can see, then reading
+its diffs and merging its branches. In Docker that is any repository in the home directory it mounts
+(`ULTRAKANBAN_HOME`): the image trusts every repository whoever owns it (`safe.directory`), so that local repositories
+work. To put it on the internet, terminate TLS in front of nginx (or add a `listen 443 ssl` server block with your
+certificates in `deploy/nginx.conf`).
 
 ## Without Docker
 
