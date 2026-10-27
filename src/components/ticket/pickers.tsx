@@ -7,7 +7,7 @@ import {
   PlusIcon,
   UserRoundXIcon,
 } from 'lucide-react'
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useRef, useState } from 'react'
 import {
   AGENT_DEFAULTS,
   AGENT_EFFORTS,
@@ -113,10 +113,15 @@ export function EffortPicker({ value, onChange, children }: PickerProps<AgentEff
 
 const BOARD_MODEL = '__board'
 
+/** The last model in the menu `element` is in, just above the model name field. */
+const lastModel = (element: Element) =>
+  [...(element.closest('[role="menu"]')?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? [])].at(-1)
+
 /** The model the board's agent works a ticket with; `null` follows the board's setting. */
 export function ModelPicker({ value, onChange, children }: PickerProps<string | null>) {
   const { detail } = useBoardContext()
   const [typed, setTyped] = useState('')
+  const field = useRef<HTMLInputElement>(null)
   const isClaude = (detail.board.agentName ?? AGENT_DEFAULTS.name) === 'claude'
   const models = [...new Set([...(isClaude ? AGENT_MODELS : []), ...(value ? [value] : [])])]
   const submit = () => {
@@ -128,7 +133,17 @@ export function ModelPicker({ value, onChange, children }: PickerProps<string | 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-80">
+      <DropdownMenuContent
+        align="start"
+        className="w-80"
+        onKeyDown={(event) => {
+          // Menus keep Tab and the arrow keys on their items: Tab, or ArrowDown on the last model, goes to the name field.
+          if (event.key === 'Tab' || (event.key === 'ArrowDown' && event.target === lastModel(event.currentTarget))) {
+            event.preventDefault()
+            field.current?.focus()
+          }
+        }}
+      >
         <DropdownMenuRadioGroup
           value={value ?? BOARD_MODEL}
           onValueChange={(next) => onChange(next === BOARD_MODEL ? null : next)}
@@ -149,6 +164,7 @@ export function ModelPicker({ value, onChange, children }: PickerProps<string | 
         </DropdownMenuRadioGroup>
         <div className="border-t p-1.5">
           <Input
+            ref={field}
             value={typed}
             onChange={(event) => setTyped(event.target.value)}
             onKeyDown={(event) => {
@@ -157,6 +173,10 @@ export function ModelPicker({ value, onChange, children }: PickerProps<string | 
               if (event.key === 'Enter') {
                 event.preventDefault()
                 submit()
+              } else if (event.key === 'Tab' || event.key === 'ArrowUp') {
+                // Back to the models.
+                event.preventDefault()
+                lastModel(event.currentTarget)?.focus()
               }
             }}
             placeholder="Type a model name, then Enter"
