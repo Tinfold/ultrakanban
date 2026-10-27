@@ -11,6 +11,9 @@ services:
       # Checks pull requests on GitHub. Optional: the Setup page (/setup) takes a token too. Get one with: gh auth token
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_SYNC_INTERVAL: ${GITHUB_SYNC_INTERVAL:-60}
+      # Optional: TypeSafe AI, for routing tickets with Jev (docs/JEV.md). The Setup page takes a key too.
+      TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
+      TYPESAFE_API_BASE: ${TYPESAFE_API_BASE:-}
     volumes:
       # Database and attachments. See README for importing an existing board and for backups.
       - ultrakanban-data:/app/data

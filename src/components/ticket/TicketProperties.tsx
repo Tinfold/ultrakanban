@@ -2,6 +2,7 @@ import { CalendarIcon, ContainerIcon, CpuIcon, GaugeIcon, LayersIcon, TagIcon, U
 import type { ReactNode } from 'react'
 import { AGENT_DEFAULTS, type Ticket } from '@shared/domain'
 import { EpicChip } from '@/components/common/EpicChip'
+import { JevBadge } from '@/components/common/JevBadge'
 import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { ColorDot, TagChip } from '@/components/common/TagChip'
 import { UserAvatar } from '@/components/common/UserAvatar'
@@ -17,7 +18,9 @@ import {
 } from '@/lib/format'
 import { PRIORITY_LABELS } from '@/lib/priority'
 import { cn } from '@/lib/utils'
+import { useSetup } from '@/hooks/queries'
 import { useBoardContext } from '../board/board-context'
+import { JevSuggestionButton } from './JevSuggestionButton'
 import {
   AssigneePicker,
   ColumnPicker,
@@ -44,6 +47,7 @@ const triggerClass = 'h-auto min-h-7 w-full justify-start px-2 py-1 font-normal'
 
 export function TicketProperties({ ticket }: { ticket: Ticket }) {
   const { actions, detail, moveTicket, columnsById, tagsById, epicsById } = useBoardContext()
+  const hasTypesafeKey = !!useSetup().data?.typesafe.source
   const column = columnsById.get(ticket.columnId)
   const tags = ticket.tagIds.flatMap((tagId) => tagsById.get(tagId) ?? [])
   const epic = ticket.epicId ? epicsById.get(ticket.epicId) : undefined
@@ -136,6 +140,21 @@ export function TicketProperties({ ticket }: { ticket: Ticket }) {
               {ticket.agentModel ?? `Board default (${detail.board.agentModel ?? AGENT_DEFAULTS.model})`}
             </Button>
           </ModelPicker>
+        </Property>
+      )}
+
+      {detail.board.agentEnabled && detail.board.jevEnabled && hasTypesafeKey && (
+        <Property label="Jev">
+          <JevSuggestionButton
+            title={ticket.title}
+            description={ticket.description}
+            tagIds={ticket.tagIds}
+            epicId={ticket.epicId}
+            agentModel={ticket.agentModel}
+            agentEffort={ticket.agentEffort}
+            onApply={(agentModel, agentEffort) => actions.updateTicket(ticket.id, { agentModel, agentEffort })}
+          />
+          {ticket.jevPick && <JevBadge pick={ticket.jevPick} className="ml-2 inline-block" />}
         </Property>
       )}
 

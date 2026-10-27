@@ -25,6 +25,7 @@ import { newId, transaction } from '../db.ts'
 import { badRequest, gitHubFailure, HttpError } from '../errors.ts'
 import type { GitHubClient } from '../github.ts'
 import { actorOf, errorBody, readJson } from '../http.ts'
+import { routeClaim, routeRun } from '../jev-routing.ts'
 import { listActivity } from '../store/activity.ts'
 import { createAttachment, listAttachments } from '../store/attachments.ts'
 import {
@@ -72,6 +73,8 @@ const tooLargeMessage = `Attachments can be at most ${MAX_ATTACHMENT_BYTES / 102
 export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles, notifier }: AppServices) =>
   new Hono()
     .get('/:ticketId', (c) => c.json(getTicket(c.req.param('ticketId'))))
+    // A POST, though it reads: it may ask Jev, a paid request, and keep its pick.
+    .post('/:ticketId/route', async (c) => c.json({ routed: await routeRun(getTicket(c.req.param('ticketId'))) }))
     .patch('/:ticketId', async (c) => {
       const input = await readJson(c, updateTicketSchema)
       const ticket = transaction(() => updateTicket(c.req.param('ticketId'), input, actorOf(c)))
@@ -175,7 +178,9 @@ export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles, notifi
     })
     .post('/:ticketId/claim', async (c) => {
       const input = await readJson(c, claimTicketSchema)
-      return c.json(transaction(() => claimTicket(c.req.param('ticketId'), input)))
+      const ticket = transaction(() => claimTicket(c.req.param('ticketId'), input))
+      const routed = await routeClaim(ticket)
+      return c.json(routed ? { ...ticket, routed } : ticket)
     })
     .post('/:ticketId/release', async (c) => {
       const input = await readJson(c, releaseTicketSchema)

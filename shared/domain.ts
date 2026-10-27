@@ -18,6 +18,7 @@ export type AgentEffort = (typeof AGENT_EFFORTS)[number]
  * that an Anthropic-compatible endpoint serves the agent instead of Claude, e.g. qwen3-coder:30b (see docs/agents.md).
  */
 export const AGENT_MODELS = ['fable', 'opus', 'sonnet', 'haiku'] as const
+export type AgentModelAlias = (typeof AGENT_MODELS)[number]
 
 /** Whether a model is one of Claude's: an alias (`AGENT_MODELS`) or a full name such as claude-opus-5-5. */
 export const isClaudeModel = (model: string) =>
@@ -331,6 +332,21 @@ export interface Attachment {
   url: string
 }
 
+/** How a board routes with Jev (see `BoardSummary.jevMode`). */
+export const JEV_MODES = ['dry-run', 'on'] as const
+export type JevMode = (typeof JEV_MODES)[number]
+
+/**
+ * How a board combines Jev's pick with the history suggestion (see `BoardSummary.jevCombine`): `jev-only` never uses
+ * the history suggestion, `jev-first` uses it only when Jev has no pick above the threshold, and `higher` / `lower`
+ * take the more or the less capable model and effort of the two when both have a pick.
+ */
+export const JEV_COMBINES = ['jev-only', 'jev-first', 'higher', 'lower'] as const
+export type JevCombine = (typeof JEV_COMBINES)[number]
+
+/** Jev routing settings used when a board doesn't set its own. */
+export const JEV_DEFAULTS = { threshold: 0.7, mode: 'dry-run' as JevMode, combine: 'jev-first' as JevCombine }
+
 export interface BoardSummary {
   id: string
   name: string
@@ -409,6 +425,24 @@ export interface BoardSummary {
    * /boards/:id/agent-cleanup`); each loop does it before its next run, or at once when idle. Null if never asked.
    */
   agentCleanupRequestedAt: string | null
+  /**
+   * Whether the board routes tickets with Jev (see docs/JEV.md): picks the model and effort for tickets that don't
+   * name their own, from their text, which is sent to TypeSafe. Only offered when a TypeSafe API key is set.
+   */
+  jevEnabled: boolean
+  /** Models Jev may pick from; every model in `AGENT_MODELS` when not set. */
+  jevModels: AgentModelAlias[] | null
+  /** Smallest confidence at which Jev's pick is used; `JEV_DEFAULTS.threshold` when not set. */
+  jevThreshold: number | null
+  /** Whether Jev may only pick a cheaper setting than the board's default, never a dearer one. */
+  jevOnlyLower: boolean
+  /** How Jev's pick and the history suggestion combine; `JEV_DEFAULTS.combine` when not set. */
+  jevCombine: JevCombine | null
+  /**
+   * `dry-run` records Jev's pick without using it, `on` uses it. Set to `dry-run` when Jev is first switched on; null
+   * until then.
+   */
+  jevMode: JevMode | null
   /** Open tickets: all but those in the done column or the cancelled one (see `CANCELLED_COLUMN`). */
   ticketCount: number
   /**
@@ -500,6 +534,8 @@ export interface Ticket {
   estimate: TicketSize | null
   /** Whether its agent's plan waits for approval or has it (see `Approval`); null when it doesn't need any. */
   approval: Approval | null
+  /** The setting Jev picked for it when its agent claimed it and the board worked it at the pick; null otherwise. */
+  jevPick: RoutingPick | null
   /** When the ticket entered its current column. */
   movedAt: string
   /** Whether it has been in the board's done column for longer than the board's `archiveDoneDays`. */
@@ -591,6 +627,8 @@ export interface AgentSuggestion {
   suggestion: AgentSettingStats | null
   /** Every setting similar tickets were worked at, the suggestion first, then by success rate and cost. */
   options: AgentSettingStats[]
+  /** How the board's routing sources compare, so the suggestion can be weighed against Jev and the default. */
+  routing: RoutingComparison
 }
 
 /**
@@ -677,7 +715,127 @@ export interface TokenUsage extends TokenCounts {
   durationMs: number | null
   /** The run's tokens split by the models that used them, most first; empty when the agent didn't report that. */
   models: ModelUsage[]
+  /**
+   * Where the model and effort the run worked at came from (see `RunRouting`); null for runs that weren't on a ticket,
+   * or whose `<agent>/<model>/<effort>` matches no source's pick.
+   */
+  routing: RunRouting | null
   createdAt: string
+}
+
+/**
+ * Where the model and effort a ticket is worked at come from: the ticket's own (`agentModel`/`agentEffort`), Jev's pick
+ * (docs/JEV.md), the history suggestion (`GET /boards/:id/agent-suggestion`) or the board's default.
+ */
+export const ROUTING_SOURCES = ['ticket', 'jev', 'history', 'default'] as const
+export type RoutingSource = (typeof ROUTING_SOURCES)[number]
+
+/** A model and effort a routing source picked, with its confidence from 0 to 1 when it has one (Jev's). */
+export interface RoutingPick {
+  model: string
+  effort: AgentEffort
+  confidence: number | null
+}
+
+/**
+ * The model and effort a claimed ticket is worked at on a board that routes with Jev (`jevMode` `on`), and the source
+ * that won (docs/JEV.md, item 5): the ticket's own setting, else Jev's pick at or above the board's threshold, else the
+ * history suggestion when it is built on `HISTORY_MIN_TICKETS` similar tickets, else the board's default. Returned as
+ * `routed` by `claim`, `claim-next` and `POST /tickets/:id/route`; the ticket's own `agentModel`/`agentEffort` stay as
+ * they are.
+ */
+export interface RoutedSetting extends RoutingPick {
+  source: RoutingSource
+}
+
+/** How an agent run on a ticket was routed, recorded with its usage. */
+export interface RunRouting {
+  source: RoutingSource
+  /** The source's confidence in the setting, when it has one (Jev's). */
+  confidence: number | null
+  /** What Jev picked for the ticket when it was claimed, used or not (dry run); null when Jev wasn't asked or failed. */
+  jev: RoutingPick | null
+}
+
+/** The name Jev's own usage is recorded under, on the ticket it routed (see docs/JEV.md). */
+export const JEV_AGENT = 'jev'
+/** What Jev charges per million input tokens, in US dollars; its output is free. */
+export const JEV_INPUT_USD_PER_MILLION = 0.042
+
+/**
+ * How much each kind of token counts when runs that reported no cost are compared by their tokens: about what Claude
+ * charges for each relative to uncached input. Cache reads are cheap but make up most of a run's raw total.
+ */
+export const TOKEN_WEIGHTS = { inputTokens: 1, outputTokens: 5, cacheReadTokens: 0.1, cacheWriteTokens: 1.25 } as const
+
+/** A run's tokens weighted by kind (see `TOKEN_WEIGHTS`), in uncached-input tokens. */
+export const weightedTokens = (counts: TokenCounts) =>
+  counts.inputTokens * TOKEN_WEIGHTS.inputTokens +
+  counts.outputTokens * TOKEN_WEIGHTS.outputTokens +
+  counts.cacheReadTokens * TOKEN_WEIGHTS.cacheReadTokens +
+  counts.cacheWriteTokens * TOKEN_WEIGHTS.cacheWriteTokens
+
+/** The routing sources compared by cost per finished ticket (see `RoutingComparison`). */
+export type RoutedSource = Exclude<RoutingSource, 'ticket'>
+
+/**
+ * A routing comparison names the cheapest source only once every source compared has at least this many finished
+ * tickets: fewer say more about the tickets than about the source.
+ */
+export const ROUTING_MIN_FINISHED = 10
+/**
+ * A ticket worked at another setting than a source picked counts at the board's average for the pick: only once the
+ * board has decided at least this many tickets at it.
+ */
+export const ROUTING_MIN_SETTING_TICKETS = 3
+/** History routes a ticket only when its suggestion is built on at least this many similar tickets. */
+export const HISTORY_MIN_TICKETS = 3
+
+/** How the tickets would have gone had one routing source picked every one of their settings. */
+export interface RoutingSourceStats {
+  source: RoutedSource
+  /** Decided tickets (finished or given up on) counted. */
+  tickets: number
+  /**
+   * Tickets the source picked a setting for itself, counted or `unmeasured`; for the rest it fell back to the next
+   * source, as it would when routing (Jev below the board's threshold, or a history suggestion built on too few tickets).
+   */
+  picked: number
+  /**
+   * Of those, how many were worked at the setting it picked, so count as they went. The rest count at the board's
+   * average for the pick: its cost per ticket and its success rate.
+   */
+  worked: number
+  /** Tickets left out: the source picked a setting the board hasn't decided `ROUTING_MIN_SETTING_TICKETS` at yet. */
+  unmeasured: number
+  /** Finished tickets; those counted at the board's average count by its success rate, so this may be fractional. */
+  finished: number
+  /** `finished` out of `tickets`, from 0 to 1; null when no ticket counted. */
+  successRate: number | null
+  /** Cost of the counted tickets' runs in US dollars; null unless every one of them reported a cost. */
+  costUsd: number | null
+  /** Their tokens, weighted by kind (see `weightedTokens`). */
+  weightedTokens: number
+  /** Cost per finished ticket (cost divided by success rate), in the comparison's `unit`; null with none finished. */
+  costPerFinished: number | null
+}
+
+/**
+ * Cost per finished ticket of each routing source on tickets claimed since routing was recorded, so a board can see
+ * whether Jev routes better than the history suggestion and the default before trusting it (docs/JEV.md, item 8).
+ */
+export interface RoutingComparison {
+  /** `usd` when every compared source has a cost in US dollars, else `tokens` (weighted by kind). */
+  unit: 'usd' | 'tokens'
+  /** Every source that picked at least one ticket, and the default; cheapest per finished ticket first. */
+  sources: RoutingSourceStats[]
+  /**
+   * The source with the lowest cost per finished ticket, once at least two are compared and each has
+   * `ROUTING_MIN_FINISHED` finished tickets; null until then.
+   */
+  verdict: RoutedSource | null
+  /** What asking Jev cost: its calls and their cost in US dollars (left out of the sources' costs). */
+  jev: { calls: number; costUsd: number }
 }
 
 export const RUN_OUTCOMES = [
@@ -788,10 +946,14 @@ function addCounts(totals: UsageCounts, counts: TokenCounts & { costUsd: number 
   totals.runs += runs
 }
 
-/** Adds a run's usage to `totals` and returns them. */
-export function addUsage(totals: UsageTotals, run: TokenCounts & { costUsd: number | null; models: ModelUsage[] }) {
-  addCounts(totals, run, 1)
-  for (const model of run.models) addCounts((totals.models[model.model] ??= noCounts()), model, 1)
+/** Adds a run's usage to `totals` and returns them. A Jev request (`JEV_AGENT`) adds its tokens and cost, not a run. */
+export function addUsage(
+  totals: UsageTotals,
+  run: TokenCounts & { agent?: string; costUsd: number | null; models: ModelUsage[] },
+) {
+  const runs = run.agent === JEV_AGENT ? 0 : 1
+  addCounts(totals, run, runs)
+  for (const model of run.models) addCounts((totals.models[model.model] ??= noCounts()), model, runs)
   return totals
 }
 
@@ -1048,6 +1210,8 @@ export interface Overview {
   usage: OverviewUsage[]
   /** Tickets with runs within the range, most tokens first. */
   tickets: OverviewTicketUsage[]
+  /** How routing sources compare on every board, over all time: routing data is slow to build up. */
+  routing: RoutingComparison
   /** The latest activity entries across all boards, newest first. */
   recent: OverviewActivity[]
 }
@@ -1309,10 +1473,25 @@ export interface SetupStatus {
     login: string | null
     error: string | null
   }
+  /** Where the TypeSafe API key for Jev comes from; null without one, and Jev's features stay hidden. Never the key. */
+  typesafe: { source: 'env' | 'board' | null }
   agents: AgentHost
   /**
    * The server's time when it answered: the page judges the agents' check-in by it, since the server's clock can be off
    * from the browser's (Docker Desktop's VM's drifts, e.g. after the machine sleeps).
    */
   serverTime: string
+}
+
+/** Jev's answer to `POST /boards/:id/jev-suggestion`: its pick for a ticket and how likely each choice is. */
+export interface JevSuggestion {
+  model: string
+  effort: AgentEffort
+  /** The lower of the model's and the effort's confidence, from 0 to 1. */
+  confidence: number
+  probabilities: {
+    model: Record<string, number>
+    effort: Record<string, number>
+    fullySpecified: number
+  }
 }

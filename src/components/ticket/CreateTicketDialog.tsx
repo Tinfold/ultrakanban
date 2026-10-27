@@ -20,6 +20,7 @@ import { formatDueDate } from '@/lib/format'
 import { PRIORITY_LABELS } from '@/lib/priority'
 import { useBoardContext } from '../board/board-context'
 import { AgentSuggestionButton } from './AgentSuggestionButton'
+import { JevSuggestionButton } from './JevSuggestionButton'
 import { DescriptionEditor } from './DescriptionEditor'
 import {
   AssigneePicker,
@@ -236,6 +237,18 @@ function CreateTicketForm({ initialEpicId, onDone, onCreated }: CreateTicketForm
               }}
             />
           )}
+          <JevSuggestionButton
+            title={title}
+            description={description}
+            tagIds={tagIds}
+            epicId={epicId}
+            agentModel={agentModel}
+            agentEffort={agentEffort}
+            onApply={(model, effort) => {
+              setAgentModel(model)
+              setAgentEffort(effort)
+            }}
+          />
         </div>
       </div>
       <DialogFooter className="m-0 items-center rounded-b-xl px-5 py-3">

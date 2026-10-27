@@ -1,9 +1,11 @@
 import { ClipboardCheckIcon } from 'lucide-react'
 import { useState } from 'react'
 import type { Ticket } from '@shared/domain'
+import { JevBadge } from '@/components/common/JevBadge'
 import { Markdown } from '@/components/common/Markdown'
 import { Button } from '@/components/ui/button'
 import { useTicketActivity } from '@/hooks/queries'
+import { formatModel } from '@/lib/format'
 import { useBoardContext } from '../board/board-context'
 
 /** The plan a ticket's agent waits on approval for, with the button that approves it. Nothing otherwise. */
@@ -35,6 +37,16 @@ export function PlanApproval({ ticket }: { ticket: Ticket }) {
           Approve plan
         </Button>
       </div>
+      {ticket.jevPick && (
+        <p className="flex flex-wrap items-center gap-1.5 text-sm">
+          Will run at <span className="font-medium">{formatModel(ticket.jevPick.model)}</span> ·{' '}
+          <span className="font-medium">{ticket.jevPick.effort}</span>
+          <JevBadge pick={ticket.jevPick} />
+          <span className="text-xs text-muted-foreground">
+            Jev’s pick. Set the ticket’s agent model and effort to override it before approving.
+          </span>
+        </p>
+      )}
       {plan?.type === 'plan' && <Markdown className="text-sm">{plan.data.body}</Markdown>}
       <p className="text-xs text-muted-foreground">
         To change the plan, comment on the ticket: the agent answers and posts a new one. To drop it, move the ticket

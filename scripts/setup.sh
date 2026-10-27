@@ -7,11 +7,12 @@
 #   scripts/setup.sh --agents=container   the agents in the container, on Linux too
 #   scripts/setup.sh --no-docker  without containers: install, build and start it with Node.js 22.13+ in the foreground
 #
-# With docker it creates .env from .env.example, with your GitHub token from gh if gh is logged in. The rest of the setup
-# is on the board's Setup page (/setup), which it opens: the board's GitHub token, and the agents' GitHub and Claude
-# logins, wherever they run. It is safe to run again: it keeps an existing .env, and rebuilds the board. Where there are
-# no systemd user services (Windows, macOS) it also starts the updater container (with docker compose, not podman),
-# which updates the board from the app's update button; on Linux the agent services do that.
+# With docker it creates .env from .env.example, with your GitHub token from gh if gh is logged in. It asks nothing: the
+# rest is on the board's Setup page (/setup), which it opens: the board's GitHub token, the agents' GitHub and Claude
+# logins, wherever they run, and the optional TypeSafe key for Jev. It is safe to run again: it keeps an existing .env,
+# and rebuilds the board. Where there are no systemd user services (Windows, macOS) it also starts the updater container
+# (with docker compose, not podman), which updates the board from the app's update button; on Linux the agent services
+# do that.
 
 set -euo pipefail
 
@@ -27,7 +28,7 @@ for arg in "$@"; do
     --agents=container) agents=1 container=1 ;;
     --no-docker) docker=0 ;;
     -h | --help)
-      sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)

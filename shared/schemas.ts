@@ -1,9 +1,12 @@
 import { z } from 'zod'
 import {
   AGENT_EFFORTS,
+  AGENT_MODELS,
   AGENT_LOGIN_KINDS,
   AGENT_MAX_CONCURRENCY,
   COLORS,
+  JEV_COMBINES,
+  JEV_MODES,
   MERGE_METHODS,
   OVERVIEW_RANGES,
   type OverviewRange,
@@ -61,6 +64,12 @@ const notifyUrl = z
   .max(2000)
   .regex(/^https?:\/\/\S+$/, 'Must be an http(s) URL')
   .nullable()
+const jevModels = z
+  .array(z.enum(AGENT_MODELS))
+  .min(1, 'Pick at least one model')
+  .refine((models) => new Set(models).size === models.length, 'Models must be unique')
+  .nullable()
+const jevThreshold = z.number().min(0).max(1).nullable()
 /** Skips the merged-pull-request requirement of the board's done column. Meant for humans, not agents. */
 const force = z.boolean().optional()
 
@@ -86,6 +95,12 @@ export const createBoardSchema = z.object({
   archiveDoneDays: archiveDoneDays.optional(),
   approvalSize: ticketSize.nullable().optional(),
   notifyUrl: notifyUrl.optional(),
+  jevEnabled: z.boolean().optional(),
+  jevModels: jevModels.optional(),
+  jevThreshold: jevThreshold.optional(),
+  jevOnlyLower: z.boolean().optional(),
+  jevCombine: z.enum(JEV_COMBINES).nullable().optional(),
+  jevMode: z.enum(JEV_MODES).nullable().optional(),
 })
 
 export const updateBoardSchema = z.object({
@@ -109,6 +124,12 @@ export const updateBoardSchema = z.object({
   archiveDoneDays: archiveDoneDays.optional(),
   approvalSize: ticketSize.nullable().optional(),
   notifyUrl: notifyUrl.optional(),
+  jevEnabled: z.boolean().optional(),
+  jevModels: jevModels.optional(),
+  jevThreshold: jevThreshold.optional(),
+  jevOnlyLower: z.boolean().optional(),
+  jevCombine: z.enum(JEV_COMBINES).nullable().optional(),
+  jevMode: z.enum(JEV_MODES).nullable().optional(),
 })
 
 /** Creates a repository on GitHub and links it to the board. */
@@ -354,6 +375,9 @@ export const attachmentCleanupSchema = z.object({
   olderThanDays: z.int().min(1).max(3650).nullable().optional(),
 })
 
+/** A TypeSafe API key for the board, set on the Setup page. */
+export const setTypesafeKeySchema = z.object({ key: z.string().trim().min(1).max(500) })
+
 /** The agent supervisor checking in, and reporting on an update it is doing. */
 export const reportAppUpdateSchema = z.object({
   state: z.enum(['running', 'done', 'failed']).optional(),
@@ -506,6 +530,15 @@ export const agentSuggestionQuerySchema = z.object({
   steps: z.coerce.number().int().min(0).max(1000).optional(),
 })
 
+/** What Jev is asked to route on demand: a ticket as it is being written, or edited and not saved yet. */
+export const jevSuggestionSchema = z.object({
+  title: z.string().max(500).default(''),
+  description: z.string().max(100_000).default(''),
+  /** Its tags, by id; ones the board doesn't have are ignored. */
+  tagIds: z.array(z.string().max(100)).max(50).default([]),
+  epicId: z.string().max(100).nullable().default(null),
+})
+
 export const boardDetailQuerySchema = z.object({
   archived: z.stringbool().default(false),
 })
@@ -599,6 +632,7 @@ export type MergeRunInput = z.input<typeof mergeRunSchema>
 export type MergeTicketInput = z.input<typeof mergeTicketSchema>
 export type ListTicketsQuery = z.output<typeof listTicketsQuerySchema>
 export type AgentSuggestionQuery = z.output<typeof agentSuggestionQuerySchema>
+export type JevSuggestionInput = z.input<typeof jevSuggestionSchema>
 export type RecordUsage = z.output<typeof recordUsageSchema>
 export type RecordRun = z.output<typeof recordRunSchema>
 export type BoardExport = z.output<typeof boardExportSchema>

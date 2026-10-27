@@ -11,12 +11,14 @@ import {
   requestAgentLoginSchema,
   setAgentServicesSchema,
   setGitHubTokenSchema,
+  setTypesafeKeySchema,
   setAgentApiKeySchema,
   setUsageReserveSchema,
 } from '../../shared/schemas.ts'
 import type { AppServices } from '../app.ts'
 import { now, transaction } from '../db.ts'
 import { gitHubFailure } from '../errors.ts'
+import { typesafeKey, verifyTypesafeKey } from '../typesafe.ts'
 import { actorOf, readJson } from '../http.ts'
 import { getAgentServices, reportAgentServices, setAgentsPaused } from '../store/agent-services.ts'
 import { cancelAppUpdate, getAppUpdate, reportAppUpdate, requestAppUpdate } from '../store/app-update.ts'
@@ -31,6 +33,7 @@ import {
   requestAgentLogin,
   sendAgentLoginCode,
   setStoredGitHubToken,
+  setStoredTypesafeKey,
 } from '../store/setup.ts'
 
 /**
@@ -42,6 +45,7 @@ import {
 export const systemRoutes = ({ pullRequests: { github } }: AppServices) => {
   const setupStatus = async (): Promise<SetupStatus> => ({
     github: { auth: await github.auth(), ...(await github.account()) },
+    typesafe: { source: typesafeKey()?.source ?? null },
     agents: getAgentHost(),
     serverTime: now(),
   })
@@ -93,6 +97,18 @@ export const systemRoutes = ({ pullRequests: { github } }: AppServices) => {
       .delete('/github-token', async (c) => {
         transaction(() => setStoredGitHubToken(null))
         github.resetAuth()
+        return c.json(await setupStatus())
+      })
+
+      // Checked with TypeSafe first, and never sent back. The TYPESAFE_API_KEY variable wins over a saved key.
+      .put('/typesafe-key', async (c) => {
+        const { key } = await readJson(c, setTypesafeKeySchema)
+        await verifyTypesafeKey(key)
+        transaction(() => setStoredTypesafeKey(key))
+        return c.json(await setupStatus())
+      })
+      .delete('/typesafe-key', async (c) => {
+        transaction(() => setStoredTypesafeKey(null))
         return c.json(await setupStatus())
       })
 

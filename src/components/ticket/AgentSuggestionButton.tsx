@@ -1,11 +1,12 @@
 import { SparklesIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { AGENT_DEFAULTS, type AgentEffort, type AgentSettingStats } from '@shared/domain'
+import { AGENT_DEFAULTS, type AgentEffort, type AgentSettingStats, type RoutingComparison } from '@shared/domain'
 import { parseChecklist } from '@shared/checklist'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { api } from '@/lib/api'
 import { formatCost, formatModel, formatTokens } from '@/lib/format'
+import { routingCosts, routingVerdict } from '@/lib/routing'
 import { useBoardContext } from '../board/board-context'
 
 interface AgentSuggestionButtonProps {
@@ -35,6 +36,7 @@ export function AgentSuggestionButton({
   const { detail } = useBoardContext()
   const boardId = detail.board.id
   const [suggestion, setSuggestion] = useState<AgentSettingStats | null>(null)
+  const [routing, setRouting] = useState<RoutingComparison | null>(null)
   const steps = parseChecklist(description).length
   const tagKey = tagIds.join(',')
   // Nothing to compare with before it has a title or tags.
@@ -46,7 +48,11 @@ export function AgentSuggestionButton({
     const timer = setTimeout(() => {
       api
         .agentSuggestion(boardId, { title, tags: tagKey ? tagKey.split(',') : [], steps })
-        .then((result) => current && setSuggestion(result.suggestion))
+        .then((result) => {
+          if (!current) return
+          setSuggestion(result.suggestion)
+          setRouting(result.routing)
+        })
         .catch(() => current && setSuggestion(null))
     }, 400)
     return () => {
@@ -56,6 +62,7 @@ export function AgentSuggestionButton({
   }, [boardId, described, title, tagKey, steps])
 
   if (!described || !suggestion) return null
+  const costs = routing && routingCosts(routing)
   const model = agentModel ?? detail.board.agentModel ?? AGENT_DEFAULTS.model
   const effort = agentEffort ?? detail.board.agentEffort ?? AGENT_DEFAULTS.effort
   if (suggestion.model === model && suggestion.effort === effort) return null
@@ -86,6 +93,13 @@ export function AgentSuggestionButton({
             </li>
           ))}
         </ul>
+        {routing && costs && (
+          <p className="max-w-80">
+            {routing.verdict
+              ? routingVerdict(routing)
+              : `Per finished ticket on this board: ${costs}. ${routingVerdict(routing)}`}
+          </p>
+        )}
       </TooltipContent>
     </Tooltip>
   )

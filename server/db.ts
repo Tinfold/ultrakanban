@@ -5,7 +5,7 @@ import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlit
 import { notFound } from './errors.ts'
 import { publish, wake } from './events.ts'
 
-const MIGRATIONS = [
+export const MIGRATIONS = [
   `
   CREATE TABLE boards (
     id TEXT PRIMARY KEY,
@@ -422,6 +422,56 @@ const MIGRATIONS = [
   -- Whether a run went on the agents' API key, so its cost was billed rather than estimated.
   ALTER TABLE token_usage ADD COLUMN api_key INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE run_records ADD COLUMN api_key INTEGER NOT NULL DEFAULT 0;
+  `,
+  `
+  -- The TypeSafe API key set on the Setup page (see docs/JEV.md); the API never sends it back.
+  ALTER TABLE setup ADD COLUMN typesafe_api_key TEXT;
+  `,
+  `
+  -- Routing tickets with Jev (see BoardSummary.jevEnabled and docs/JEV.md): whether it is on, the models it may pick (a
+  -- JSON array, every alias when NULL), the confidence its pick needs (JEV_DEFAULTS when NULL), whether it may only pick
+  -- a cheaper setting than the board's, and its mode ('dry-run' or 'on'; NULL until first switched on).
+  ALTER TABLE boards ADD COLUMN jev_enabled INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE boards ADD COLUMN jev_models TEXT;
+  ALTER TABLE boards ADD COLUMN jev_threshold REAL;
+  ALTER TABLE boards ADD COLUMN jev_only_lower INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE boards ADD COLUMN jev_mode TEXT;
+  `,
+  `
+  -- How a ticket was routed when it was last claimed (see RoutingSource and docs/JEV.md, item 8): the setting it is
+  -- worked at and where that came from, and what each source picked, so sources can be compared by cost per finished
+  -- ticket. Jev's pick is only there on boards that route with Jev, the history pick when the suggestion was built on
+  -- enough similar tickets.
+  CREATE TABLE ticket_routes (
+    ticket_id TEXT PRIMARY KEY REFERENCES tickets(id) ON DELETE CASCADE,
+    source TEXT NOT NULL,
+    model TEXT NOT NULL,
+    effort TEXT NOT NULL,
+    confidence REAL,
+    default_model TEXT NOT NULL,
+    default_effort TEXT NOT NULL,
+    history_model TEXT,
+    history_effort TEXT,
+    jev_model TEXT,
+    jev_effort TEXT,
+    jev_confidence REAL,
+    created_at TEXT NOT NULL
+  );
+  -- Each run's routing, from its ticket's route when its usage is recorded (see RunRouting).
+  ALTER TABLE token_usage ADD COLUMN routing_source TEXT;
+  ALTER TABLE token_usage ADD COLUMN routing_confidence REAL;
+  ALTER TABLE token_usage ADD COLUMN jev_model TEXT;
+  ALTER TABLE token_usage ADD COLUMN jev_effort TEXT;
+  ALTER TABLE token_usage ADD COLUMN jev_confidence REAL;
+  `,
+  `
+  -- What Jev was told about the ticket when it picked (a hash of its content, see contentKey in server/jev-routing.ts),
+  -- so a ticket whose content hasn't changed since isn't sent to Jev again.
+  ALTER TABLE ticket_routes ADD COLUMN content_key TEXT;
+  `,
+  `
+  -- How Jev's pick and the history suggestion combine (see BoardSummary.jevCombine; JEV_DEFAULTS when NULL).
+  ALTER TABLE boards ADD COLUMN jev_combine TEXT;
   `,
 ]
 
