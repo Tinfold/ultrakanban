@@ -256,12 +256,14 @@ export function createMergeQueue(
   async function planEntries(boardId: string, focus?: string) {
     const reviewColumnId = getBoard(boardId).reviewColumnId
     if (!reviewColumnId) throw badRequest('This board has no review column; choose one in the board settings')
-    if (!(await github.auth())) {
-      throw badRequest('Merging needs a GitHub token: add one on the Setup page (/setup), or set GITHUB_TOKEN')
-    }
     const tickets = listTickets(boardId, { column: reviewColumnId }).filter(
       (ticket) => ticket.pullRequest && !['merged', 'closed'].includes(ticket.pullRequest.state),
     )
+    // Local pull requests are only listed, to merge on their page, so a board with only those needs no token.
+    const onGitHub = tickets.some((ticket) => !parseLocalPullRequestUrl(ticket.pullRequest!.url))
+    if (onGitHub && !(await github.auth())) {
+      throw badRequest('Merging needs a GitHub token: add one on the Setup page (/setup), or set GITHUB_TOKEN')
+    }
     const entries = await Promise.all(tickets.map(describe))
 
     const pairs = entries

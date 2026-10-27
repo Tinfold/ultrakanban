@@ -349,6 +349,29 @@ describe('merging all reviewed pull requests', () => {
     )
   })
 
+  test('plans a board whose pull requests are all local without a GitHub token', async () => {
+    await call('PATCH', `/boards/${boardId}`, { localRepoPath: '/repos/app' })
+    const local = await addTicket({ title: 'Local', column: 'Review' })
+    const input = { head: 'feature', base: 'main', title: 'Local', body: '' }
+    transaction(() => openLocalPullRequest(local.id, input, 'claude/opus/high'))
+    github.auth = null
+    try {
+      const { status, body: plan } = await call<MergePlan>('GET', `/boards/${boardId}/merge-plan`)
+      assert.equal(status, 200)
+      assert.deepEqual(
+        plan.items.map((item) => [item.ticketId, item.skip]),
+        [[local.id, 'A local pull request: merge it on its page']],
+      )
+
+      await inReview(1)
+      const withGitHub = await call<ApiErrorBody>('GET', `/boards/${boardId}/merge-plan`)
+      assert.equal(withGitHub.status, 400)
+      assert.match(withGitHub.body.error.message, /needs a GitHub token/)
+    } finally {
+      github.auth = 'env'
+    }
+  })
+
   describe('deleting branches after merge', () => {
     /** Adds a ticket in review whose branch exists on the fake GitHub at the pull request's head. */
     async function withBranch(number: number, pullRequest: Parameters<typeof inReview>[1] = {}) {
