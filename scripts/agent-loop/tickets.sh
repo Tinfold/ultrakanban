@@ -91,6 +91,9 @@ adopt() {
 # What the loop reads of a pull request, from gh pr list or gh pr view.
 PR_FIELDS=state,updatedAt,mergeable,mergeStateStatus,headRefOid,headRefName,baseRefOid,baseRefName
 
+# The link of a local pull request (on the board, for a board with a local repository): its board and number.
+LOCAL_PR='^(https?://[^/]+)?/b/([[:alnum:]_-]+)/pr/([0-9]+)([/?#].*)?$'
+
 # Reads an open pull request's comments, reviews, inline comments and checks into issue, reviews, inline and ci. They
 # are kept in STATE_DIR/github/<ticket>.json and used again while the pull request (gh pr list or view) is unchanged:
 # same updatedAt and head commit, no checks still running, and read less than PR_RECHECK_SECONDS ago. Each of the
@@ -128,8 +131,7 @@ read_pr_feedback() {
 handle_feedback() {
   local board review cancelled idle tickets file id number column holder version ticket_model ticket_effort pr_url repo pr_number \
     queued approval conflicts pr pr_state branch listed open_prs list after ci issue reviews inline comments activity \
-    state triage items ci_note next fix_runs fix local_repo \
-    local_pr='^(https?://[^/]+)?/b/([[:alnum:]_-]+)/pr/([0-9]+)([/?#].*)?$'
+    state triage items ci_note next fix_runs fix local_repo
   claim_lock -s
   # Read again under the claim lock: the round's board may be from before another loop claimed a ticket, which would
   # look as if the agent didn't hold it (see claim_lock), and the rest of the round reads this fresher copy.
@@ -188,7 +190,7 @@ handle_feedback() {
       continue
     fi
     pr=null pr_state= branch= ci=null issue='[]' reviews='[]' inline='[]' comments='[]'
-    if [[ $pr_url =~ $local_pr ]]; then
+    if [[ $pr_url =~ $LOCAL_PR ]]; then
       # A local pull request, on the board rather than on GitHub (a board with a local repository): read from the
       # board, its comments (inline ones too) count as feedback as GitHub's do. It has no checks.
       pr=$(get "/boards/${BASH_REMATCH[2]}/pull-requests/${BASH_REMATCH[3]}") || { log "can't read $pr_url"; continue; }
@@ -392,11 +394,23 @@ their first run yet (CLAIM_LIMIT $CLAIM_LIMIT)"
   snapshot=$(get "/tickets/$id/activity" | jq -c '{activity: (map(.id) | max // 0)}') || snapshot='{}'
   # A re-claimed ticket may already have a pull request. Its comments and reviews so far may ask for changes no run was
   # handed (they came while no one held the ticket, or another agent did), so this run is told to read them (pr_note),
-  # and they go into the snapshot too rather than coming back as new feedback.
-  local pr_repo pr_number issue reviews inline pr_note=
+  # and they go into the snapshot too rather than coming back as new feedback. A local one is read from the board, and
+  # its comments are counted as TRIAGE counts them.
+  local pr_url pr_repo pr_number pr_board issue reviews inline comments pr_note=
+  pr_url=$(jq -r '.pullRequest.url // empty' <<<"$ticket")
   pr_repo=$(jq -r '.pullRequest.repo // empty' <<<"$ticket")
   pr_number=$(jq -r '.pullRequest.number // empty' <<<"$ticket")
-  if [[ -n $pr_repo && -n $pr_number ]]; then
+  if [[ $pr_url =~ $LOCAL_PR ]]; then
+    pr_board=${BASH_REMATCH[2]} pr_number=${BASH_REMATCH[3]}
+    pr_note="
+The ticket already has a local pull request, $pr_url: read its comments, inline ones included, first (GET \
+$KANBAN/api/boards/$pr_board/pull-requests/$pr_number, see the skill), and address what they ask for that isn't done \
+yet."
+    if comments=$(get "/boards/$pr_board/pull-requests/$pr_number" | jq -e '.comments | length'); then
+      snapshot=$(jq -c --arg pr "$KANBAN/b/$pr_board/pr/$pr_number" --argjson seen "$comments" \
+        '. + {local: {pr: $pr, seen: $seen}}' <<<"$snapshot") || true
+    fi
+  elif [[ -n $pr_repo && -n $pr_number ]]; then
     pr_note="
 The ticket already has a pull request, $(jq -r .pullRequest.url <<<"$ticket"): read its comments, reviews and inline \
 review comments first (see the skill), and address what they ask for that isn't done yet."
