@@ -257,7 +257,8 @@ started in the background, so nothing it started keeps holding memory.
 
 **Max turns.** The board's **Max turns per run** setting (`agentMaxTurns`) caps how many turns one `claude -p` run may
 take; the loop passes it as `--max-turns`. Without it a run is limited only by `TICKET_TIMEOUT`. A run that hits the cap
-ends like any other unfinished run and is retried up to `MAX_ATTEMPTS` times.
+isn't retried, as a new one would most likely hit it too: the loop says so on the ticket and keeps the run's session,
+and the next run, once there is new feedback such as a comment, carries on where it left off.
 
 **Parallel runs.** By default a board's agent runs one `claude -p` at a time. The board's **Parallel runs** setting
 (`agentConcurrency`, up to 8) lets it work that many tickets at once: the unit then runs that many loops, the first in

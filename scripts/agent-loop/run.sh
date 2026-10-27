@@ -441,8 +441,8 @@ run_claude() {
 Put scratch files (clones, builds, test output, screenshots) in \$TMPDIR ($scratch), not in /tmp: /tmp may be held \
 in memory and is never cleaned up. \$TMPDIR is on disk, and the loop empties it once the ticket's run finishes."
   fi
-  # The board's agentMaxTurns, when set, caps how many turns the run may take.
-  max_turns=$(get "/boards/$BOARD" | jq -r '.board.agentMaxTurns // empty' 2>/dev/null)
+  # The board's agentMaxTurns, when set, caps how many turns the run may take (run_on_ticket's max_turns).
+  max_turns=$(board | jq -r '.board.agentMaxTurns // empty' 2>/dev/null)
   [[ $max_turns =~ ^[0-9]+$ ]] || max_turns=
   run=$(new_session_id)
   started=$(date +%s%3N)
@@ -515,6 +515,8 @@ new_session_id() { { uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid; } 
 #   (without `done`), with why it stopped, and the next run picks up where it left off.
 # - A run that failed or timed out drops it, so the retry starts a new session, as resuming it would likely fail the
 #   same way. So does a run whose ticket was taken away.
+# - A run that reached the board's turn limit (agentMaxTurns) keeps it, with why it stopped, but isn't retried: a new
+#   session would most likely reach the limit too. The next run, on new feedback, carries on where it left off.
 # - A run only to fix merge conflicts or failing CI (the eighth argument is 1) starts a session of its own rather than
 #   resume the ticket's finished one: that is often a long conversation with the ticket's model, which the fix model
 #   would read all over again with no prompt cache, likely for more than a new session's prompt costs. The ticket's
@@ -533,7 +535,7 @@ new_session_id() { { uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid; } 
 # run resumes the session with that feedback, and drops `stopped`.
 run_on_ticket() {
   local id=$1 task=$2 snapshot=$3 fingerprint=$4 ci_runs=${5:-0} branch=${6:-} steps=${7:-1} fix=${8:-0} code limit \
-    why state session start prompt notes= work= until
+    why state session start prompt notes= work= until max_turns=
   # Whether this run goes on the API key, Claude usage having run out (see use_api_key), which turns into a pause if
   # the board no longer allows that.
   use_api_key
@@ -686,6 +688,18 @@ if the board's Claude usage shows it), then resumes this one where it left off."
     note "$id" "Out of Claude usage, so this run stopped. Claude said: \"$limit\". The loop starts no runs on any \
 ticket until $(date -d "@$paused_until" '+%-I:%M%P %Z on %b %-d') (or until the board's Claude usage shows it is back, if \
 that is sooner), then resumes this one where it left off."
+    return 0
+  fi
+  if [[ $claude_subtype == error_max_turns ]]; then
+    # Counted as failed as many times as are retried (MAX_ATTEMPTS), so it waits for feedback, but its session stays
+    # for that run to carry on (see above). A fix run's session stays a fix run's, with the ticket's own still aside.
+    why="it reached the board's limit of ${max_turns:-its} turns per run (Max turns per run in Board settings)"
+    log "ticket $id: $why; not retrying it until there is new feedback"
+    write_state "$id" "$(read_state "$id" | jq -c --arg fp "$fingerprint" --argjson now "$(date +%s)" \
+      --argjson ci "$ci_runs" --argjson max "$MAX_ATTEMPTS" --arg why "$why" \
+      '. + {failures: $max, failedAt: $now, failedFor: $fp, ciRuns: $ci} | .session.why = $why')"
+    note "$id" "Agent run stopped: $why. It isn't retried, as a new run would most likely reach the limit too. Comment \
+on the ticket to have the agent carry on where it left off (raise the limit first if the work needs more turns)."
     return 0
   fi
   if [[ $claude_subtype == error_max_budget_usd ]]; then
