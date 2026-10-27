@@ -165,6 +165,16 @@ describe('local pull requests', () => {
     assert.match((await open({ head: 'feature' }, elsewhere.id)).body.error.message, /isn't a git repository/)
   })
 
+  test('the base is the branch HEAD is on when left out, also with a tag named like it', async () => {
+    git(repo, 'tag', 'main')
+    pushBranch('feature', { 'a.txt': 'a\n' })
+    const { status, body } = await open({ head: 'feature' })
+    assert.deepEqual([status, body.base], [201, 'main'])
+    git(repo, 'checkout', '-q', '--detach')
+    pushBranch('other', { 'b.txt': 'b\n' })
+    assert.match((await open({ head: 'other' })).body.error.message, /HEAD isn't on a branch/)
+  })
+
   test('a ticket links only a local pull request opened for it', async () => {
     pushBranch('feature', { 'a.txt': 'a\n' })
     const { body } = await open({ head: 'feature' })

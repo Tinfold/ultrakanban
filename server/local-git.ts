@@ -78,9 +78,13 @@ export async function openRepository(localRepoPath: string | null) {
 
 /** The repository's default branch: the one its `HEAD` points at. */
 export async function defaultBranch(repo: string) {
-  const { code, stdout } = await git(repo, ['symbolic-ref', '--quiet', '--short', 'HEAD'], { codes: [0, 1] })
-  if (code !== 0) throw badRequest("The local repository's HEAD isn't on a branch; give the base branch")
-  return stdout.trim()
+  // The full ref: `--short` gives `heads/main` when a tag is called `main` too.
+  const { code, stdout } = await git(repo, ['symbolic-ref', '--quiet', 'HEAD'], { codes: [0, 1] })
+  const ref = stdout.trim()
+  if (code !== 0 || !ref.startsWith('refs/heads/')) {
+    throw badRequest("The local repository's HEAD isn't on a branch; give the base branch")
+  }
+  return ref.slice('refs/heads/'.length)
 }
 
 /** The commit a branch is at; null when there is no such branch. */
