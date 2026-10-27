@@ -844,7 +844,18 @@ interface Overview {
   routing: RoutingComparison // routing sources compared on every board, over all time (see Routing)
   // Every board's decided tickets by the model and effort that did most of their work (any agent), over all time,
   // most tickets first: the suggestion's figures with every ticket counting fully
-  settings: { model; effort; tickets; finished; successRate: number; costUsd: number | null; tokens: number }[]
+  settings: {
+    model
+    effort
+    tickets
+    finished
+    successRate: number // finished share (0 to 1)
+    costUsd: number | null // average cost per ticket; null when none reported one
+    costPerFinishedUsd: number | null // costUsd / successRate; null without a cost or a finished ticket
+    tokens: number // average tokens per ticket
+    weightedTokens: number // average tokens per ticket, weighted by kind
+    weightedTokensPerFinished: number | null // weightedTokens / successRate; null without a finished ticket
+  }[]
 }
 
 // Token usage added up over runs; costUsd sums the runs that reported a cost (null when none did).
