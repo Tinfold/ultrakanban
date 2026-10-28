@@ -89,4 +89,13 @@ three=$(jq -c '. + [{"id":"c","author":"bob","body":"Go on, but keep the old nam
 got=$(triage "$pr" "$three" "$stopped" '[.run, .fingerprint]')
 if [ "$got" = '[true,"l2 l3"]' ]; then echo "ok   stopped run on a local pull request resumes on a new comment"; else
   echo "FAIL stopped run on a local pull request resumes on a new comment: got '$got'"; fail=1; fi
+# A local pull request with merge conflicts (tickets.sh gives it mergeable and its head and base commits from the
+# board's mergeability) starts a run only to fix them, as a GitHub one does.
+local_pr='{"state":"OPEN","url":"/b/x/pr/1","baseRefName":"main","headRefOid":"h1","baseRefOid":"b1","mergeable":"CONFLICTING"}'
+got=$(triage "$local_pr" '[]' '{}' '[.run, .trigger, .conflicted]')
+if [ "$got" = '[true,"conflict",true]' ]; then echo "ok   local pull request with conflicts"; else
+  echo "FAIL local pull request with conflicts: got '$got'"; fail=1; fi
+got=$(triage "$local_pr" '[]' '{"conflict":"h1:b1"}' .run)
+if [ "$got" = false ]; then echo "ok   local pull request with the same conflicts again"; else
+  echo "FAIL local pull request with the same conflicts again: got '$got'"; fail=1; fi
 exit $fail

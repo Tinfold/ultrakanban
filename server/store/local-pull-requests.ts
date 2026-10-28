@@ -108,7 +108,30 @@ export function getLocalPullRequest(boardId: string, number: number): LocalPullR
     'SELECT * FROM local_pull_request_comments WHERE pull_request_id = ? ORDER BY created_at, rowid',
     row.id,
   )
-  return { ...toPullRequest(row), comments: comments.map(toComment) }
+  // Reading it takes git: the routes fill it in (see `mergeability` in server/local-git.ts).
+  return { ...toPullRequest(row), comments: comments.map(toComment), mergeability: null }
+}
+
+/** The open local pull requests of every board that has a local repository, to check them for conflicts. */
+export function listOpenLocalPullRequests() {
+  return sql.all<{ boardId: string; number: number }>(
+    `SELECT p.board_id AS boardId, p.number FROM local_pull_requests p JOIN boards b ON b.id = p.board_id
+     WHERE p.state = 'open' AND b.local_repo_path IS NOT NULL ORDER BY p.board_id, p.number`,
+  )
+}
+
+/**
+ * Records whether an open local pull request has merge conflicts with its base branch on its ticket, as a GitHub one's
+ * are (`PullRequest.conflicts`), so the board shows them and the agent loop and "fix conflicts" find them.
+ */
+export function recordLocalConflicts(boardId: string, number: number, conflicts: boolean) {
+  const row = getRow(boardId, number)
+  if (row.state !== 'open' || !row.ticket_id) return
+  applyPullRequestStatus(row.ticket_id, localPullRequestUrl(boardId, number), {
+    state: 'open',
+    title: row.title,
+    conflicts,
+  })
 }
 
 /**

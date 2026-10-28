@@ -355,6 +355,19 @@ export interface LocalPullRequestComment {
 export interface LocalPullRequestDetail extends LocalPullRequest {
   /** Oldest first. */
   comments: LocalPullRequestComment[]
+  /**
+   * Whether it can be merged cleanly as its branches are now; null unless it is open and both its branches are in the
+   * local repository.
+   */
+  mergeability: LocalMergeability | null
+}
+
+/** Whether an open local pull request's head branch merges into its base branch cleanly, as they are now. */
+export interface LocalMergeability {
+  baseSha: string
+  headSha: string
+  /** The files that conflict, which a rebase onto the base branch has to resolve; empty when it merges cleanly. */
+  conflicts: string[]
 }
 
 /** A line of a diff hunk, with its number in the old file (unless added) and in the new one (unless deleted). */
@@ -395,6 +408,8 @@ export interface LocalPullRequestDiff {
   baseSha: string
   headSha: string
   files: DiffFile[]
+  /** The files that conflict with the base branch (see `LocalMergeability`); empty unless it is open. */
+  conflicts: string[]
 }
 
 /** A commit of a local pull request (`git log base..head`). */
