@@ -5,7 +5,7 @@ import {
   openLocalPullRequestSchema,
 } from '../../shared/schemas.ts'
 import { transaction } from '../db.ts'
-import { badRequest, conflict, notFound } from '../errors.ts'
+import { badRequest, conflict, HttpError, notFound } from '../errors.ts'
 import { actorOf, readJson } from '../http.ts'
 import * as git from '../local-git.ts'
 import { getBoard } from '../store/boards.ts'
@@ -14,7 +14,9 @@ import {
   finishLocalPullRequest,
   getLocalPullRequest,
   listLocalPullRequests,
+  listOpenLocalPullRequests,
   openLocalPullRequest,
+  recordLocalConflicts,
 } from '../store/local-pull-requests.ts'
 import { getTicket } from '../store/tickets.ts'
 
@@ -35,6 +37,40 @@ async function commitsOf(boardId: string, number: number) {
 }
 
 /**
+ * Checks whether an open local pull request merges cleanly as its branches are now (`git.mergeability`) and records
+ * the answer on its ticket. Null when it isn't open, or its branches or the repository can't be read.
+ */
+async function checkMergeability(boardId: string, number: number) {
+  const pullRequest = getLocalPullRequest(boardId, number)
+  if (pullRequest.state !== 'open') return null
+  try {
+    const mergeability = await git.mergeability(await repositoryOf(boardId), pullRequest.base, pullRequest.head)
+    if (mergeability) transaction(() => recordLocalConflicts(boardId, number, mergeability.conflicts.length > 0))
+    return mergeability
+  } catch {
+    return null
+  }
+}
+
+/** A local pull request with its `mergeability`. */
+async function detailOf(boardId: string, number: number) {
+  const mergeability = await checkMergeability(boardId, number)
+  return { ...getLocalPullRequest(boardId, number), mergeability }
+}
+
+/**
+ * Checks every open local pull request for merge conflicts with its base branch, which moves on as others merge, and
+ * records them on their tickets (see `recordLocalConflicts`). Run with GitHub's sync; overlapping calls share one run.
+ */
+export const checkLocalConflicts = (() => {
+  let running: Promise<void> | null = null
+  return () =>
+    (running ??= (async () => {
+      for (const { boardId, number } of listOpenLocalPullRequests()) await checkMergeability(boardId, number)
+    })().finally(() => (running = null)))
+})()
+
+/**
  * Merging and closing are one at a time per local pull request, so a close can't land while a merge is under way and
  * leave the merge commit on the base with the pull request closed: it waits, then finds it merged.
  */
@@ -51,11 +87,19 @@ export function mergeLocalPullRequest(boardId: string, number: number, actor: st
       throw conflict('pull_request_not_open', `Local pull request #${number} is ${pullRequest.state}`)
     }
     const repo = await repositoryOf(boardId)
-    const merged = await git.merge(repo, {
-      base: pullRequest.base,
-      head: pullRequest.head,
-      message: `Merge pull request #${number} from ${pullRequest.head}\n\n${pullRequest.title}`,
-    })
+    const merged = await git
+      .merge(repo, {
+        base: pullRequest.base,
+        head: pullRequest.head,
+        message: `Merge pull request #${number} from ${pullRequest.head}\n\n${pullRequest.title}`,
+      })
+      .catch((error: unknown) => {
+        // Its agent can fix them now rather than at the next check.
+        if (error instanceof HttpError && error.code === 'merge_conflicts') {
+          transaction(() => recordLocalConflicts(boardId, number, true))
+        }
+        throw error
+      })
     return transaction(() => finishLocalPullRequest(boardId, number, { state: 'merged', ...merged }, actor))
   })
 }
@@ -98,20 +142,22 @@ export const localPullRequestRoutes = new Hono()
         actorOf(c),
       ),
     )
-    return c.json(pullRequest, 201)
+    return c.json(await detailOf(ticket.boardId, pullRequest.number), 201)
   })
   .get('/boards/:boardId/pull-requests', (c) => {
     const { state } = listLocalPullRequestsQuerySchema.parse(c.req.query())
     return c.json(listLocalPullRequests(c.req.param('boardId'), state))
   })
-  .get('/boards/:boardId/pull-requests/:number', (c) => {
+  .get('/boards/:boardId/pull-requests/:number', async (c) => {
     const boardId = c.req.param('boardId')
-    return c.json(getLocalPullRequest(boardId, numberOf(boardId, c.req.param('number'))))
+    return c.json(await detailOf(boardId, numberOf(boardId, c.req.param('number'))))
   })
   .get('/boards/:boardId/pull-requests/:number/diff', async (c) => {
     const boardId = c.req.param('boardId')
-    const { repo, base, head } = await commitsOf(boardId, numberOf(boardId, c.req.param('number')))
-    return c.json(await git.diff(repo, base, head))
+    const number = numberOf(boardId, c.req.param('number'))
+    const { repo, base, head } = await commitsOf(boardId, number)
+    const mergeability = await checkMergeability(boardId, number)
+    return c.json({ ...(await git.diff(repo, base, head)), conflicts: mergeability?.conflicts ?? [] })
   })
   .get('/boards/:boardId/pull-requests/:number/commits', async (c) => {
     const boardId = c.req.param('boardId')

@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { DiffFile, DiffHunk, LocalCommit, LocalPullRequestDiff } from '../shared/domain.ts'
+import type { DiffFile, DiffHunk, LocalCommit, LocalMergeability, LocalPullRequestDiff } from '../shared/domain.ts'
 import { badRequest, conflict, HttpError } from './errors.ts'
 
 /**
@@ -240,7 +240,7 @@ export function parseDiff(patch: string, files: Pick<DiffFile, 'path' | 'oldPath
 }
 
 /** What `head` changes compared with `base`: `git diff base...head`, file by file. */
-export async function diff(repo: string, base: string, head: string): Promise<LocalPullRequestDiff> {
+export async function diff(repo: string, base: string, head: string): Promise<Omit<LocalPullRequestDiff, 'conflicts'>> {
   const baseSha = await mergeBase(repo, base, head)
   const options = ['--no-color', '--no-ext-diff', '--no-textconv', '-M', '--src-prefix=a/', '--dst-prefix=b/']
   const [names, patch] = await Promise.all([
@@ -293,6 +293,29 @@ export function oneAtATime() {
   }
 }
 
+/**
+ * Merges two commits without touching any branch or worktree (`git merge-tree`): the tree the merge would have, and
+ * the files that conflict, none when it is clean.
+ */
+async function mergeTree(repo: string, baseSha: string, headSha: string) {
+  const args = ['merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', baseSha, headSha]
+  const tree = await git(repo, args, { codes: [0, 1] })
+  const [treeSha, ...conflicted] = tree.stdout.split('\0').filter(Boolean)
+  return { treeSha: treeSha.trim(), conflicts: tree.code === 1 ? [...new Set(conflicted)] : [] }
+}
+
+/**
+ * Whether `head` can be merged into `base` cleanly as they are now (see `LocalMergeability`), changing nothing; null
+ * when either branch is gone. Fails when they share no history.
+ */
+export async function mergeability(repo: string, base: string, head: string): Promise<LocalMergeability | null> {
+  const [baseSha, headSha] = [await branchSha(repo, base), await branchSha(repo, head)]
+  if (!baseSha || !headSha) return null
+  if (await isAncestor(repo, headSha, baseSha)) return { baseSha, headSha, conflicts: [] }
+  await mergeBase(repo, baseSha, headSha)
+  return { baseSha, headSha, conflicts: (await mergeTree(repo, baseSha, headSha)).conflicts }
+}
+
 /** Merges are one at a time per repository, so two can't both move a branch from the same commit. */
 const exclusive = oneAtATime()
 
@@ -310,14 +333,11 @@ export function merge(repo: string, { base, head, message }: { base: string; hea
     if (!headSha) throw conflict('branch_missing', `The local repository has no branch "${head}"`)
     if (await isAncestor(repo, headSha, baseSha)) return { baseSha, headSha, mergeSha: null }
 
-    const args = ['merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', baseSha, headSha]
-    const tree = await git(repo, args, { codes: [0, 1] })
-    const [treeSha, ...conflicted] = tree.stdout.split('\0').filter(Boolean)
-    if (tree.code === 1) {
-      const files = [...new Set(conflicted)]
+    const { treeSha, conflicts: files } = await mergeTree(repo, baseSha, headSha)
+    if (files.length) {
       throw conflict(
         'merge_conflicts',
-        `"${head}" can't be merged into "${base}" cleanly: they conflict in ${files.join(', ')}. Merge "${base}" into "${head}" and resolve the conflicts first.`,
+        `"${head}" can't be merged into "${base}" cleanly: they conflict in ${files.join(', ')}. Rebase "${head}" onto "${base}" and resolve the conflicts first.`,
         { files },
       )
     }
@@ -347,7 +367,7 @@ export function merge(repo: string, { base, head, message }: { base: string; hea
       return { baseSha: parent, headSha, mergeSha }
     }
 
-    const commit = await git(repo, ['commit-tree', treeSha.trim(), '-p', baseSha, '-p', headSha, '-m', message], {
+    const commit = await git(repo, ['commit-tree', treeSha, '-p', baseSha, '-p', headSha, '-m', message], {
       env,
     })
     const mergeSha = commit.stdout.trim()

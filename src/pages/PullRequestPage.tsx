@@ -67,11 +67,12 @@ export function PullRequestPage({ boardId, number, tab }: { boardId: string; num
     if (pullRequest) document.title = `${pullRequest.title} · Pull request #${number} · ultrakanban`
   }, [pullRequest, number])
 
-  // Links to a comment (`#comment-<id>`) scroll to it once it is there.
+  // Links to a comment (`#comment-<id>`) or a file (`#file-<path>`) scroll to it once it is there.
   const loaded = !!pullRequest
+  const diffLoaded = !!diff
   useEffect(() => {
     if (loaded && location.hash) document.getElementById(location.hash.slice(1))?.scrollIntoView()
-  }, [loaded, files])
+  }, [loaded, diffLoaded, files])
 
   if (isPending) return <AppHeader boardId={boardId} />
 
