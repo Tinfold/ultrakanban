@@ -16,6 +16,7 @@ import type {
   Ticket,
 } from '../shared/domain.ts'
 import { subscribeWake } from './events.ts'
+import { checkLocalConflicts } from './routes/local-pull-requests.ts'
 import { addTicket, boardId, call, ticketsIn, useBoard } from './test-app.ts'
 
 const IDENTITY = {
@@ -418,6 +419,39 @@ describe('local pull requests', () => {
     assert.equal(git(repo, 'rev-parse', 'main'), before)
     assert.equal(git(repo, 'status', '--porcelain'), '')
     assert.equal((await call<LocalPullRequestDetail>('GET', pr('/1'))).body.state, 'open')
+    assert.equal((await call<Ticket>('GET', `/tickets/${ticket.id}`)).body.pullRequest?.conflicts, true)
+  })
+
+  test('conflicts with the base show on the pull request, its diff and its ticket until a rebase resolves them', async () => {
+    const headSha = pushBranch('feature', { 'src/main.ts': lines(20, { 5: 'theirs' }), 'a.txt': 'a\n' })
+    const { body: opened } = await open({ head: 'feature' })
+    const baseSha = git(repo, 'rev-parse', 'main')
+    assert.deepEqual(opened.mergeability, { baseSha, headSha, conflicts: [] })
+
+    // The base moves on: the next check finds the conflict, and records it on the ticket.
+    const conflicting = commit(repo, 'Conflicting', { 'src/main.ts': lines(20, { 5: 'ours' }) })
+    assert.equal((await call<Ticket>('GET', `/tickets/${ticket.id}`)).body.pullRequest?.conflicts, false)
+    await checkLocalConflicts()
+    assert.equal((await call<Ticket>('GET', `/tickets/${ticket.id}`)).body.pullRequest?.conflicts, true)
+    const { body: detail } = await call<LocalPullRequestDetail>('GET', pr('/1'))
+    assert.deepEqual(detail.mergeability, { baseSha: conflicting, headSha, conflicts: ['src/main.ts'] })
+    const { body: diff } = await call<LocalPullRequestDiff>('GET', pr('/1/diff'))
+    assert.deepEqual(diff.conflicts, ['src/main.ts'])
+    assert.deepEqual(
+      diff.files.map((file) => file.path),
+      ['a.txt', 'src/main.ts'],
+    )
+
+    // Its agent rebases the branch onto the base, resolving the conflict, and force-pushes it.
+    git(work, 'fetch', '-q', 'origin')
+    git(work, 'checkout', '-q', '-B', 'feature', 'origin/main')
+    const rebased = commit(work, 'Change on feature', { 'src/main.ts': lines(20, { 5: 'both' }), 'a.txt': 'a\n' })
+    git(work, 'push', '-q', '--force', 'origin', 'feature')
+    const { body: resolved } = await call<LocalPullRequestDetail>('GET', pr('/1'))
+    assert.deepEqual(resolved.mergeability, { baseSha: conflicting, headSha: rebased, conflicts: [] })
+    assert.equal((await call<Ticket>('GET', `/tickets/${ticket.id}`)).body.pullRequest?.conflicts, false)
+    assert.equal((await call<LocalPullRequestDetail>('POST', pr('/1/merge'))).status, 200)
+    assert.equal((await call<LocalPullRequestDetail>('GET', pr('/1'))).body.mergeability, null)
   })
 
   test('merging without a worktree on the base: a bare repository, or the base not checked out', async () => {
