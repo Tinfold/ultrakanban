@@ -192,14 +192,18 @@ handle_feedback() {
     pr=null pr_state= branch= ci=null issue='[]' reviews='[]' inline='[]' comments='[]'
     if [[ $pr_url =~ $LOCAL_PR ]]; then
       # A local pull request, on the board rather than on GitHub (a board with a local repository): read from the
-      # board, its comments (inline ones too) count as feedback as GitHub's do. It has no checks.
+      # board, its comments (inline ones too) count as feedback as GitHub's do, and its merge conflicts with its base
+      # branch as GitHub's do (by its head and base commits, as mergeable and the ref oids). It has no checks.
       pr=$(get "/boards/${BASH_REMATCH[2]}/pull-requests/${BASH_REMATCH[3]}") || { log "can't read $pr_url"; continue; }
       pr_state=$(jq -r '.state | ascii_upcase' <<<"$pr")
       if [[ $pr_state == OPEN ]]; then
         branch=$(jq -r .head <<<"$pr")
         comments=$(jq -c .comments <<<"$pr")
         pr=$(jq -c --arg url "$KANBAN/b/${BASH_REMATCH[2]}/pr/${BASH_REMATCH[3]}" \
-          '{state: "OPEN", headRefName: .head, baseRefName: .base, url: $url}' <<<"$pr")
+          '{state: "OPEN", headRefName: .head, baseRefName: .base, url: $url,
+            headRefOid: .mergeability.headSha, baseRefOid: .mergeability.baseSha,
+            mergeable: (.mergeability | if . == null then "UNKNOWN" elif .conflicts != [] then "CONFLICTING"
+              else "MERGEABLE" end)}' <<<"$pr")
       fi
     elif [[ $pr_url != - && -z $local_repo ]]; then
       if [[ $repo != - && $listed != *$'\n'"$repo"$'\n'* ]]; then

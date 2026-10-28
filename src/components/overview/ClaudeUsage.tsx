@@ -1,7 +1,8 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { CirclePauseIcon } from 'lucide-react'
-import { useState } from 'react'
+import { type ReactNode, useState } from 'react'
 import { toast } from 'sonner'
+import { Link } from 'wouter'
 import {
   CLAUDE_USAGE_FRESH_MINUTES,
   type ClaudeUsage as ClaudeUsageData,
@@ -40,20 +41,52 @@ function limitName(limit: ClaudeUsageLimit) {
   return model === undefined ? limit.label : model === 'all models' ? 'week' : `${model} week`
 }
 
-/** `reserve`: the usage reserve of the limit (see `reserveFor`), marked on the bar; null when off. */
-function LimitBar({ limit, now, reserve }: { limit: ClaudeUsageLimit; now: number; reserve: number | null }) {
+/** The colour of a bar `percent` used. */
+const barColor = (percent: number) => (percent >= 90 ? 'bg-destructive' : percent >= 70 ? 'bg-amber-500' : 'bg-primary')
+
+/**
+ * `reserve`: the usage reserve of the limit (see `reserveFor`), marked on the bar; null when off. `compact` puts the
+ * name, percent used and reset time on one line above the bar.
+ */
+function LimitBar({
+  limit,
+  now,
+  reserve,
+  compact,
+}: {
+  limit: ClaudeUsageLimit
+  now: number
+  reserve: number | null
+  compact?: boolean
+}) {
   const resetsAt = limit.resetsAt ? Date.parse(limit.resetsAt) : null
   // Past its reset time the limit starts again from nothing, even before the next report says so.
   const reset = resetsAt !== null && resetsAt <= now
   const percent = reset ? 0 : Math.round(limit.percent)
+  const resets = resetsAt !== null && (
+    <span title={formatDateTime(limit.resetsAt!)}>
+      {reset ? 'Reset' : `Resets in ${formatDuration(resetsAt - now)}`}
+    </span>
+  )
   return (
     <div className="grid gap-1.5">
-      <div className="flex items-baseline justify-between gap-2 text-xs">
-        <span className="font-medium">{limit.label}</span>
-        <span className="text-muted-foreground tabular-nums">
-          <span className="font-medium text-foreground">{100 - percent}%</span> left
-        </span>
-      </div>
+      {compact ? (
+        <div className="flex items-baseline justify-between gap-2 text-xs">
+          <span className="truncate font-medium" title={limit.label}>
+            {limit.label}
+          </span>
+          <span className="shrink-0 text-muted-foreground tabular-nums">
+            <span className="font-medium text-foreground">{percent}%</span> used
+          </span>
+        </div>
+      ) : (
+        <div className="flex items-baseline justify-between gap-2 text-xs">
+          <span className="font-medium">{limit.label}</span>
+          <span className="text-muted-foreground tabular-nums">
+            <span className="font-medium text-foreground">{100 - percent}%</span> left
+          </span>
+        </div>
+      )}
       <div className="relative">
         <div
           role="meter"
@@ -64,10 +97,7 @@ function LimitBar({ limit, now, reserve }: { limit: ClaudeUsageLimit; now: numbe
           className="h-2 overflow-hidden rounded-full bg-muted"
         >
           <div
-            className={cn(
-              'h-full rounded-full transition-[width]',
-              percent >= 90 ? 'bg-destructive' : percent >= 70 ? 'bg-amber-500' : 'bg-primary',
-            )}
+            className={cn('h-full rounded-full transition-[width]', barColor(percent))}
             style={{ width: `${percent}%` }}
           />
         </div>
@@ -79,33 +109,40 @@ function LimitBar({ limit, now, reserve }: { limit: ClaudeUsageLimit; now: numbe
           />
         )}
       </div>
-      <div className="flex justify-between gap-2 text-xs text-muted-foreground tabular-nums">
-        <span>{percent}% used</span>
-        {resetsAt !== null && (
-          <span title={formatDateTime(limit.resetsAt!)}>
-            {reset ? 'Reset' : `Resets in ${formatDuration(resetsAt - now)}`}
-          </span>
-        )}
-      </div>
+      {compact ? (
+        resets && <div className="text-xs text-muted-foreground tabular-nums">{resets}</div>
+      ) : (
+        <div className="flex justify-between gap-2 text-xs text-muted-foreground tabular-nums">
+          <span>{percent}% used</span>
+          {resets}
+        </div>
+      )}
     </div>
   )
 }
 
 /** What each kind of credit is, as its tooltip says. */
 const CREDIT_NOTES: Record<ClaudeUsageCredit['kind'], string> = {
-  grant: 'Dollars granted to your Claude plan, spent on its usage.',
+  grant: `Dollars granted to your Claude plan, spent on its usage. ${API_CREDITS_NOTE}`,
   usage:
     'Usage credits (extra usage on claude.ai) cover usage once a plan limit is reached, while they are switched on.',
 }
 
-/** Money the account can spend on usage besides its limits: how much is left, and a bar of what's used when it has a limit. */
-function CreditBar({ credit, now }: { credit: ClaudeUsageCredit; now: number }) {
+/**
+ * Money the account can spend on usage besides its limits: how much is left, and a bar of what's used when it has a
+ * limit. `compact` leaves out what's used, but in its tooltip.
+ */
+function CreditBar({ credit, now, compact }: { credit: ClaudeUsageCredit; now: number; compact?: boolean }) {
   const { kind, label, enabled, currency, used, limit, remaining, resetsAt } = credit
   const money = (amount: number) => formatMoney(amount, currency)
   const percent = enabled && limit ? Math.min(100, Math.round((used / limit) * 100)) : null
   const resetsIn = resetsAt === null ? null : Date.parse(resetsAt) - now
+  const spent =
+    enabled || used > 0
+      ? `${money(used)} used${limit !== null ? ` of ${money(limit)}` : ''}`
+      : 'Switched off on claude.ai'
   return (
-    <div className="grid gap-1.5" title={`${CREDIT_NOTES[kind]} ${API_CREDITS_NOTE}`}>
+    <div className="grid gap-1.5" title={compact ? `${spent}. ${CREDIT_NOTES[kind]}` : CREDIT_NOTES[kind]}>
       <div className="flex items-baseline justify-between gap-2 text-xs">
         <span className="font-medium">{label}</span>
         {!enabled ? (
@@ -128,20 +165,13 @@ function CreditBar({ credit, now }: { credit: ClaudeUsageCredit; now: number }) 
           className="h-2 overflow-hidden rounded-full bg-muted"
         >
           <div
-            className={cn(
-              'h-full rounded-full transition-[width]',
-              percent >= 90 ? 'bg-destructive' : percent >= 70 ? 'bg-amber-500' : 'bg-primary',
-            )}
+            className={cn('h-full rounded-full transition-[width]', barColor(percent))}
             style={{ width: `${percent}%` }}
           />
         </div>
       )}
       <div className="flex justify-between gap-2 text-xs text-muted-foreground tabular-nums">
-        <span>
-          {enabled || used > 0
-            ? `${money(used)} used${limit !== null ? ` of ${money(limit)}` : ''}`
-            : 'Switched off on claude.ai'}
-        </span>
+        {!compact && <span>{spent}</span>}
         {resetsIn !== null && (
           <span title={formatDateTime(resetsAt!)}>
             {resetsIn <= 0 ? 'Reset' : `Resets in ${formatDuration(resetsIn)}`}
@@ -190,6 +220,26 @@ function ReserveSelect({
   )
 }
 
+/** Why agents claim no new tickets now, in a line with `action` after it; nothing when they may. */
+function ReserveReached({ usage, action }: { usage: ClaudeUsageData; action?: ReactNode }) {
+  const { reserve, reserveReached, credits } = usage
+  if (!reserveReached) return null
+  const creditsOn = credits.some((credit) => credit.kind === 'usage' && credit.enabled)
+  const reachedPercent = reserveFor(reserveReached, reserve)
+  return (
+    <p className="flex items-start gap-1.5 text-sm text-amber-600 dark:text-amber-400">
+      <CirclePauseIcon className="mt-0.5 size-4 shrink-0" />
+      <span>
+        Agents paused new tickets: {limitName(reserveReached)}{' '}
+        {reachedPercent === null
+          ? `used up${creditsOn ? ', and they keep your usage credits for you' : ''}.`
+          : `at ${Math.round(reserveReached.percent)}%, reserve starts at ${reachedPercent}%.`}
+        {action && <> {action}</>}
+      </span>
+    </p>
+  )
+}
+
 /**
  * The usage reserve: how far agents may use the week and the current session before they claim no new tickets,
  * keeping the rest for the user's own work, and whether it holds them back now.
@@ -200,13 +250,22 @@ function UsageReserve({ usage, now }: { usage: ClaudeUsageData; now: number }) {
   const { reserve, reserveReached, reportedAt, limitsAt, credits } = usage
   const set = reserve.week !== null || reserve.session !== null
   const creditsOn = credits.some((credit) => credit.kind === 'usage' && credit.enabled)
-  const reachedPercent = reserveReached && reserveFor(reserveReached, reserve)
   const bounds = [
     ...(reserve.week === null ? [] : [`a weekly limit is ${reserve.week}% used`]),
     ...(reserve.session === null ? [] : [`the current session is ${reserve.session}% used`]),
   ]
   // Without any report the card says so already.
   const stale = reportedAt !== null && (!limitsAt || now - Date.parse(limitsAt) > CLAUDE_USAGE_FRESH_MINUTES * 60_000)
+  const details =
+    (set
+      ? `Agents claim no new tickets once ${bounds.join(' or ')}, keeping the rest for you. `
+      : 'Agents may use the whole week and every session. ') +
+    (reserve.usageCredits
+      ? `Once a limit is used up they go on claiming, ${creditsOn ? 'on your usage credits' : 'on usage credits if you switch them on'}. `
+      : usage.apiKey.usable
+        ? 'Once a limit is used up they go on claiming, and run on the API key (below). '
+        : 'Once a limit is used up they claim none, rather than spend usage credits. ') +
+    'Tickets they hold still get runs for their feedback.'
 
   const change = async (input: SetUsageReserveInput) => {
     setSaving(true)
@@ -220,7 +279,7 @@ function UsageReserve({ usage, now }: { usage: ClaudeUsageData; now: number }) {
   }
 
   return (
-    <div className="grid gap-2 border-t pt-3">
+    <div className="grid gap-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span className="font-medium text-foreground">Usage reserve</span>
         <ReserveSelect
@@ -253,30 +312,18 @@ function UsageReserve({ usage, now }: { usage: ClaudeUsageData; now: number }) {
           </Select>
         </span>
       </div>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs text-muted-foreground" title={details}>
         {set
-          ? `Agents claim no new tickets once ${bounds.join(' or ')}, keeping the rest for you. `
-          : 'Agents may use the whole week and every session. '}
-        {reserve.usageCredits
-          ? `Once a limit is used up they go on claiming, ${creditsOn ? 'on your usage credits' : 'on usage credits if you switch them on'}. `
-          : usage.apiKey.usable
-            ? 'Once a limit is used up they go on claiming, and run on the API key (below). '
-            : 'Once a limit is used up they claim none, rather than spend usage credits. '}
-        Tickets they hold still get runs for their feedback.
+          ? 'Agents claim no new tickets past these, keeping the rest for you.'
+          : 'Agents may use all of every limit.'}
       </p>
-      {reserveReached && (
-        <p className="flex items-center gap-1.5 text-sm text-amber-600 dark:text-amber-400">
-          <CirclePauseIcon className="size-4 shrink-0" />
-          Agents paused new tickets: {limitName(reserveReached)}{' '}
-          {reachedPercent === null
-            ? `used up${creditsOn ? ', and they keep your usage credits for you' : ''}.`
-            : `at ${Math.round(reserveReached.percent)}%, reserve starts at ${reachedPercent}%.`}
-        </p>
-      )}
+      <ReserveReached usage={usage} />
       {set && !reserveReached && stale && (
-        <p className="text-xs text-muted-foreground">
-          The reserve only goes by limits read in the last {CLAUDE_USAGE_FRESH_MINUTES} minutes, so it doesn’t hold
-          agents back until the supervisor reads them again.
+        <p
+          className="text-xs text-muted-foreground"
+          title={`The reserve only goes by limits read in the last ${CLAUDE_USAGE_FRESH_MINUTES} minutes.`}
+        >
+          It holds no agents back until the supervisor reads the limits again.
         </p>
       )}
     </div>
@@ -363,21 +410,25 @@ function ApiKeySetting({ usage }: { usage: ClaudeUsageData }) {
     }
   }
 
-  let note: string
+  // A line of hint, and what it means in full.
+  let hint: string
+  let details: string
   if (!enabled) {
-    note = 'Agents wait for the limit to reset. Tickets they hold get their runs then.'
+    hint = 'Agents wait for the limit to reset.'
+    details = 'Agents wait for the limit to reset. Tickets they hold get their runs then.'
   } else if (!available) {
-    note =
-      'The agents have no API key, so they wait for the limit to reset: set AGENT_API_KEY in their environment (see docs/agents.md).'
+    hint = 'No API key: set AGENT_API_KEY in the agents’ environment (docs/agents.md).'
+    details = 'The agents have no API key, so they wait for the limit to reset.'
   } else {
-    note =
+    hint = 'Runs go on the API key until the limit resets, billed to its API credits.'
+    details =
       `A run that hits the limit is retried on the API key, and runs go on it until the limit resets, each spending at ` +
       `most ${formatCost(runBudgetUsd)}. Agents go on claiming new tickets, within the usage reserve. The key’s API ` +
       `credits are billed, unlike the plan’s estimated cost.`
   }
 
   return (
-    <div className="grid gap-2 border-t pt-3">
+    <div className="grid gap-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5">
           <label htmlFor="usage-runs-out" className="font-medium text-foreground">
@@ -416,7 +467,9 @@ function ApiKeySetting({ usage }: { usage: ClaudeUsageData }) {
           </>
         )}
       </div>
-      <p className="text-xs text-muted-foreground">{note}</p>
+      <p className="text-xs text-muted-foreground" title={details}>
+        {hint}
+      </p>
       {(enabled || spentThisMonthUsd > 0) && (
         <p className={cn('text-xs', capReached ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}>
           Billed to the API key this month: {formatCost(spentThisMonthUsd)}
@@ -428,9 +481,23 @@ function ApiKeySetting({ usage }: { usage: ClaudeUsageData }) {
   )
 }
 
-/** How much of the Claude plan's usage limits is used and left, as the agent supervisor last read it. */
-export function ClaudeUsage({ usage, now }: { usage: ClaudeUsageData; now: number }) {
-  const { reportedAt, limitsAt, plan, limits, credits, error } = usage
+/**
+ * The plan's usage limits and credits, as the agent supervisor last read them: what's used and left of each, under a
+ * heading with `action` at its end. `compact` shows the limits in one row, and of the credits only the plan's grant.
+ */
+function UsageMeters({
+  usage,
+  now,
+  compact,
+  action,
+}: {
+  usage: ClaudeUsageData
+  now: number
+  compact?: boolean
+  action?: ReactNode
+}) {
+  const { reportedAt, limitsAt, plan, limits, error } = usage
+  const credits = compact ? usage.credits.filter((credit) => credit.kind === 'grant') : usage.credits
   let note: string | null = null
   if (!reportedAt) {
     note =
@@ -444,7 +511,7 @@ export function ClaudeUsage({ usage, now }: { usage: ClaudeUsageData; now: numbe
   const stale = reportedAt !== null && now - Date.parse(reportedAt) > STALE_MS
 
   return (
-    <div className="grid gap-3 rounded-xl border bg-card p-4">
+    <>
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <p className="text-xs text-muted-foreground">
           Claude usage
@@ -454,31 +521,86 @@ export function ClaudeUsage({ usage, now }: { usage: ClaudeUsageData; now: numbe
             </>
           )}
         </p>
-        {reportedAt && (
-          <p
-            className={cn('text-xs', stale ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}
-            title={formatDateTime(reportedAt)}
-          >
-            {stale ? 'Last reported' : 'Updated'} {formatRelative(reportedAt)}
-          </p>
-        )}
+        <div className="flex items-baseline gap-3">
+          {reportedAt && (
+            <p
+              className={cn('text-xs', stale ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}
+              title={formatDateTime(reportedAt)}
+            >
+              {stale ? 'Last reported' : 'Updated'} {formatRelative(reportedAt)}
+            </p>
+          )}
+          {action}
+        </div>
       </div>
       {limits.length + credits.length > 0 && (
-        <div className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div
+          className={cn(
+            'grid gap-x-6',
+            compact
+              ? 'grid-cols-2 gap-x-4 gap-y-3 sm:gap-x-6 sm:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]'
+              : 'grid-cols-1 gap-y-4 sm:grid-cols-2 lg:grid-cols-3',
+          )}
+        >
           {limits.map((limit) => (
-            <LimitBar key={limit.label} limit={limit} now={now} reserve={reserveFor(limit, usage.reserve)} />
+            <LimitBar
+              key={limit.label}
+              limit={limit}
+              now={now}
+              reserve={reserveFor(limit, usage.reserve)}
+              compact={compact}
+            />
           ))}
           {credits.map((credit, index) => (
-            <CreditBar key={`${credit.label}-${index}`} credit={credit} now={now} />
+            <CreditBar key={`${credit.label}-${index}`} credit={credit} now={now} compact={compact} />
           ))}
         </div>
       )}
-      {credits.length > 0 && (
-        <p className="text-xs text-muted-foreground">Credits here are your Claude plan’s. {API_CREDITS_NOTE}</p>
-      )}
       {note && <p className="text-sm text-muted-foreground">{note}</p>}
-      <UsageReserve usage={usage} now={now} />
-      <ApiKeySetting usage={usage} />
+    </>
+  )
+}
+
+const LINK_CLASS = 'text-xs font-medium text-foreground underline-offset-4 hover:underline'
+
+/** The usage meters for the overview's summary, linking to `href`, where the full panel and its settings are. */
+export function ClaudeUsageSummary({ usage, now, href }: { usage: ClaudeUsageData; now: number; href: string }) {
+  return (
+    <div className="grid gap-3 rounded-xl border bg-card p-4">
+      <UsageMeters
+        usage={usage}
+        now={now}
+        compact
+        action={
+          <Link href={href} className={LINK_CLASS}>
+            Usage limits
+          </Link>
+        }
+      />
+      <ReserveReached
+        usage={usage}
+        action={
+          <Link href={href} className={LINK_CLASS}>
+            Usage reserve settings
+          </Link>
+        }
+      />
+    </div>
+  )
+}
+
+/** How much of the Claude plan's usage limits is used and left, and the limits agents keep to. */
+export function ClaudeUsage({ usage, now }: { usage: ClaudeUsageData; now: number }) {
+  return (
+    <div className="grid gap-3 rounded-xl border bg-card p-4">
+      <UsageMeters usage={usage} now={now} />
+      <fieldset className="grid gap-4 border-t pt-4">
+        <legend className="float-left mb-1 w-full text-xs font-medium tracking-wide text-muted-foreground uppercase">
+          Limits
+        </legend>
+        <UsageReserve usage={usage} now={now} />
+        <ApiKeySetting usage={usage} />
+      </fieldset>
     </div>
   )
 }

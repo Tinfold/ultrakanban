@@ -22,7 +22,7 @@ With a review and done column configured (**Board menu → Board settings**; the
 columns named "Review" and "Done" get this automatically), agents finish work like this:
 
 ```sh
-# Attach screenshots of visible changes to the ticket
+# Attach pictures of the change to the ticket (and put them in the pull request's description)
 curl -X POST localhost:4317/api/tickets/$TICKET/attachments -H 'X-Actor: claude/claude-opus-5-5/high' -F file=@screenshot.png
 
 # Link the PR, post a summary, move to Review
@@ -536,9 +536,11 @@ prompt tells the agent not to use `gh` and how to work local pull requests inste
    same line), ending each reply with the marker line; the loop also ignores comments by the agent's own name, so its
    replies never start runs.
 3. **Merging.** **Merge** on the pull request's page merges the branch into the base in the local repository and moves
-   the ticket to the done column. If they conflict, merging fails and changes nothing: say so in a comment, and the
-   agent rebases its branch onto the base and resolves the conflicts. Local pull requests have no CI checks, and the
-   loop doesn't look for conflicts by itself.
+   the ticket to the done column. The board checks open local pull requests for conflicts with their base every sync
+   interval (and whenever one is read), as GitHub does for its own: the page then names the conflicting files, Merge
+   is off, and the ticket's pull request shows them. The loop starts a run to fix them like it does for a GitHub pull
+   request's: the agent rebases its branch onto the base, resolves the conflicts and force-pushes. Local pull requests
+   have no CI checks.
 4. **Closing.** A local pull request closed without merging moves its ticket from the review column to `Cancelled`, as
    a GitHub one does.
 

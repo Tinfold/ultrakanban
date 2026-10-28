@@ -135,14 +135,50 @@ curl -s -X POST $KANBAN/api/tickets/$TICKET/comments \
   -H 'Content-Type: application/json' -H "X-Actor: $ME" -d '{"body":"<markdown>"}'
 ```
 
-## 5. Attach screenshots of visible changes
+## 5. Pictures: on the ticket and in every pull request
 
-If the change is visible (UI, styling, charts, CLI output), attach screenshots or a short screen recording so
-reviewers can see the result without running it. PNG, JPEG, GIF, WebP, MP4 or WebM, up to 25 MB each:
+Every pull request has pictures in its description, so reviewers can see the result without running it. For a
+visible change (UI, styling, charts, CLI output), screenshots or a short screen recording of it, before and after if
+that helps. For a change with nothing to look at, a picture of the evidence that it works: the tests or the command
+you ran and their output, an API response, a log. A terminal capture is fine; crop each picture to what matters.
+
+Attach them to the ticket too. PNG, JPEG, GIF, WebP, MP4 or WebM, up to 25 MB each:
 
 ```sh
 curl -s -X POST $KANBAN/api/tickets/$TICKET/attachments -H "X-Actor: $ME" -F file=@screenshot.png
 ```
+
+GitHub can't load the board's attachments, so for the pull request put the files on a `pr-images` branch of `origin`
+with this function (it commits them without touching your checkout) and paste the markdown it prints into the pull
+request's body (`gh pr create --body`, or `gh pr edit --body` later). Recordings: GIF, as GitHub shows no video from a
+link.
+
+```sh
+pr_images() {  # pr_images FILE...: puts the files on origin's pr-images branch, prints markdown for each
+  local repo parent commit f try entries=
+  repo=$(git config remote.origin.url | sed -E 's#\.git$##; s#^.*github\.com[:/]##')
+  for f in "$@"; do
+    entries+="100644 blob $(git hash-object -w "$f")	$(basename "$f" | tr -c 'A-Za-z0-9._\n-' -)"$'\n'
+  done
+  for try in 1 2 3; do  # again when another push got in first
+    parent=$(git ls-remote origin refs/heads/pr-images | cut -f1)
+    if [[ -n $parent ]]; then
+      git fetch -q origin pr-images && commit=$(printf "$entries" | git mktree | xargs git commit-tree -p "$parent" -m Pictures)
+    else
+      commit=$(printf "$entries" | git mktree | xargs git commit-tree -m Pictures)
+    fi || return
+    git push -q origin "${commit}:refs/heads/pr-images" || continue
+    for f in "$@"; do
+      echo "![](https://github.com/$repo/blob/$commit/$(basename "$f" | tr -c 'A-Za-z0-9._\n-' -)?raw=true)"
+    done
+    return
+  done
+  return 1
+}
+```
+
+On a board with a local repository, put the attachments' markdown (`![](/api/attachments/<id>)`, from the upload's
+`url`) in the local pull request's body instead.
 
 ## 6. Open a pull request and submit for review
 
@@ -154,7 +190,7 @@ any step is still unchecked.
 ```sh
 curl -s -X POST $KANBAN/api/tickets/$TICKET/review \
   -H 'Content-Type: application/json' -H "X-Actor: $ME" \
-  -d "{\"agent\":\"$ME\",\"pullRequest\":\"$PR_URL\",\"comment\":\"What changed and how it was verified. Screenshots attached.\"}"
+  -d "{\"agent\":\"$ME\",\"pullRequest\":\"$PR_URL\",\"comment\":\"What changed and how it was verified. Pictures attached.\"}"
 ```
 
 This links the pull request, keeps the ticket yours and moves it to the review column in one step. On a board with a
@@ -178,7 +214,7 @@ gh api repos/$OWNER/$REPO/pulls/$NUMBER/comments   # inline review comments on t
 gh pr checks $PR_URL                           # failing CI is feedback too
 ```
 
-Address every point: push fixes, re-attach screenshots if the UI changed, reply on the pull request, and
+Address every point: push fixes, add new pictures to the ticket and the pull request if the result changed, reply on the pull request, and
 comment on the ticket summarising what you changed. Resolve merge conflicts by rebasing the pull request's branch onto
 the base branch (`git fetch origin && git rebase origin/<base>`), not by merging it in: merge commits tangle the
 history and make it easy to lose a feature in a bad resolution. Resolve each conflict by keeping both sides' changes,

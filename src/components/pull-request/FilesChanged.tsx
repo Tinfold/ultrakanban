@@ -1,4 +1,4 @@
-import { ChevronDownIcon, ChevronRightIcon, PlusIcon } from 'lucide-react'
+import { ChevronDownIcon, ChevronRightIcon, PlusIcon, TriangleAlertIcon } from 'lucide-react'
 import { Fragment, useState } from 'react'
 import type { DiffFile, DiffLine, DiffSide, LocalPullRequestComment, LocalPullRequestDetail } from '@shared/domain'
 import { Markdown } from '@/components/common/Markdown'
@@ -57,15 +57,20 @@ interface FileDiffProps {
   file: DiffFile
   pullRequest: LocalPullRequestDetail
   comments: Map<string, LocalPullRequestComment[]>
+  /** Whether it conflicts with the base branch. */
+  conflicted: boolean
 }
 
 /** One file's diff, collapsible, with a comment form under the line being commented on. */
-function FileDiff({ file, pullRequest, comments }: FileDiffProps) {
+function FileDiff({ file, pullRequest, comments, conflicted }: FileDiffProps) {
   const [open, setOpen] = useState(true)
   const [commenting, setCommenting] = useState<string | null>(null)
 
   return (
-    <section className="overflow-hidden rounded-lg border">
+    <section
+      id={`file-${encodeURIComponent(file.path)}`}
+      className={cn('scroll-mt-4 overflow-hidden rounded-lg border', conflicted && 'border-amber-500/60')}
+    >
       <button
         type="button"
         aria-expanded={open}
@@ -79,6 +84,15 @@ function FileDiff({ file, pullRequest, comments }: FileDiffProps) {
         <span className="min-w-0 flex-1 truncate font-mono text-xs">
           {file.oldPath && file.oldPath !== file.path ? `${file.oldPath} → ${file.path}` : file.path}
         </span>
+        {conflicted && (
+          <span
+            className="flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 text-xs font-medium text-amber-700 dark:text-amber-400"
+            title={`Conflicts with ${pullRequest.base}`}
+          >
+            <TriangleAlertIcon className="size-3" />
+            Conflict
+          </span>
+        )}
         <span className="shrink-0 text-xs text-muted-foreground">{STATUS_LABELS[file.status]}</span>
         <span className="shrink-0 font-mono text-xs tabular-nums">
           <span className="text-emerald-600 dark:text-emerald-400">+{file.additions}</span>{' '}
@@ -190,6 +204,8 @@ export function FilesChanged({ pullRequest }: { pullRequest: LocalPullRequestDet
     const key = placeKey(comment.path, comment.side ?? 'right', comment.line)
     comments.set(key, [...(comments.get(key) ?? []), comment])
   }
+  // From the pull request rather than the diff: that is refetched as the base moves on, the diff only on new commits.
+  const conflicts = new Set(pullRequest.mergeability?.conflicts ?? [])
   const additions = data.files.reduce((sum, file) => sum + file.additions, 0)
   const deletions = data.files.reduce((sum, file) => sum + file.deletions, 0)
 
@@ -200,8 +216,24 @@ export function FilesChanged({ pullRequest }: { pullRequest: LocalPullRequestDet
         <span className="text-emerald-600 dark:text-emerald-400">+{additions}</span>{' '}
         <span className="text-red-600 dark:text-red-400">−{deletions}</span>
       </p>
+      {conflicts.size > 0 && (
+        <p className="flex items-start gap-2 rounded-lg border border-amber-500/60 bg-amber-500/10 p-3 text-sm">
+          <TriangleAlertIcon className="mt-0.5 size-4 shrink-0 text-amber-600" />
+          <span>
+            {conflicts.size === 1 ? 'A file conflicts' : `${conflicts.size} files conflict`} with{' '}
+            <code className="text-xs">{pullRequest.base}</code>, so this can't be merged until{' '}
+            <code className="text-xs">{pullRequest.head}</code> is rebased onto it and they are resolved.
+          </span>
+        </p>
+      )}
       {data.files.map((file) => (
-        <FileDiff key={file.path} file={file} pullRequest={pullRequest} comments={comments} />
+        <FileDiff
+          key={file.path}
+          file={file}
+          pullRequest={pullRequest}
+          comments={comments}
+          conflicted={conflicts.has(file.path)}
+        />
       ))}
     </div>
   )

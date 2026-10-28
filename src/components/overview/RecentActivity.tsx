@@ -1,66 +1,52 @@
+import { useMemo } from 'react'
 import { Link } from 'wouter'
 import type { OverviewActivity } from '@shared/domain'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { formatDateTime, formatRelative, ticketRef } from '@/lib/format'
-import { ticketHref } from '@/lib/overview'
+import { activityVerb, type ActivityGroup, mergeActivity, ticketHref } from '@/lib/overview'
 
-const PULL_REQUEST_EVENTS = {
-  linked: 'linked a pull request to',
-  unlinked: 'unlinked the pull request of',
-  open: 'reports the pull request open for',
-  draft: 'reports the pull request back in draft for',
-  merged: 'reports the pull request merged for',
-  closed: 'reports the pull request closed for',
-} as const
+/** The raw events of a merged entry, one per line, for its tooltip. */
+const rawEvents = (group: ActivityGroup) =>
+  group.events
+    .map(
+      (entry) =>
+        `${formatDateTime(entry.createdAt)} ${entry.actor} ${activityVerb(entry)} ${ticketRef(group.ticket.number)}`,
+    )
+    .join('\n')
 
-function verb(entry: OverviewActivity) {
-  switch (entry.type) {
-    case 'created':
-      return 'created'
-    case 'updated':
-      return 'edited'
-    case 'checked':
-      return entry.data.checked ? 'checked off an item of' : 'unchecked an item of'
-    case 'moved':
-      return `moved to ${entry.data.to}`
-    case 'claimed':
-      return entry.actor === entry.data.assignee ? 'claimed' : `assigned ${entry.data.assignee} to`
-    case 'released':
-      return entry.actor === entry.data.assignee ? 'released' : `unassigned ${entry.data.assignee} from`
-    case 'comment':
-      return 'commented on'
-    case 'plan':
-      return entry.data.held ? 'posted a plan, waiting for approval, for' : 'posted a plan for'
-    case 'approved':
-      return 'approved the plan of'
-    case 'stopped':
-      return "stopped the agent's run on"
-    case 'attachment':
-      return 'attached a file to'
-    case 'pull_request':
-      return PULL_REQUEST_EVENTS[entry.data.event]
-  }
+interface RecentActivityProps {
+  /** Newest first. */
+  activity: OverviewActivity[]
+  /** The most entries to show, after merging. */
+  limit?: number
 }
 
-export function RecentActivity({ activity }: { activity: OverviewActivity[] }) {
-  if (!activity.length) return <p className="px-1 text-sm text-muted-foreground">No activity yet.</p>
+export function RecentActivity({ activity, limit }: RecentActivityProps) {
+  const groups = useMemo(() => mergeActivity(activity).slice(0, limit), [activity, limit])
+  if (!groups.length) return <p className="px-1 text-sm text-muted-foreground">No activity yet.</p>
 
   return (
-    <ol className="grid max-h-112 grid-cols-1 content-start gap-2.5 overflow-y-auto overscroll-contain rounded-xl border bg-card p-3 xl:max-h-none xl:min-h-80 xl:contain-size">
-      {activity.map((entry) => (
-        <li key={entry.id} className="flex gap-2 text-xs text-muted-foreground">
-          <UserAvatar name={entry.actor} size="xs" />
+    <ol className="grid grid-cols-1 content-start gap-2.5 rounded-xl border bg-card p-3">
+      {groups.map((group) => (
+        <li
+          key={group.id}
+          className="flex gap-2 text-xs text-muted-foreground"
+          title={group.events.length > 1 ? rawEvents(group) : undefined}
+        >
+          <UserAvatar name={group.actor} size="xs" />
           <p className="min-w-0">
-            <span className="font-medium text-foreground">{entry.actor}</span> {verb(entry)}{' '}
-            <Link href={ticketHref({ id: entry.ticketId, boardId: entry.ticket.boardId })} className="hover:underline">
-              <span className="font-mono">{ticketRef(entry.ticket.number)}</span>{' '}
-              <span className="text-foreground">{entry.ticket.title}</span>
+            <span className="font-medium text-foreground">{group.actor}</span> {group.verb}{' '}
+            <Link href={ticketHref({ id: group.ticketId, boardId: group.ticket.boardId })} className="hover:underline">
+              <span className="font-mono">{ticketRef(group.ticket.number)}</span>{' '}
+              <span className="text-foreground">{group.ticket.title}</span>
             </Link>
+            {group.column && <> · {group.column}</>}
             <span className="block">
-              {entry.ticket.boardName} ·{' '}
-              <time dateTime={entry.createdAt} title={formatDateTime(entry.createdAt)}>
-                {formatRelative(entry.createdAt)}
+              {group.ticket.boardName} ·{' '}
+              <time dateTime={group.createdAt} title={formatDateTime(group.createdAt)}>
+                {formatRelative(group.createdAt)}
               </time>
+              {group.events.length > 1 && ` · ${group.events.length} events`}
             </span>
           </p>
         </li>

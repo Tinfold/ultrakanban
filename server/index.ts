@@ -11,6 +11,7 @@ import { createMergeQueue } from './merge-queue.ts'
 import { createNotifier } from './notifications.ts'
 import { getStoredGitHubToken } from './store/setup.ts'
 import { createPullRequestSync } from './pull-request-sync.ts'
+import { checkLocalConflicts } from './routes/local-pull-requests.ts'
 import { listAttachmentIds } from './store/attachments.ts'
 
 const port = Number(process.env.PORT ?? 4317)
@@ -34,6 +35,9 @@ const attachmentsDirectory =
 const attachmentFiles = createAttachmentFiles(attachmentsDirectory)
 const app = createApp({ pullRequests, mergeQueue, attachmentFiles, notifier })
 pullRequests.start(syncIntervalMs)
+// Local pull requests' conflicts, as their base branches move on (GitHub works those out for its own).
+void checkLocalConflicts()
+setInterval(() => void checkLocalConflicts(), syncIntervalMs).unref()
 mergeQueue.startAutoMerge(syncIntervalMs)
 void attachmentFiles.sweep(listAttachmentIds())
 

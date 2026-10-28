@@ -355,6 +355,19 @@ export interface LocalPullRequestComment {
 export interface LocalPullRequestDetail extends LocalPullRequest {
   /** Oldest first. */
   comments: LocalPullRequestComment[]
+  /**
+   * Whether it can be merged cleanly as its branches are now; null unless it is open and both its branches are in the
+   * local repository.
+   */
+  mergeability: LocalMergeability | null
+}
+
+/** Whether an open local pull request's head branch merges into its base branch cleanly, as they are now. */
+export interface LocalMergeability {
+  baseSha: string
+  headSha: string
+  /** The files that conflict, which a rebase onto the base branch has to resolve; empty when it merges cleanly. */
+  conflicts: string[]
 }
 
 /** A line of a diff hunk, with its number in the old file (unless added) and in the new one (unless deleted). */
@@ -395,6 +408,8 @@ export interface LocalPullRequestDiff {
   baseSha: string
   headSha: string
   files: DiffFile[]
+  /** The files that conflict with the base branch (see `LocalMergeability`); empty unless it is open. */
+  conflicts: string[]
 }
 
 /** A commit of a local pull request (`git log base..head`). */
@@ -1007,6 +1022,12 @@ export const JEV_INPUT_USD_PER_MILLION = 0.042
  */
 export const TOKEN_WEIGHTS = { inputTokens: 1, outputTokens: 5, cacheReadTokens: 0.1, cacheWriteTokens: 1.25 } as const
 
+/**
+ * What Opus lists per million uncached input tokens, in US dollars; the other kinds cost `TOKEN_WEIGHTS` times that.
+ * The overview's savings price tokens at what Opus runs reported they cost, and at this when none did.
+ */
+export const OPUS_INPUT_USD_PER_MILLION = 5
+
 /** A run's tokens weighted by kind (see `TOKEN_WEIGHTS`), in uncached-input tokens. */
 export const weightedTokens = (counts: TokenCounts) =>
   counts.inputTokens * TOKEN_WEIGHTS.inputTokens +
@@ -1400,6 +1421,8 @@ export interface OverviewUsage extends TokenCounts {
   costUsd: number | null
   /** Whether the run went on the agents' API key, its cost billed rather than estimated (see `AgentApiKey`). */
   apiKey: boolean
+  /** Where the model and effort the run worked at came from (see `RunRouting`); null when that isn't known. */
+  routingSource: RoutingSource | null
   /**
    * Split by model. Runs that didn't report it count as a run of the model in the agent's name (see `workerModel`),
    * or of `UNKNOWN_MODEL`.

@@ -37,7 +37,7 @@ import { WAITING_SINCE } from './tickets.ts'
 import { queryUsage } from './usage.ts'
 
 const DAY_MS = 24 * 60 * 60 * 1000
-const RECENT_LIMIT = 30
+const RECENT_LIMIT = 200
 
 interface TicketRow {
   id: string
@@ -226,6 +226,7 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
       boardId: run.boardId,
       ...counts,
       apiKey: run.apiKey,
+      routingSource: run.routing?.source ?? null,
       // Runs that didn't report their models ran the one in the agent's name, if it has one.
       models: run.models.length ? run.models : [{ model: workerModel(run.agent) ?? UNKNOWN_MODEL, ...counts }],
     }

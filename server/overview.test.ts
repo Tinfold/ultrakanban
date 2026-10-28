@@ -512,4 +512,16 @@ describe('overview', () => {
     assert.equal(latest.disk.deletedBoards, 0)
     assert.equal(boardOf(latest).disk.agent?.worktrees, 0)
   })
+
+  test('recent activity has more than a screenful of events, newest first, for the Activity tab', async () => {
+    const created = []
+    for (let i = 0; i < 40; i++) created.push(await addTicket({ title: `Ticket ${i}` }))
+    const { body } = await call<Overview>('GET', '/overview')
+    const ours = body.recent.filter((entry) => entry.ticket.boardId === boardId)
+    assert.equal(ours.length, 40)
+    assert.deepEqual(
+      ours.map((entry) => entry.ticketId),
+      created.map((ticket) => ticket.id).toReversed(),
+    )
+  })
 })
