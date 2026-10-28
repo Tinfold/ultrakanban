@@ -221,7 +221,7 @@ state as it does a GitHub pull request's: merging it moves the ticket to the don
 | ------ | ------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------ |
 | POST   | `/tickets/:ticketId/local-pull-request`           | `{ head, base?, title?, body? }`                              | `201 LocalPullRequestDetail`, linked to the ticket           |
 | GET    | `/boards/:boardId/pull-requests?state=`           |                                                               | `LocalPullRequest[]`, newest first; `state` filters them     |
-| GET    | `/boards/:boardId/pull-requests/:number`          |                                                               | `LocalPullRequestDetail`, with its comments                  |
+| GET    | `/boards/:boardId/pull-requests/:number`          |                                                               | `LocalPullRequestDetail`, with its comments and mergeability |
 | GET    | `/boards/:boardId/pull-requests/:number/diff`     |                                                               | `LocalPullRequestDiff`: `git diff base...head`, file by file |
 | GET    | `/boards/:boardId/pull-requests/:number/commits`  |                                                               | `LocalCommit[]`: `git log base..head`, oldest first          |
 | POST   | `/boards/:boardId/pull-requests/:number/comments` | `{ body, path?, line?, side?: "right" \| "left" }` (markdown) | `201 LocalPullRequestComment`                                |
@@ -239,11 +239,16 @@ state as it does a GitHub pull request's: merging it moves the ticket to the don
   base's (for deleted lines). A comment from anyone but the agent holding the ticket wakes the agent, as a ticket
   comment does. `POST /tickets/:ticketId/comments` with `pullRequest: true` posts on the ticket's local pull request
   when it has one (`data.pullRequestComment` is `/b/<board>/pr/<number>#comment-<id>`).
+- **Conflicts:** an open one's `mergeability` is `{ baseSha, headSha, conflicts }`, its branches' commits now and the
+  files that conflict between them (empty when it merges cleanly; `git merge-tree`, which changes nothing), or `null`
+  when it isn't open or a branch is missing. The diff's `conflicts` lists the same files. Reading it, a refused merge,
+  and a check of every open one each sync interval record whether it has any as its ticket's `pullRequest.conflicts`,
+  as GitHub's are, so the board, `POST /boards/:boardId/fix-conflicts` and the agent loop see them.
 - **Merging** runs `git merge --no-ff` of the head into the base, with the message `Merge pull request #<number> from
   <head>`, in the worktree that has the base checked out, so its files follow. In a bare repository, or when nobody
   has the base checked out, the same merge commit is made without a worktree. It is refused, changing nothing, with
   `409 merge_conflicts` when they conflict (`details.files` lists the files; rebase the head onto the base and resolve
-  them first), `409 merge_failed` when git refuses (e.g. uncommitted changes in the worktree that the merge would
+  them first; it marks the ticket's `pullRequest.conflicts` too), `409 merge_failed` when git refuses (e.g. uncommitted changes in the worktree that the merge would
   overwrite) or can't run, or when the worktree that has the base checked out isn't there (`git worktree prune` forgets
   one that was deleted), `409 branch_missing` and `409 pull_request_not_open`. Merge commits are by the repository's git identity,
   or `ultrakanban <ultrakanban@localhost>` when it has none. `POST /tickets/:ticketId/merge` merges a ticket's local
