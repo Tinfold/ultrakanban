@@ -16,7 +16,7 @@ import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { Textarea } from '@/components/ui/textarea'
-import { useTicketActivity, useTicketAttachments, useTicketRuns } from '@/hooks/queries'
+import { useLiveRun, useTicketActivity, useTicketAttachments, useTicketRuns } from '@/hooks/queries'
 import { formatDateTime, formatRelative, formatRunOutcome, formatRunTotals } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { useBoardContext } from '../board/board-context'
@@ -238,6 +238,49 @@ function RunItem({ run }: { run: RunRecord }) {
   )
 }
 
+/**
+ * The agent run working the ticket, after what has happened so far: collapsed to its current step; open, it shows the
+ * tool calls it has made so far, fetched only then, and updated as it goes on.
+ */
+function LiveRunItem({ ticketId, agent, run }: { ticketId: string; agent: string | null; run: AgentRun }) {
+  const [open, setOpen] = useState(false)
+  const { data: live, isPending } = useLiveRun(ticketId, open)
+
+  return (
+    <li className="rounded-lg border border-emerald-500/40 bg-card text-xs">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className="flex w-full min-w-0 items-center gap-2 rounded-lg px-3 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <ChevronRightIcon className={cn('size-3.5 shrink-0 text-muted-foreground', open && 'rotate-90')} />
+        {agent && <UserAvatar name={agent} size="xs" />}
+        <p className="min-w-0 text-muted-foreground">
+          {agent && <span className="font-medium text-foreground">{agent} </span>}
+          Run
+          <span aria-hidden> · </span>
+          <span className="font-medium text-emerald-600 dark:text-emerald-400">going on</span>
+          {run.step && <> · {run.step}</>}
+          <span aria-hidden> · </span>
+          started <Timestamp iso={run.startedAt} />
+        </p>
+      </button>
+      {open && (
+        <div className="grid gap-2 border-t px-3 py-2.5">
+          {live?.steps.length ? (
+            <RunSteps run={live} />
+          ) : (
+            <p className="text-muted-foreground">
+              {isPending ? 'Loading its tool calls…' : "No tool calls yet, or its agent doesn't send them."}
+            </p>
+          )}
+        </div>
+      )}
+    </li>
+  )
+}
+
 /** The ticket's activity and its agent runs, oldest first: a run shows when it ended, among what happened meanwhile. */
 type FeedEntry = { kind: 'activity'; entry: Activity } | { kind: 'run'; run: RunRecord }
 
@@ -326,7 +369,12 @@ function CommentComposer({ ticketId, pullRequest, run }: CommentComposerProps) {
   )
 }
 
-export function ActivityFeed({ ticketId, pullRequest, run }: CommentComposerProps) {
+interface ActivityFeedProps extends CommentComposerProps {
+  /** Who works the ticket, shown with the run going on. */
+  assignee: string | null
+}
+
+export function ActivityFeed({ ticketId, pullRequest, run, assignee }: ActivityFeedProps) {
   const { data: activity = [] } = useTicketActivity(ticketId)
   const { data: runs = [] } = useTicketRuns(ticketId)
   const { data: attachments = [] } = useTicketAttachments(ticketId)
@@ -352,6 +400,7 @@ export function ActivityFeed({ ticketId, pullRequest, run }: CommentComposerProp
             />
           ),
         )}
+        {run && <LiveRunItem ticketId={ticketId} agent={assignee} run={run} />}
       </ol>
       <CommentComposer ticketId={ticketId} pullRequest={pullRequest} run={run} />
       <AttachmentViewer ticketId={ticketId} attachment={viewing} onClose={() => setViewing(null)} />

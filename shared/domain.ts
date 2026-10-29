@@ -873,6 +873,18 @@ export interface AgentRun {
   stopRequested: { at: string; by: string } | null
 }
 
+/**
+ * The run working a ticket with the tool calls it has made so far (`GET /tickets/:id/run`), as its heartbeats tell,
+ * so people can follow what it does while it goes on rather than once its record (see `RunRecord`) comes in at its
+ * end. Like a record's, its steps hold at most `RUN_MAX_STEPS`: the first and last ones of a longer run.
+ */
+export interface LiveRun extends AgentRun {
+  /** Its tool calls so far, in order (not its subagents'); empty until its agent sends them. */
+  steps: RunStep[]
+  /** How many steps were left out between `steps[after - 1]` and `steps[after]`; null when none were. */
+  omittedSteps: { after: number; count: number } | null
+}
+
 export interface BoardDetail {
   board: BoardSummary
   columns: Column[]

@@ -12,6 +12,7 @@ import {
   IN_PROGRESS_COLUMN,
   isWeeklyLimit,
   JEV_AGENT,
+  type LiveRun,
   type LocalPullRequestState,
   parseLocalPullRequestUrl,
   parsePullRequestUrl,
@@ -83,6 +84,8 @@ interface TicketRow {
   run_started_at: string | null
   run_step: string | null
   run_tokens: number | null
+  /** JSON `{steps, omittedSteps}` (see `LiveRun`). */
+  run_steps: string | null
   stop_requested_at: string | null
   stop_requested_by: string | null
   estimate: TicketSize | null
@@ -758,8 +761,9 @@ export function releaseTicket(id: string, input: ReleaseTicketInput): Ticket {
 }
 
 const getRunRow = (id: string) => {
-  const row = sql.get<RunRow & { board_id: string }>(
-    `SELECT board_id, agent_seen_at, run_started_at, run_step, run_tokens, stop_requested_at, stop_requested_by
+  const row = sql.get<RunRow & Pick<TicketRow, 'board_id' | 'run_steps'>>(
+    `SELECT board_id, agent_seen_at, run_started_at, run_step, run_tokens, run_steps, stop_requested_at,
+       stop_requested_by
      FROM tickets WHERE id = ?`,
     id,
   )
@@ -769,10 +773,10 @@ const getRunRow = (id: string) => {
 
 /**
  * Notes that an agent is working on the ticket right now, starting a run unless one is going on (see `AgentRun`), and
- * what the run is doing and the tokens it has used if the agent says (it keeps them otherwise). Not a change to the
- * ticket: nothing is logged or bumped, but boards are told when a run starts or its step or tokens change, so they
- * show it. A new run starts without a
- * stop request, even if the run before it went quiet with one.
+ * what the run is doing, the tokens it has used and its tool calls so far if the agent says (it keeps them otherwise).
+ * Not a change to the ticket: nothing is logged or bumped, but boards are told when a run starts or its step, tokens
+ * or tool calls change, so they show it. A new run starts without a stop request or tool calls, even if the run before
+ * it went quiet with them.
  */
 export function recordHeartbeat(id: string, input: HeartbeatInput) {
   const row = getRunRow(id)
@@ -780,20 +784,37 @@ export function recordHeartbeat(id: string, input: HeartbeatInput) {
   const at = now()
   const step = input.step === undefined ? (run?.step ?? null) : input.step || null
   const tokens = input.tokens ?? run?.tokens ?? null
+  const before = run ? row.run_steps : null
+  const steps =
+    input.steps === undefined
+      ? before
+      : JSON.stringify({ steps: input.steps, omittedSteps: input.omittedSteps ?? null })
   sql.run(
-    `UPDATE tickets SET agent_seen_at = ?, run_started_at = ?, run_step = ?, run_tokens = ?, stop_requested_at = ?,
-       stop_requested_by = ?
+    `UPDATE tickets SET agent_seen_at = ?, run_started_at = ?, run_step = ?, run_tokens = ?, run_steps = ?,
+       stop_requested_at = ?, stop_requested_by = ?
      WHERE id = ?`,
     at,
     run?.startedAt ?? at,
     step,
     tokens,
+    steps,
     run?.stopRequested?.at ?? null,
     run?.stopRequested?.by ?? null,
     id,
   )
-  if (!run || step !== run.step || tokens !== run.tokens) publish({ boardId: row.board_id })
+  if (!run || step !== run.step || tokens !== run.tokens || steps !== before) publish({ boardId: row.board_id })
   return { stopRequested: run?.stopRequested ?? null }
+}
+
+/** The run working the ticket with its tool calls so far (see `LiveRun`), or null while none is. */
+export function getLiveRun(id: string): LiveRun | null {
+  const row = getRunRow(id)
+  const run = runOf(row)
+  if (!run) return null
+  const { steps = [], omittedSteps = null } = row.run_steps
+    ? (JSON.parse(row.run_steps) as Partial<Pick<LiveRun, 'steps' | 'omittedSteps'>>)
+    : {}
+  return { ...run, steps, omittedSteps }
 }
 
 /** Ends the run working the ticket, if any: the agent says it has stopped. Its stop request, if any, goes with it. */
@@ -801,8 +822,8 @@ export function endRun(id: string) {
   const row = getRunRow(id)
   if (!row.run_started_at) return
   sql.run(
-    `UPDATE tickets SET run_started_at = NULL, run_step = NULL, run_tokens = NULL, stop_requested_at = NULL,
-       stop_requested_by = NULL
+    `UPDATE tickets SET run_started_at = NULL, run_step = NULL, run_tokens = NULL, run_steps = NULL,
+       stop_requested_at = NULL, stop_requested_by = NULL
      WHERE id = ?`,
     id,
   )

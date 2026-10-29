@@ -217,7 +217,12 @@ function TicketDetail({ ticket, onClose }: { ticket: Ticket; onClose: () => void
             </div>
             <SubticketsSection ticket={ticket} />
             <AttachmentsSection ticketId={ticket.id} uploads={uploads} />
-            <ActivityFeed ticketId={ticket.id} pullRequest={ticket.pullRequest} run={ticket.run} />
+            <ActivityFeed
+              ticketId={ticket.id}
+              pullRequest={ticket.pullRequest}
+              run={ticket.run}
+              assignee={ticket.assignee}
+            />
           </div>
         </div>
       </div>

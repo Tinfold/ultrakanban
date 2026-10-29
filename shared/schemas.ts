@@ -358,11 +358,6 @@ export const releaseTicketSchema = z.object({
   force: z.boolean().optional(),
 })
 
-export const heartbeatSchema = z.object({
-  step: z.string().trim().max(200).optional(),
-  tokens: z.int().min(0).optional(),
-})
-
 export const releaseIdleSchema = z.object({
   moveTo: ref,
 })
@@ -522,6 +517,24 @@ export const recordUsageSchema = z.object({
 const clipped = (max: number) =>
   z.string().transform((text) => (text.length > max ? `${text.slice(0, max - 1)}…` : text))
 
+/** An agent run's tool calls (see `RunStep`), at most `RUN_MAX_STEPS`: a long run sends its first and last ones. */
+const runSteps = z
+  .array(
+    z.object({
+      tool: z.string().trim().min(1).max(200),
+      summary: clipped(300).default(''),
+      error: z.boolean().default(false),
+    }),
+  )
+  .max(RUN_MAX_STEPS)
+
+/** How many tool calls a long run left out between its first and last ones, and where. */
+const omittedSteps = z.object({ after: z.int().min(0), count: z.int().min(1) }).nullable()
+
+const stepsFit = (run: { steps?: unknown[]; omittedSteps?: { after: number } | null }) =>
+  !run.omittedSteps || run.omittedSteps.after <= (run.steps?.length ?? 0)
+const omittedStepsMessage = 'omittedSteps.after must be at most the number of steps'
+
 /** What an agent run on a ticket did and how it ended (see `RunRecord`). */
 export const recordRunSchema = z
   .object({
@@ -534,25 +547,20 @@ export const recordRunSchema = z
     costUsd: cost,
     apiKey: z.boolean().default(false),
     message: clipped(RUN_MESSAGE_MAX).default(''),
-    steps: z
-      .array(
-        z.object({
-          tool: z.string().trim().min(1).max(200),
-          summary: clipped(300).default(''),
-          error: z.boolean().default(false),
-        }),
-      )
-      .max(RUN_MAX_STEPS)
-      .default([]),
-    omittedSteps: z
-      .object({ after: z.int().min(0), count: z.int().min(1) })
-      .nullable()
-      .default(null),
+    steps: runSteps.default([]),
+    omittedSteps: omittedSteps.default(null),
   })
-  .refine(
-    (run) => !run.omittedSteps || run.omittedSteps.after <= run.steps.length,
-    'omittedSteps.after must be at most the number of steps',
-  )
+  .refine(stepsFit, omittedStepsMessage)
+
+/** What the run working a ticket is doing, so far (see `AgentRun` and `LiveRun`). */
+export const heartbeatSchema = z
+  .object({
+    step: z.string().trim().max(200).optional(),
+    tokens: z.int().min(0).optional(),
+    steps: runSteps.optional(),
+    omittedSteps: omittedSteps.optional(),
+  })
+  .refine(stepsFit, omittedStepsMessage)
 
 export const listRunsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(RUN_RECORDS_KEPT).default(20),
@@ -713,7 +721,7 @@ export type MoveTicketInput = z.input<typeof moveTicketSchema>
 export type BulkTicketsInput = z.input<typeof bulkTicketsSchema>
 export type ClaimTicketInput = z.input<typeof claimTicketSchema>
 export type ReleaseTicketInput = z.input<typeof releaseTicketSchema>
-export type HeartbeatInput = z.input<typeof heartbeatSchema>
+export type HeartbeatInput = z.output<typeof heartbeatSchema>
 export type ReleaseIdleInput = z.input<typeof releaseIdleSchema>
 export type SubmitForReviewInput = z.input<typeof submitForReviewSchema>
 export type ReportAppUpdateInput = z.input<typeof reportAppUpdateSchema>

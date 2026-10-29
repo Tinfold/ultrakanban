@@ -125,14 +125,24 @@ post() {
     -H 'Content-Type: application/json' -H "X-Actor: ${3:-$worker}" -d "$2"
 }
 
-# Tells the board the agent is working on a ticket right now, what the run is doing (run_step) and how many tokens it
-# has used so far (run_tokens), so the ticket's card shows the run. Sets stop_requested_by to who asked for the run to
-# stop (empty when no one did): the board answers with it, so the loop needn't read the ticket for it.
+# Tells the board the agent is working on a ticket right now, what the run is doing (run_step), how many tokens it
+# has used so far (run_tokens) and its tool calls so far (run_steps, JSON {steps, omittedSteps}), so the ticket shows
+# the run. Sets stop_requested_by to who asked for the run to stop (empty when no one did): the board answers with it,
+# so the loop needn't read the ticket for it. Sets heartbeat_failed when the board didn't take the heartbeat; one whose
+# tool calls the board refuses is sent again without them, so they can't keep the ticket from looking worked on.
 heartbeat() {
-  stop_requested_by=$(curl -s -X POST "$KANBAN/api/tickets/$1/heartbeat" -H 'Content-Type: application/json' \
-    -H "X-Actor: $worker" -d "$(jq -nc --arg step "${run_step:-}" --arg tokens "${run_tokens:-}" \
-      '(if $step == "" then {} else {step: $step} end) + (if $tokens == "" then {} else {tokens: ($tokens | tonumber)} end)')" |
-    jq -r '.stopRequested.by // empty' 2>/dev/null) || stop_requested_by=
+  local body response steps=${run_steps:-}
+  while :; do
+    body=$(jq -nc --arg step "${run_step:-}" --arg tokens "${run_tokens:-}" --arg steps "$steps" '
+      (if $step == "" then {} else {step: $step} end) + (if $tokens == "" then {} else {tokens: ($tokens | tonumber)} end)
+      + (if $steps == "" then {} else $steps | fromjson end)')
+    response=$(post "/tickets/$1/heartbeat" "$body")
+    [[ ${response##*$'\n'} != 400 || -z $steps ]] && break
+    steps=
+  done
+  heartbeat_failed=
+  [[ ${response##*$'\n'} == 200 && $steps == "${run_steps:-}" ]] || heartbeat_failed=1
+  stop_requested_by=$(jq -r '.stopRequested.by // empty' <<<"${response%$'\n'*}" 2>/dev/null) || stop_requested_by=
 }
 
 # Tells the board the run on a ticket has ended.

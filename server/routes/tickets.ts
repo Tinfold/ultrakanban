@@ -46,6 +46,7 @@ import {
   listSubtickets,
   moveTicket,
   postPlan,
+  getLiveRun,
   recordHeartbeat,
   endRun,
   releaseTicket,
@@ -210,6 +211,7 @@ export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles, notifi
       const input = (await c.req.text()) ? await readJson(c, heartbeatSchema) : {}
       return c.json(recordHeartbeat(c.req.param('ticketId'), input))
     })
+    .get('/:ticketId/run', (c) => c.json(getLiveRun(c.req.param('ticketId'))))
     .delete('/:ticketId/heartbeat', (c) => {
       endRun(c.req.param('ticketId'))
       return c.body(null, 204)
