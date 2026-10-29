@@ -72,7 +72,8 @@
 #
 # Runs clean up after themselves, so nothing they leave holds memory or swap for good: each run's TMPDIR is a scratch
 # directory of its ticket's on disk (STATE_DIR/tmp/<ticket>), removed once a run on the ticket finishes, and when a run
-# ends the loop stops whatever it left running (see stop_leftovers in agent-loop/run.sh).
+# ends the loop stops whatever it left running: its systemd scope, and what has its marker (see run_scope and
+# stop_leftovers in agent-loop/run.sh).
 #
 # Each run's token usage (from the result at the end of claude's stream-json output) is reported to the board with
 # POST /tickets/:id/usage, so the overview can show how many tokens each agent uses; a run that ended without a result
@@ -152,6 +153,8 @@
 #                       run is for (working the ticket, or the feedback it answers) (default: 10)
 #   INHIBIT_SLEEP       1 keeps the machine from suspending or going idle while a run is going (a systemd-logind
 #                       inhibitor lock, where systemd-inhibit is available), 0 doesn't (default: 1)
+#   RUN_SCOPE           1 starts each run in a systemd scope of its own, where systemd-run can, so that everything it
+#                       started is stopped when it ends; 0 stops only what still has the run's marker (default: 1)
 #   RETRY_SECONDS       wait before retrying a failed run, doubled after each failure (default: 600)
 #   USAGE_CHECK_SECONDS how often, while out of Claude usage, the board's usage report is read to see whether it is
 #                       back before the time claude's limit message gave (default: 60)
@@ -228,6 +231,7 @@ TICKET_TIMEOUT=${TICKET_TIMEOUT:-4h}
 TICKET_CHECK_SECONDS=${TICKET_CHECK_SECONDS:-30}
 RUN_STEP_SECONDS=${RUN_STEP_SECONDS:-10}
 INHIBIT_SLEEP=${INHIBIT_SLEEP:-1}
+RUN_SCOPE=${RUN_SCOPE:-1}
 RETRY_SECONDS=${RETRY_SECONDS:-600}
 USAGE_CHECK_SECONDS=${USAGE_CHECK_SECONDS:-60}
 MAX_ATTEMPTS=${MAX_ATTEMPTS:-3}
@@ -356,6 +360,7 @@ if [[ ${1:-} == save-work ]]; then
   exit
 fi
 
+check_scopes
 rm -f "$WAKE_FILE"
 listen_for_wakes &
 listener=$!

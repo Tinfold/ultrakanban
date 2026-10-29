@@ -251,9 +251,14 @@ Runs also clean up after themselves. Agents like to put clones, builds and test 
 in memory (tmpfs) and never emptied, so it ends up in swap for good. Each run gets a scratch directory on disk instead,
 as `TMPDIR`, under the loop's state directory (`boards/<board>/state/tmp/<ticket>`), and its prompt asks it to use that
 directory. The directory is removed when the ticket's run finishes, and kept when the run stops partway and will be
-resumed. Directories no run has used for 3 days are removed too. Every run's processes carry an `ULTRAKANBAN_RUN`
-marker in their environment. When the run ends, the loop stops whatever still has the marker, such as a dev server
-started in the background, so nothing it started keeps holding memory.
+resumed. Directories no run has used for 3 days are removed too. Each run also goes in a systemd scope of its own,
+`ultrakanban-run-<id>.scope` in `app-ultrakanban.slice`. When the run ends, the loop stops the scope with everything
+still in it, such as a dev server started in the background, so nothing the run started keeps holding memory or swap.
+That includes processes started with an environment of their own (`env -i`, or a script's `subprocess` with `env=`).
+Stopping the loop's service stops its runs' scopes too. Where systemd can't start scopes (macOS, the Docker image), or
+with `RUN_SCOPE=0`, the loop instead stops whatever still has the run's `ULTRAKANBAN_RUN` marker in its environment,
+which every process the run starts inherits unless it is given an environment of its own. Processes that a run hands
+to another service manager escape both: units started with `systemd-run --user`, and Docker or Podman containers.
 
 **Max turns.** The board's **Max turns per run** setting (`agentMaxTurns`) caps how many turns one `claude -p` run may
 take; the loop passes it as `--max-turns`. Without it a run is limited only by `TICKET_TIMEOUT`. A run that hits the cap
