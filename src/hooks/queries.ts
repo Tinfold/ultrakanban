@@ -10,6 +10,8 @@ export const queryKeys = {
   activity: (ticketId: string) => ['activity', ticketId] as const,
   allActivity: ['activity'] as const,
   runs: (ticketId: string) => ['runs', ticketId] as const,
+  /** Under `runs`, so live updates refetch it with them. */
+  liveRun: (ticketId: string) => ['runs', ticketId, 'live'] as const,
   allRuns: ['runs'] as const,
   attachments: (ticketId: string) => ['attachments', ticketId] as const,
   allAttachments: ['attachments'] as const,
@@ -50,6 +52,10 @@ export const useTicketActivity = (ticketId: string) =>
 /** What the agent's runs on the ticket did and how they ended (see `RunRecord`), newest first. */
 export const useTicketRuns = (ticketId: string) =>
   useQuery({ queryKey: queryKeys.runs(ticketId), queryFn: () => api.listRuns(ticketId) })
+
+/** The run working the ticket with its tool calls so far (see `LiveRun`), fetched only while `enabled`. */
+export const useLiveRun = (ticketId: string, enabled: boolean) =>
+  useQuery({ queryKey: queryKeys.liveRun(ticketId), queryFn: () => api.getLiveRun(ticketId), enabled })
 
 export const useLocalPullRequest = (boardId: string, number: number) =>
   useQuery({

@@ -578,6 +578,11 @@ export const MIGRATIONS = [
   );
   CREATE INDEX local_pull_request_comments_pull_request ON local_pull_request_comments(pull_request_id, created_at);
   `,
+  `
+  -- The tool calls the run working the ticket has made so far, as its heartbeats say (see LiveRun): JSON
+  -- {steps, omittedSteps}, cleared with the run's other fields when it ends.
+  ALTER TABLE tickets ADD COLUMN run_steps TEXT;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

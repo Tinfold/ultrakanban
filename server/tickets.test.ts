@@ -6,6 +6,7 @@ import {
   type ApiErrorBody,
   type BoardDetail,
   type CompactTicket,
+  type LiveRun,
   RUN_MAX_STEPS,
   RUN_MESSAGE_MAX,
   RUN_RECORDS_KEPT,
@@ -518,6 +519,50 @@ describe('idle tickets', () => {
     assert.equal(stale, null)
     assert.ok(restarted!.startedAt > started.startedAt)
     assert.equal(restarted!.step, null)
+  })
+
+  test('shows the tool calls of the run working a ticket so far, until it ends', async () => {
+    const ticket = await addTicket({ title: 'A' })
+    const live = async () => (await call<LiveRun | null>('GET', `/tickets/${ticket.id}/run`)).body
+    const events: string[] = []
+    const unsubscribe = subscribe((event) => events.push(event.boardId))
+    assert.equal(await live(), null)
+
+    await call('POST', `/tickets/${ticket.id}/heartbeat`, { step: 'Working the ticket' })
+    assert.deepEqual(await live().then((run) => [run?.step, run?.steps, run?.omittedSteps]), [
+      'Working the ticket',
+      [],
+      null,
+    ])
+
+    const steps = [{ tool: 'Bash', summary: 'npm test', error: true }, { tool: 'Read' }]
+    await call('POST', `/tickets/${ticket.id}/heartbeat`, { step: 'Read: a.ts', steps })
+    assert.deepEqual((await live())?.steps, [steps[0], { tool: 'Read', summary: '', error: false }])
+    assert.equal(events.length, 2)
+
+    // A heartbeat without them keeps them, and the same ones again change nothing boards need to show.
+    await call('POST', `/tickets/${ticket.id}/heartbeat`, { tokens: 10 })
+    await call('POST', `/tickets/${ticket.id}/heartbeat`, { steps })
+    assert.equal((await live())?.steps.length, 2)
+    assert.equal(events.length, 3)
+
+    // A long run sends its first and last ones, as in its record.
+    const omittedSteps = { after: 1, count: 40 }
+    await call('POST', `/tickets/${ticket.id}/heartbeat`, { steps, omittedSteps })
+    assert.deepEqual((await live())?.omittedSteps, omittedSteps)
+    assert.equal(events.length, 4)
+    unsubscribe()
+    const tooFew = { steps: [], omittedSteps }
+    assert.equal((await call('POST', `/tickets/${ticket.id}/heartbeat`, tooFew)).status, 400)
+    const tooMany = { steps: Array.from({ length: RUN_MAX_STEPS + 1 }, () => ({ tool: 'Bash' })) }
+    assert.equal((await call('POST', `/tickets/${ticket.id}/heartbeat`, tooMany)).status, 400)
+
+    // Ended, the run's tool calls go with it, and the next run starts without them.
+    await call('DELETE', `/tickets/${ticket.id}/heartbeat`)
+    assert.equal(await live(), null)
+    await call('POST', `/tickets/${ticket.id}/heartbeat`)
+    assert.deepEqual((await live())?.steps, [])
+    assert.equal((await call('GET', '/tickets/missing/run')).status, 404)
   })
 
   test('records who asked a run to stop, and wakes the agent up, until the run ends', async () => {

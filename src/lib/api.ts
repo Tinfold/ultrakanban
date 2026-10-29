@@ -24,6 +24,7 @@ import type {
   MergeRun,
   Overview,
   OverviewRange,
+  LiveRun,
   RunRecord,
   SetupStatus,
   Tag,
@@ -147,6 +148,8 @@ export const api = {
   listActivity: (ticketId: string) => request<Activity[]>('GET', `/tickets/${ticketId}/activity`),
   /** The ticket's latest agent runs, newest first. */
   listRuns: (ticketId: string) => request<RunRecord[]>('GET', `/tickets/${ticketId}/runs`),
+  /** The run working the ticket with its tool calls so far, or null while none is. */
+  getLiveRun: (ticketId: string) => request<LiveRun | null>('GET', `/tickets/${ticketId}/run`),
   approvePlan: (ticketId: string) => request<Ticket>('POST', `/tickets/${ticketId}/approve`),
   stopRun: (ticketId: string) => request<Ticket>('POST', `/tickets/${ticketId}/stop`),
   syncPullRequest: (ticketId: string) => request<Ticket>('POST', `/tickets/${ticketId}/pull-request/sync`),

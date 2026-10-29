@@ -398,7 +398,10 @@ Agent call that started a subagent while that works), which the loop reads from 
 `RUN_STEP_SECONDS` (10) and sends with the run's heartbeat when it changed. Before its first call, and with
 `RUN_STEP_SECONDS=0`, they show what the run is for: working the ticket, or the feedback it answers. They also show
 the tokens the run has used so far, which the loop adds up from the same output and sends with each heartbeat, so a
-runaway run shows while it goes on; its record on the ticket shows the tokens it used in all once it ends.
+runaway run shows while it goes on; its record on the ticket shows the tokens it used in all once it ends. The
+ticket's activity also shows the run going on: open it to see the tool calls it has made so far, as in its record,
+which the loop reads from the same output with its step and sends with the heartbeat when they changed, so you can
+follow a run without waiting for it to end.
 
 Nothing is missed, even while a run is going: before each run the loop notes the newest ticket activity id,
 pull request comment, review and inline comment ids, and the head commit's checks and conflict state. It saves

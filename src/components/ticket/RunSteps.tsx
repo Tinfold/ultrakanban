@@ -55,7 +55,7 @@ function Chip({ pressed, onClick, children }: { pressed: boolean; onClick: () =>
  * calls that reported an error, or to those matching a text, and a long run's list scrolls on its own (without
  * scrolling the ticket once it reaches an end) or can be shown in full.
  */
-export function RunSteps({ run }: { run: RunRecord }) {
+export function RunSteps({ run }: { run: Pick<RunRecord, 'steps' | 'omittedSteps'> }) {
   const [filter, setFilter] = useState<StepFilter>(NO_STEP_FILTER)
   const [showAll, setShowAll] = useState(false)
   const steps = useMemo(() => numberSteps(run), [run])
