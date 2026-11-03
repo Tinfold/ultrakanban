@@ -78,6 +78,10 @@ export function boardDiskBreakdown(boardId: string): BoardDiskBreakdown {
     attachments: {
       images: attachmentBytesWhere(`t.board_id = ? AND a.content_type LIKE 'image/%'`, id),
       videos: attachmentBytesWhere(`t.board_id = ? AND a.content_type LIKE 'video/%'`, id),
+      files: attachmentBytesWhere(
+        `t.board_id = ? AND a.content_type NOT LIKE 'image/%' AND a.content_type NOT LIKE 'video/%'`,
+        id,
+      ),
       finished: attachmentBytesWhere(`t.board_id = ? AND ${TICKET_FINISHED}`, id),
       tickets,
     },

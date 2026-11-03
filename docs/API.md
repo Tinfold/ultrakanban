@@ -24,7 +24,7 @@ JSON over HTTP. Base URL: `http://127.0.0.1:4317/api` (in development the Vite d
   - `409 cannot_merge` - the ticket's pull request can't be merged now (draft, conflicts, builds on another in review).
   - `409 merge_conflicts` / `merge_failed` - a local pull request can't be merged (see [Local pull requests](#local-pull-requests)).
   - `502 git_error` - git failed in the board's local repository; the message says how.
-  - `413 payload_too_large` / `415 unsupported_media_type` - attachments must be PNG, JPEG, GIF, WebP, MP4 or WebM, up to 25 MB.
+  - `413 payload_too_large` - attachments can be at most 25 MB.
 
 Columns, tags and epics can be referenced **by id or by name** (an epic's title) (case-insensitive) wherever a request field says `ref`.
 Unknown tag names are created automatically when creating or updating tickets.
@@ -921,9 +921,11 @@ interface AgentSettingStats {
 
 ## Attachments
 
-Screenshots and screen recordings on tickets. Upload one file per request as `multipart/form-data` in a field named
-`file`; the type is detected from the file contents (PNG, JPEG, GIF, WebP, MP4 or WebM, up to 25 MB). Uploads and
-deletions appear in the ticket's activity. Attachments are not included in board exports.
+Screenshots, screen recordings and any other files (archives, logs, documents) on tickets, up to 25 MB each. Upload
+one file per request as `multipart/form-data` in a field named `file`. The type is detected from the file contents, not
+the declared one: PNG, JPEG, GIF, WebP, MP4 and WebM are shown in the browser; anything else is stored as
+`application/octet-stream` and always served as a download (`Content-Disposition: attachment`). Uploads and deletions
+appear in the ticket's activity. Attachments are not included in board exports.
 
 | Method | Path                             | Body             | Returns                       |
 | ------ | -------------------------------- | ---------------- | ----------------------------- |
@@ -937,11 +939,12 @@ interface Attachment {
   id: string
   ticketId: string
   filename: string
-  contentType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp' | 'video/mp4' | 'video/webm'
+  contentType:
+    'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp' | 'video/mp4' | 'video/webm' | 'application/octet-stream'
   size: number // bytes
   actor: string
   createdAt: string
-  url: string // /api/attachments/:id, also usable in markdown: ![screenshot](/api/attachments/:id)
+  url: string // /api/attachments/:id, also usable in markdown: ![screenshot](/api/attachments/:id) or [logs.zip](/api/attachments/:id)
 }
 ```
 
@@ -1189,6 +1192,7 @@ interface BoardDiskBreakdown {
   attachments: {
     images: { count: number; bytes: number } // screenshots: PNG, JPEG, GIF, WebP
     videos: { count: number; bytes: number } // screen recordings: MP4, WebM
+    files: { count: number; bytes: number } // any other file
     finished: { count: number; bytes: number } // those of finished tickets, which the cleanup deletes
     tickets: { ticketId: string; number: number; title: string; finished: boolean; count: number; bytes: number }[] // the 10 largest
   }

@@ -1,11 +1,6 @@
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
-import {
-  ATTACHMENT_TYPES,
-  MAX_ATTACHMENT_BYTES,
-  parseLocalPullRequestUrl,
-  parsePullRequestUrl,
-} from '../../shared/domain.ts'
+import { MAX_ATTACHMENT_BYTES, parseLocalPullRequestUrl, parsePullRequestUrl } from '../../shared/domain.ts'
 import { parseChecklist } from '../../shared/checklist.ts'
 import {
   approvePlanSchema,
@@ -163,13 +158,6 @@ export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles, notifi
 
         const bytes = new Uint8Array(await file.arrayBuffer())
         const contentType = detectAttachmentType(bytes)
-        if (!contentType) {
-          throw new HttpError(
-            415,
-            'unsupported_media_type',
-            `Attachments must be one of: ${ATTACHMENT_TYPES.join(', ')}`,
-          )
-        }
 
         const id = newId()
         await attachmentFiles.write(id, bytes)

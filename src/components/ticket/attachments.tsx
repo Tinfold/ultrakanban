@@ -1,7 +1,17 @@
-import { CopyIcon, ExternalLinkIcon, PaperclipIcon, PlayIcon, PlusIcon, Trash2Icon } from 'lucide-react'
+import {
+  CopyIcon,
+  DownloadIcon,
+  ExternalLinkIcon,
+  FileArchiveIcon,
+  FileIcon,
+  PaperclipIcon,
+  PlayIcon,
+  PlusIcon,
+  Trash2Icon,
+} from 'lucide-react'
 import { type DragEvent, useState } from 'react'
 import { toast } from 'sonner'
-import { type Attachment, ATTACHMENT_TYPES } from '@shared/domain'
+import { type Attachment, isMediaAttachment } from '@shared/domain'
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
@@ -13,11 +23,32 @@ import { cn } from '@/lib/utils'
 import { useBoardContext } from '../board/board-context'
 import type { AttachmentUploads } from './use-attachment-uploads'
 
+const ARCHIVE = /\.(7z|zip|rar|tar|tgz|gz|bz2|xz|zst)$/i
+
+/** An icon for a file that isn't a screenshot or recording, by its name. */
+function FileTypeIcon({ filename, className }: { filename: string; className?: string }) {
+  const Icon = ARCHIVE.test(filename) ? FileArchiveIcon : FileIcon
+  return <Icon className={className} />
+}
+
+const extension = (filename: string) => /\.([a-z0-9]{1,8})$/i.exec(filename)?.[1]?.toUpperCase()
+
+/** Markdown that shows the attachment: an image for a screenshot, a link for anything else. */
+const attachmentMarkdown = ({ filename, url, contentType }: Attachment) =>
+  contentType.startsWith('image/') ? `![${filename}](${url})` : `[${filename}](${url})`
+
 export function AttachmentThumbnail({ attachment, className }: { attachment: Attachment; className?: string }) {
   const video = attachment.contentType.startsWith('video/')
   return (
     <span className={cn('relative block overflow-hidden rounded-lg border bg-muted', className)}>
-      {video ? (
+      {!isMediaAttachment(attachment.contentType) ? (
+        <span className="flex size-full flex-col items-center justify-center gap-1 text-muted-foreground">
+          <FileTypeIcon filename={attachment.filename} className="size-6" />
+          <span className="text-[11px] font-medium">
+            {extension(attachment.filename) ?? 'File'} · {formatBytes(attachment.size)}
+          </span>
+        </span>
+      ) : video ? (
         <>
           <video src={attachment.url} preload="metadata" muted className="size-full object-cover" />
           <span className="absolute inset-0 grid place-items-center">
@@ -45,7 +76,7 @@ export function AttachmentViewer({ ticketId, attachment, onClose }: AttachmentVi
 
   const copyMarkdown = async (item: Attachment) => {
     try {
-      await copyText(`![${item.filename}](${item.url})`)
+      await copyText(attachmentMarkdown(item))
     } catch {
       toast.error("Couldn't copy to the clipboard")
       return
@@ -59,7 +90,17 @@ export function AttachmentViewer({ ticketId, attachment, onClose }: AttachmentVi
         {attachment && (
           <>
             <div className="grid max-h-[75dvh] place-items-center bg-black/90">
-              {attachment.contentType.startsWith('video/') ? (
+              {!isMediaAttachment(attachment.contentType) ? (
+                <div className="grid place-items-center gap-3 px-6 py-16 text-white/80">
+                  <FileTypeIcon filename={attachment.filename} className="size-12" />
+                  <Button variant="secondary" size="sm" asChild>
+                    <a href={attachment.url} download={attachment.filename}>
+                      <DownloadIcon />
+                      Download
+                    </a>
+                  </Button>
+                </div>
+              ) : attachment.contentType.startsWith('video/') ? (
                 <video src={attachment.url} controls autoPlay className="max-h-[75dvh] w-auto" />
               ) : (
                 <img src={attachment.url} alt={attachment.filename} className="max-h-[75dvh] w-auto object-contain" />
@@ -77,12 +118,14 @@ export function AttachmentViewer({ ticketId, attachment, onClose }: AttachmentVi
                 <CopyIcon />
                 Copy markdown
               </Button>
-              <Button variant="ghost" size="sm" asChild>
-                <a href={attachment.url} target="_blank" rel="noreferrer">
-                  <ExternalLinkIcon />
-                  Open original
-                </a>
-              </Button>
+              {isMediaAttachment(attachment.contentType) && (
+                <Button variant="ghost" size="sm" asChild>
+                  <a href={attachment.url} target="_blank" rel="noreferrer">
+                    <ExternalLinkIcon />
+                    Open original
+                  </a>
+                </Button>
+              )}
               <Button variant="ghost" size="sm" className="text-destructive" onClick={() => setConfirmingDelete(true)}>
                 <Trash2Icon />
                 Delete
@@ -111,7 +154,7 @@ export function AttachmentsSection({ ticketId, uploads }: { ticketId: string; up
   const [dragging, setDragging] = useState(false)
   const [viewing, setViewing] = useState<Attachment | null>(null)
 
-  const browse = async () => uploads.upload(await pickFiles(ATTACHMENT_TYPES.join(','), { multiple: true }))
+  const browse = async () => uploads.upload(await pickFiles('', { multiple: true }))
 
   const dropProps = {
     onDragOver: (event: DragEvent) => {
@@ -152,7 +195,7 @@ export function AttachmentsSection({ ticketId, uploads }: { ticketId: string; up
           )}
         >
           <PaperclipIcon className="size-4" />
-          Drop screenshots or recordings, paste, or browse
+          Drop screenshots, recordings or other files, paste, or browse
         </button>
       ) : (
         <ul

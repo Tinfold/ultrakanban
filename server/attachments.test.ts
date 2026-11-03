@@ -38,6 +38,7 @@ describe('attachments', () => {
     assert.equal(status, 201)
     assert.equal(attachment.filename, 'screenshot.png')
     assert.equal(served.headers.get('content-type'), 'image/png')
+    assert.match(served.headers.get('content-disposition') ?? '', /^inline;/)
     assert.deepEqual(new Uint8Array(await served.arrayBuffer()), PNG)
     assert.deepEqual(
       listed.map((item) => item.id),
@@ -47,14 +48,27 @@ describe('attachments', () => {
     assert.equal(updated.attachmentCount, 1)
   })
 
-  test('rejects unsupported files regardless of declared type', async () => {
+  test('stores any other file as a download, whatever its declared type', async () => {
     const ticket = await addTicket({ title: 'A' })
+    const SEVEN_ZIP = new Uint8Array([0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c, 0, 4, 1, 2, 3])
     const svg = new TextEncoder().encode('<svg onload="alert(1)"></svg>')
-    const res = await upload(ticket.id, svg, 'fake.png', 'image/png')
+    const archive = await upload(ticket.id, SEVEN_ZIP, 'logs.7z', 'application/x-7z-compressed')
+    const disguised = await upload(ticket.id, svg, 'fake.png', 'image/png')
     const missing = await call('POST', `/tickets/${ticket.id}/attachments`, {})
 
-    assert.equal(res.status, 415)
-    assert.equal(res.body.error.code, 'unsupported_media_type')
+    assert.equal(archive.status, 201)
+    assert.equal(archive.body.filename, 'logs.7z')
+    assert.equal(archive.body.contentType, 'application/octet-stream')
+    const served = await app.request(archive.body.url)
+    assert.equal(served.headers.get('content-type'), 'application/octet-stream')
+    assert.equal(served.headers.get('content-disposition'), "attachment; filename*=UTF-8''logs.7z")
+    assert.deepEqual(new Uint8Array(await served.arrayBuffer()), SEVEN_ZIP)
+
+    assert.equal(disguised.status, 201)
+    assert.equal(disguised.body.contentType, 'application/octet-stream')
+    const servedSvg = await app.request(disguised.body.url)
+    assert.match(servedSvg.headers.get('content-disposition') ?? '', /^attachment;/)
+    assert.equal(servedSvg.headers.get('x-content-type-options'), 'nosniff')
     assert.equal(missing.status, 400)
   })
 
@@ -82,18 +96,21 @@ describe('attachments', () => {
     const kept = (await upload(open.id, PNG, 'open.png')).body
     const recent = (await upload(cancelled.id, MP4, 'recording.mp4')).body
     const old = (await upload(cancelled.id, PNG, 'old.png')).body
+    const ZIP = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2])
+    const archive = (await upload(open.id, ZIP, 'logs.zip')).body
     await call('POST', `/tickets/${cancelled.id}/move`, { column: 'Cancelled' })
     sql.run('UPDATE attachments SET created_at = ? WHERE id = ?', '2020-01-01T00:00:00.000Z', old.id)
 
     const { body: usage } = await call<BoardDiskBreakdown>('GET', `/boards/${boardId}/disk-usage`)
     assert.deepEqual(usage.attachments.images, { count: 2, bytes: PNG.length * 2 })
     assert.deepEqual(usage.attachments.videos, { count: 1, bytes: MP4.length })
+    assert.deepEqual(usage.attachments.files, { count: 1, bytes: ZIP.length })
     assert.deepEqual(usage.attachments.finished, { count: 2, bytes: PNG.length + MP4.length })
     assert.deepEqual(
       usage.attachments.tickets.map(({ title, count, finished }) => ({ title, count, finished })),
       [
         { title: 'Cancelled', count: 2, finished: true },
-        { title: 'Open', count: 1, finished: false },
+        { title: 'Open', count: 2, finished: false },
       ],
     )
     assert.equal(usage.agent, null)
@@ -107,7 +124,7 @@ describe('attachments', () => {
     assert.deepEqual(none, { count: 0, bytes: 0 })
 
     const files = readdirSync(attachmentDir)
-    assert.ok(files.includes(kept.id))
+    assert.ok(files.includes(kept.id) && files.includes(archive.id))
     assert.ok(!files.includes(old.id) && !files.includes(recent.id))
     assert.equal((await call('POST', path, { olderThanDays: 0 })).status, 400)
   })

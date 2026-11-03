@@ -2,7 +2,7 @@ import { createReadStream } from 'node:fs'
 import { access, mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { Readable } from 'node:stream'
-import type { AttachmentType } from '../shared/domain.ts'
+import { type AttachmentType, FILE_ATTACHMENT_TYPE, type MediaAttachmentType } from '../shared/domain.ts'
 
 export type AttachmentFiles = ReturnType<typeof createAttachmentFiles>
 
@@ -11,8 +11,15 @@ const matches = (bytes: Uint8Array, signature: number[] | string, offset = 0) =>
     (expected, index) => bytes[offset + index] === (typeof expected === 'string' ? expected.charCodeAt(0) : expected),
   )
 
-/** Identifies a supported media type from the file contents; the type a client declares isn't trusted. */
-export function detectAttachmentType(bytes: Uint8Array): AttachmentType | null {
+/**
+ * Identifies a screenshot or screen recording from the file contents (the type a client declares isn't trusted); any
+ * other file is a plain download.
+ */
+export function detectAttachmentType(bytes: Uint8Array): AttachmentType {
+  return detectMediaType(bytes) ?? FILE_ATTACHMENT_TYPE
+}
+
+function detectMediaType(bytes: Uint8Array): MediaAttachmentType | null {
   if (matches(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return 'image/png'
   if (matches(bytes, [0xff, 0xd8, 0xff])) return 'image/jpeg'
   if (matches(bytes, 'GIF87a') || matches(bytes, 'GIF89a')) return 'image/gif'
@@ -29,6 +36,7 @@ const EXTENSIONS: Record<AttachmentType, string> = {
   'image/webp': 'webp',
   'video/mp4': 'mp4',
   'video/webm': 'webm',
+  [FILE_ATTACHMENT_TYPE]: 'bin',
 }
 
 /** A display-safe file name: no directories or control characters, with a fallback for unnamed uploads. */

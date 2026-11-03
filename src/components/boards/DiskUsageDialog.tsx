@@ -85,7 +85,7 @@ function Attachments({ usage, onClose }: { usage: BoardDiskBreakdown; onClose: (
   const [, setSearchParams] = useSearchParams()
   const [age, setAge] = useState<(typeof AGES)[number]>(0)
   const [confirming, setConfirming] = useState(false)
-  const { images, videos, finished, tickets } = usage.attachments
+  const { images, videos, files: others, finished, tickets } = usage.attachments
   const done =
     (detail.board.doneColumnId && columnsById.get(detail.board.doneColumnId)?.name) || detail.columns.at(-1)?.name
   const cancelled = detail.columns.find((column) => column.name.toLowerCase() === CANCELLED_COLUMN)?.name
@@ -113,9 +113,10 @@ function Attachments({ usage, onClose }: { usage: BoardDiskBreakdown; onClose: (
   }
 
   return (
-    <Section title="Attachments" total={images.bytes + videos.bytes}>
+    <Section title="Attachments" total={images.bytes + videos.bytes + others.bytes}>
       <Row label="Screenshots" detail={files(images)} value={images.bytes} />
       <Row label="Screen recordings" detail={files(videos)} value={videos.bytes} />
+      <Row label="Other files" detail={files(others)} value={others.bytes} />
       <Row label="On finished tickets" detail={files(finished)} value={finished.bytes} />
 
       {tickets.length > 0 && (
