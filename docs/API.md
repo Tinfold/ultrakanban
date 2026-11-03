@@ -24,7 +24,7 @@ JSON over HTTP. Base URL: `http://127.0.0.1:4317/api` (in development the Vite d
   - `409 cannot_merge` - the ticket's pull request can't be merged now (draft, conflicts, builds on another in review).
   - `409 merge_conflicts` / `merge_failed` - a local pull request can't be merged (see [Local pull requests](#local-pull-requests)).
   - `502 git_error` - git failed in the board's local repository; the message says how.
-  - `413 payload_too_large` - attachments can be at most 25 MB.
+  - `413 payload_too_large` - attachments can be at most 25 MB from an agent, 1 GB from a person (see [Attachments](#attachments)).
 
 Columns, tags and epics can be referenced **by id or by name** (an epic's title) (case-insensitive) wherever a request field says `ref`.
 Unknown tag names are created automatically when creating or updating tickets.
@@ -921,8 +921,9 @@ interface AgentSettingStats {
 
 ## Attachments
 
-Screenshots, screen recordings and any other files (archives, logs, documents) on tickets, up to 25 MB each. Upload
-one file per request as `multipart/form-data` in a field named `file`. The type is detected from the file contents, not
+Screenshots, screen recordings and any other files (archives, logs, documents) on tickets. Agents (an `X-Actor` of the
+form `<agent>/<model>/<effort>`) can upload up to 25 MB each, people (any other `X-Actor`, e.g. `me` from the UI) up to
+1 GB. Upload one file per request as `multipart/form-data` in a field named `file`. The type is detected from the file contents, not
 the declared one: PNG, JPEG, GIF, WebP, MP4 and WebM are shown in the browser; anything else is stored as
 `application/octet-stream` and always served as a download (`Content-Disposition: attachment`). Uploads and deletions
 appear in the ticket's activity. Attachments are not included in board exports.

@@ -480,7 +480,20 @@ export const FILE_ATTACHMENT_TYPE = 'application/octet-stream'
 export type AttachmentType = MediaAttachmentType | typeof FILE_ATTACHMENT_TYPE
 export const isMediaAttachment = (type: string): type is MediaAttachmentType =>
   (MEDIA_ATTACHMENT_TYPES as readonly string[]).includes(type)
+/** Largest attachment an agent (an `<agent>/<model>/<effort>` name, see `parseWorkerName`) can upload. */
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+/** Largest attachment a person (any other `X-Actor`, e.g. `me` from the UI) can upload. */
+export const MAX_PERSON_ATTACHMENT_BYTES = 1024 * 1024 * 1024
+
+/** Largest attachment `actor` can upload: agents are held to `MAX_ATTACHMENT_BYTES`, people get more. */
+export const maxAttachmentBytes = (actor: string) =>
+  parseWorkerName(actor) ? MAX_ATTACHMENT_BYTES : MAX_PERSON_ATTACHMENT_BYTES
+
+/** The limit as people read it, e.g. `25 MB` or `1 GB`. */
+export function formatAttachmentLimit(bytes: number) {
+  const mb = bytes / 1024 / 1024
+  return mb >= 1024 ? `${mb / 1024} GB` : `${mb} MB`
+}
 
 export interface Attachment {
   id: string
