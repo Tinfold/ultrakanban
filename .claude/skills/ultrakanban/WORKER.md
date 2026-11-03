@@ -52,7 +52,7 @@ curl -s -X POST $KANBAN/api/tickets/$TICKET/checklist/0 -H 'Content-Type: applic
 
 Post a comment on a notable decision or when blocked: `POST /api/tickets/$TICKET/comments` with `{"body":"<markdown>"}`.
 Attach screenshots of visible changes: `POST /api/tickets/$TICKET/attachments -F file=@shot.png` (PNG, JPEG, GIF, WebP,
-MP4, WebM, up to 25 MB).
+MP4, WebM are shown inline, other files are downloads; up to 25 MB).
 
 ## Submit for review
 

@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { isMediaAttachment } from '../../shared/domain.ts'
 import type { AttachmentFiles } from '../attachment-files.ts'
 import { transaction } from '../db.ts'
 import { notFound } from '../errors.ts'
@@ -10,10 +11,12 @@ export const attachmentRoutes = (files: AttachmentFiles) =>
       const attachment = getAttachment(c.req.param('attachmentId'))
       const contents = await files.open(attachment.id)
       if (!contents) throw notFound('Attachment file', attachment.id)
+      // Only screenshots and recordings are shown in the browser; any other file is downloaded, never rendered.
+      const disposition = isMediaAttachment(attachment.contentType) ? 'inline' : 'attachment'
       return c.body(contents, 200, {
         'Content-Type': attachment.contentType,
         'Content-Length': String(attachment.size),
-        'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(attachment.filename)}`,
+        'Content-Disposition': `${disposition}; filename*=UTF-8''${encodeURIComponent(attachment.filename)}`,
         'Cache-Control': 'private, max-age=31536000, immutable',
         'X-Content-Type-Options': 'nosniff',
       })

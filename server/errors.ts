@@ -1,7 +1,7 @@
 import { GitHubError } from './github.ts'
 
 export class HttpError extends Error {
-  readonly status: 400 | 404 | 409 | 413 | 415 | 429 | 502
+  readonly status: 400 | 404 | 409 | 413 | 429 | 502
   readonly code: string
   readonly details?: unknown
   /** Seconds to wait before trying again, sent as `Retry-After`. */

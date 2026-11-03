@@ -1,9 +1,9 @@
 import { useCallback, useState } from 'react'
 import { toast } from 'sonner'
-import { ATTACHMENT_TYPES } from '@shared/domain'
+import { MAX_ATTACHMENT_BYTES } from '@shared/domain'
 import { useBoardContext } from '../board/board-context'
 
-const isSupported = (file: File) => (ATTACHMENT_TYPES as readonly string[]).includes(file.type)
+const isSupported = (file: File) => file.size <= MAX_ATTACHMENT_BYTES
 
 /** Upload state for one ticket, shared by the attachments section and the dialog's paste handler. */
 export function useAttachmentUploads(ticketId: string) {
@@ -13,7 +13,8 @@ export function useAttachmentUploads(ticketId: string) {
   const upload = useCallback(
     async (files: File[]) => {
       const supported = files.filter(isSupported)
-      if (supported.length < files.length) toast.error('Only PNG, JPEG, GIF, WebP, MP4 and WebM files can be attached')
+      if (supported.length < files.length)
+        toast.error(`Attachments can be at most ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB`)
       if (!supported.length) return
       setUploading((count) => count + supported.length)
       await actions.uploadAttachments(ticketId, supported)

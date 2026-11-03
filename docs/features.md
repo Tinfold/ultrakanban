@@ -6,8 +6,8 @@
   assignee, due date, tags, comments, full activity history, shareable links (`?ticket=<id>`)
 - **View**: search, filter by priority/tag/assignee, sort by manual order, priority, due date, recency or title
   (saved per board)
-- **Attachments**: screenshots and screen recordings on tickets (upload, drag and drop or paste), shown in the
-  ticket and its activity
+- **Attachments**: screenshots, screen recordings and any other files (archives, logs) on tickets (upload, drag and
+  drop or paste); screenshots and recordings are shown in the ticket and its activity, other files are downloads
 - **Pull request workflow**: agents submit tickets for review with their GitHub pull request; tickets only enter
   Done once the pull request is merged and move there automatically when it is. Questions (tickets tagged
   `question`) are answered in a comment instead, and you close them yourself by moving them to Done
