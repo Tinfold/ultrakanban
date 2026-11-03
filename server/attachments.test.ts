@@ -7,6 +7,7 @@ import {
   type AttachmentCleanup,
   type BoardDiskBreakdown,
   type BoardSummary,
+  MAX_ATTACHMENT_BYTES,
   type Ticket,
 } from '../shared/domain.ts'
 import { sql } from './db.ts'
@@ -15,12 +16,18 @@ import { addTicket, app, attachmentDir, boardId, call } from './test-app.ts'
 describe('attachments', () => {
   const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4])
 
-  const upload = async (ticketId: string, bytes: Uint8Array, filename: string, type = 'image/png') => {
+  const upload = async (
+    ticketId: string,
+    bytes: Uint8Array,
+    filename: string,
+    type = 'image/png',
+    actor = 'agent-1',
+  ) => {
     const form = new FormData()
     form.append('file', new File([bytes], filename, { type }))
     const res = await app.request(`/api/tickets/${ticketId}/attachments`, {
       method: 'POST',
-      headers: { 'x-actor': 'agent-1' },
+      headers: { 'x-actor': actor },
       body: form,
     })
     return { status: res.status, body: (await res.json()) as Attachment & { error: { code: string } } }
@@ -70,6 +77,19 @@ describe('attachments', () => {
     assert.match(servedSvg.headers.get('content-disposition') ?? '', /^attachment;/)
     assert.equal(servedSvg.headers.get('x-content-type-options'), 'nosniff')
     assert.equal(missing.status, 400)
+  })
+
+  test('holds agents to 25 MB but lets people attach larger files', async () => {
+    const ticket = await addTicket({ title: 'A' })
+    const large = new Uint8Array(MAX_ATTACHMENT_BYTES + 1)
+    const byAgent = await upload(ticket.id, large, 'large.bin', 'application/octet-stream', 'claude/opus/high')
+    const byPerson = await upload(ticket.id, large, 'large.bin', 'application/octet-stream', 'me')
+
+    assert.equal(byAgent.status, 413)
+    assert.equal(byAgent.body.error.code, 'payload_too_large')
+    assert.match(JSON.stringify(byAgent.body), /at most 25 MB/)
+    assert.equal(byPerson.status, 201)
+    assert.equal(byPerson.body.size, MAX_ATTACHMENT_BYTES + 1)
   })
 
   test('removes files when the attachment or its ticket is deleted', async () => {

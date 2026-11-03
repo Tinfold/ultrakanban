@@ -1,6 +1,11 @@
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
-import { MAX_ATTACHMENT_BYTES, parseLocalPullRequestUrl, parsePullRequestUrl } from '../../shared/domain.ts'
+import {
+  formatAttachmentLimit,
+  maxAttachmentBytes,
+  parseLocalPullRequestUrl,
+  parsePullRequestUrl,
+} from '../../shared/domain.ts'
 import { parseChecklist } from '../../shared/checklist.ts'
 import {
   approvePlanSchema,
@@ -77,7 +82,7 @@ async function commentOnPullRequest(github: GitHubClient, ticketId: string, body
   }
 }
 
-const tooLargeMessage = `Attachments can be at most ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB`
+const tooLargeMessage = (maxBytes: number) => `Attachments can be at most ${formatAttachmentLimit(maxBytes)}`
 
 export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles, notifier }: AppServices) =>
   new Hono()
@@ -143,18 +148,23 @@ export const ticketRoutes = ({ pullRequests, mergeQueue, attachmentFiles, notifi
     .get('/:ticketId/attachments', (c) => c.json(listAttachments(c.req.param('ticketId'))))
     .post(
       '/:ticketId/attachments',
-      // Multipart framing adds some overhead on top of the file itself.
-      bodyLimit({
-        maxSize: MAX_ATTACHMENT_BYTES + 64 * 1024,
-        onError: (c) => c.json(errorBody('payload_too_large', tooLargeMessage), 413),
-      }),
+      // Agents are held to a smaller limit than people (see `maxAttachmentBytes`). Multipart framing adds some overhead
+      // on top of the file itself.
+      (c, next) => {
+        const maxBytes = maxAttachmentBytes(actorOf(c))
+        return bodyLimit({
+          maxSize: maxBytes + 64 * 1024,
+          onError: (c) => c.json(errorBody('payload_too_large', tooLargeMessage(maxBytes)), 413),
+        })(c, next)
+      },
       async (c) => {
         const ticketId = getTicket(c.req.param('ticketId')).id
         const { file } = await c.req.parseBody()
         if (!(file instanceof File)) {
           throw badRequest('Send the file as multipart/form-data in a field named "file"')
         }
-        if (file.size > MAX_ATTACHMENT_BYTES) throw new HttpError(413, 'payload_too_large', tooLargeMessage)
+        const maxBytes = maxAttachmentBytes(actorOf(c))
+        if (file.size > maxBytes) throw new HttpError(413, 'payload_too_large', tooLargeMessage(maxBytes))
 
         const bytes = new Uint8Array(await file.arrayBuffer())
         const contentType = detectAttachmentType(bytes)
