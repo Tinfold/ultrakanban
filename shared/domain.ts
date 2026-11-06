@@ -1501,6 +1501,44 @@ export interface Overview {
   recent: OverviewActivity[]
 }
 
+/** A ticket the morning summary lists, with when it got where it is. */
+export interface MorningSummaryTicket {
+  id: string
+  boardId: string
+  number: number
+  title: string
+  assignee: string | null
+  at: string
+  pullRequest: { url: string; state: PullRequestState } | null
+}
+
+/** What happened on a board within the morning summary's window. The lists hold where tickets stand now, oldest first. */
+export interface MorningSummaryBoard {
+  id: string
+  name: string
+  /** Tickets that reached the done column and are still there. */
+  completed: MorningSummaryTicket[]
+  /** Tickets that entered the review column and are still there, with a pull request that isn't closed. */
+  review: MorningSummaryTicket[]
+  /** Open tickets whose agent started waiting for an answer or for approval of its plan, and still is. */
+  waiting: MorningSummaryTicket[]
+  /** Tickets created. */
+  created: number
+  comments: number
+  /** All activity entries, of any kind. */
+  events: number
+  /** Agent runs' usage. */
+  usage: TicketUsage
+}
+
+export interface MorningSummary {
+  generatedAt: string
+  /** Start of the window. */
+  since: string
+  /** Every board, including those where nothing happened. */
+  boards: MorningSummaryBoard[]
+}
+
 /**
  * Updating ultrakanban itself, done on the host by the agent supervisor (`scripts/agent-supervisor.sh`): someone asks
  * for it in the app (`requested`), the supervisor picks it up (`running`), moves the checkout to origin's default

@@ -16,6 +16,7 @@ import { AgentList } from '@/components/overview/AgentList'
 import { BoardTable } from '@/components/overview/BoardTable'
 import { ClaudeUsage } from '@/components/overview/ClaudeUsage'
 import { type ChartSeries, ColumnChart } from '@/components/overview/ColumnChart'
+import { MorningSummary } from '@/components/overview/MorningSummary'
 import { NeedsAttention } from '@/components/overview/NeedsAttention'
 import { RecentActivity } from '@/components/overview/RecentActivity'
 import { RoutingTable } from '@/components/overview/RoutingTable'
@@ -23,7 +24,7 @@ import { SettingsTable } from '@/components/overview/SettingsTable'
 import { TicketUsageTable, type UsageGrouping } from '@/components/overview/TicketUsageTable'
 import { Button } from '@/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { queryKeys, useClaudeUsage, useOverview } from '@/hooks/queries'
+import { queryKeys, useClaudeUsage, useMorningSummary, useOverview } from '@/hooks/queries'
 import { useNow } from '@/hooks/use-now'
 import { useStoredState } from '@/hooks/use-stored-state'
 import { api, errorMessage } from '@/lib/api'
@@ -36,6 +37,7 @@ import {
   modelSeries,
   modelsByTokens,
   needsAttention,
+  overnightStart,
   seriesTokens,
   workedByAgent,
 } from '@/lib/overview'
@@ -62,6 +64,7 @@ const HOUR_MS = 60 * 60 * 1000
 
 /** Anchors of the parts of the page stats and the jump bar link to. */
 const SECTIONS = {
+  morning: 'morning-summary',
   attention: 'needs-attention',
   agents: 'agents',
   boards: 'boards',
@@ -140,6 +143,7 @@ const tickets = (count: number) => `${count} ${count === 1 ? 'ticket' : 'tickets
 
 function JumpBar({ attention }: { attention: number }) {
   const links: [SectionId, string, number?][] = [
+    [SECTIONS.morning, 'Morning summary'],
     [SECTIONS.attention, 'Needs attention', attention],
     [SECTIONS.agents, 'Agents'],
     [SECTIONS.boards, 'Boards'],
@@ -218,6 +222,9 @@ export function OverviewPage() {
   const { data: overview, error, isPlaceholderData } = useOverview(days)
   const { data: claudeUsage } = useClaudeUsage()
   const now = useNow()
+  // Stays the same all day, so the summary only refetches when something changes.
+  const overnight = overnightStart(now).toISOString()
+  const { data: morningSummary } = useMorningSummary(overnight)
   const queryClient = useQueryClient()
 
   useEffect(() => {
@@ -293,6 +300,20 @@ export function OverviewPage() {
     content = (
       <div className={cn('grid grid-cols-1 gap-6 transition-opacity', isPlaceholderData && 'opacity-60')}>
         <JumpBar attention={attention.waiting.length + attention.review.length + attention.stalled.length} />
+
+        {morningSummary && (
+          <Section
+            id={SECTIONS.morning}
+            title="Morning summary"
+            actions={
+              <p className="text-xs text-muted-foreground" title={formatDateTime(morningSummary.since)}>
+                Since 18:00 yesterday
+              </p>
+            }
+          >
+            <MorningSummary boards={morningSummary.boards} />
+          </Section>
+        )}
 
         {claudeUsage && <ClaudeUsage usage={claudeUsage} now={now} />}
 

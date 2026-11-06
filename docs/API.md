@@ -1072,6 +1072,41 @@ Stale or duplicate agent names can be cleared from the list: `POST /overview/hid
 actor), and `DELETE /overview/hidden-agents` (204) lists every cleared agent again. Totals, charts and sessions still
 include their work.
 
+### Morning summary
+
+`GET /overview/morning-summary?since=<ISO time>` (default: the last 12 hours) says briefly what happened on each board
+since then. The overview page asks for everything since 18:00 yesterday, local time.
+
+```ts
+interface MorningSummary {
+  generatedAt: string
+  since: string
+  // Every board, including those where nothing happened (no events and no tokens)
+  boards: {
+    id
+    name
+    completed: MorningSummaryTicket[] // reached the done column within the window and are still there
+    review: MorningSummaryTicket[] // entered the review column within the window and are still there, pull request not closed
+    waiting: MorningSummaryTicket[] // open; their agent started waiting for an answer or plan approval within the window and still is
+    created: number // tickets created
+    comments: number
+    events: number // activity entries of any kind
+    usage: { runs; tokens; costUsd } // agent runs' usage; costUsd is null when none reported one
+  }[]
+}
+
+// Lists are oldest first; `at` is when the ticket got there.
+interface MorningSummaryTicket {
+  id
+  boardId
+  number
+  title
+  assignee: string | null
+  at: string
+  pullRequest: { url; state } | null
+}
+```
+
 ## Updating ultrakanban
 
 The app can't update itself from its container; the updater does it when asked: the agent supervisor

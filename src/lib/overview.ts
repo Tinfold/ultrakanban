@@ -1,7 +1,8 @@
-import { addDays, differenceInCalendarDays, startOfDay } from 'date-fns'
+import { addDays, differenceInCalendarDays, setHours, startOfDay } from 'date-fns'
 import {
   addUsage,
   type BoardDiskUsage,
+  type MorningSummaryBoard,
   noUsage,
   type Overview,
   type OverviewAgent,
@@ -13,6 +14,12 @@ import {
   type UsageTotals,
   type WorkSession,
 } from '@shared/domain'
+
+/** When "overnight" starts, for the morning summary: 18:00 local time yesterday. */
+export const overnightStart = (now: number) => setHours(addDays(startOfDay(now), -1), 18)
+
+/** Whether anything happened on a board within the morning summary's window. */
+export const hadActivity = (board: MorningSummaryBoard) => board.events > 0 || board.usage.tokens > 0
 
 /** All of a board's disk space, in bytes. */
 export const diskBytes = ({ attachments, agent }: BoardDiskUsage) =>
