@@ -2,11 +2,13 @@ import assert from 'node:assert/strict'
 import { beforeEach, describe, test } from 'node:test'
 import {
   OVERVIEW_ACTIVITY_LIMIT,
+  type MorningSummary,
   type Overview,
   type OverviewActivity,
   type Ticket,
   type TokenUsage,
 } from '../shared/domain.ts'
+import { sql } from './db.ts'
 import { getOverview, getOverviewActivity } from './store/overview.ts'
 import { addTicket, app, boardId, call, pullRequestStatuses, useBoard } from './test-app.ts'
 
@@ -552,5 +554,88 @@ describe('overview', () => {
 
     for (let i = 0; i < OVERVIEW_ACTIVITY_LIMIT; i++) await addTicket({ title: `Ticket ${i}` })
     assert.equal(getOverviewActivity(14, boardId).length, OVERVIEW_ACTIVITY_LIMIT)
+  })
+
+  describe('morning summary', () => {
+    const agent = 'night-agent'
+    const summaryOf = async (since: string) => {
+      const { status, body } = await call<MorningSummary>('GET', `/overview/morning-summary?since=${since}`)
+      assert.equal(status, 200)
+      return body.boards.find((board) => board.id === boardId)!
+    }
+    const numbers = (tickets: { number: number }[]) => tickets.map((ticket) => ticket.number)
+    /** Makes a ticket's whole history look older than the window. */
+    const backdate = (ticketId: string, at: string) =>
+      sql.run('UPDATE activity SET created_at = ? WHERE ticket_id = ?', at, ticketId)
+    const claim = (ticketId: string) => call('POST', `/tickets/${ticketId}/claim`, { agent, moveTo: 'In progress' })
+
+    test('says what got done, what waits for review and who waits for an answer', async () => {
+      const done = await addTicket({ title: 'Done overnight' })
+      const reviewed = await addTicket({ title: 'Reviewed overnight' })
+      const asking = await addTicket({ title: 'Asks something' })
+      const reopened = await addTicket({ title: 'Reopened' })
+      const old = await addTicket({ title: 'Done before the window' })
+      for (const ticket of [done, reviewed, asking]) await claim(ticket.id)
+
+      await call('POST', `/tickets/${reviewed.id}/review`, { agent, pullRequest: PR })
+      await call('POST', `/tickets/${asking.id}/comments`, { body: 'Which one?' }, agent)
+      await call('POST', `/tickets/${done.id}/move`, { column: 'Done', force: true })
+      await call('POST', `/tickets/${reopened.id}/move`, { column: 'Done', force: true })
+      await call('POST', `/tickets/${reopened.id}/move`, { column: 'Todo' })
+      await call('POST', `/tickets/${old.id}/move`, { column: 'Done', force: true })
+      backdate(old.id, '2020-01-01T00:00:00.000Z')
+      await call('POST', `/tickets/${done.id}/usage`, {
+        agent,
+        inputTokens: 100,
+        outputTokens: 50,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        costUsd: 1.5,
+      })
+
+      const board = await summaryOf('2026-01-01T00:00:00.000Z')
+      assert.deepEqual(numbers(board.completed), [done.number])
+      assert.deepEqual(numbers(board.review), [reviewed.number])
+      assert.equal(board.review[0].pullRequest?.url, PR)
+      assert.equal(board.review[0].assignee, agent)
+      assert.deepEqual(numbers(board.waiting), [asking.number])
+      // Everything but the backdated ticket.
+      assert.equal(board.created, 4)
+      assert.equal(board.comments, 1)
+      assert.deepEqual([board.usage.runs, board.usage.tokens, board.usage.costUsd], [1, 150, 1.5])
+    })
+
+    test('leaves out what happened before the window', async () => {
+      const ticket = await addTicket({ title: 'Earlier' })
+      await call('POST', `/tickets/${ticket.id}/move`, { column: 'Done', force: true })
+
+      const later = new Date(Date.now() + 60 * 60 * 1000).toISOString()
+      const board = await summaryOf(later)
+      assert.deepEqual([board.completed, board.review, board.waiting], [[], [], []])
+      assert.deepEqual([board.created, board.comments, board.events, board.usage.runs], [0, 0, 0, 0])
+    })
+
+    test('covers the last 12 hours by default and rejects a since that is not a time', async () => {
+      const ticket = await addTicket({ title: 'Recent' })
+      await call('POST', `/tickets/${ticket.id}/move`, { column: 'Done', force: true })
+
+      const { body } = await call<MorningSummary>('GET', '/overview/morning-summary')
+      assert.equal(Date.parse(body.generatedAt) - Date.parse(body.since), 12 * 60 * 60 * 1000)
+      assert.deepEqual(numbers(body.boards.find((board) => board.id === boardId)!.completed), [ticket.number])
+
+      const { status } = await call('GET', '/overview/morning-summary?since=yesterday')
+      assert.equal(status, 400)
+    })
+
+    test('reads a since with an offset as the same moment', async () => {
+      const ticket = await addTicket({ title: 'Offset' })
+      await call('POST', `/tickets/${ticket.id}/move`, { column: 'Done', force: true })
+
+      // An hour ago, written 14 hours ahead of UTC: compared as text it would look later than the move.
+      const at = new Date(Date.now() - 60 * 60 * 1000)
+      const offset = new Date(at.getTime() + 14 * 60 * 60 * 1000).toISOString().replace('Z', '+14:00')
+      const board = await summaryOf(encodeURIComponent(offset))
+      assert.deepEqual(numbers(board.completed), [ticket.number])
+    })
   })
 })

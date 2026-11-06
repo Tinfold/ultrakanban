@@ -4,6 +4,7 @@ import {
   addUsage,
   AGENT_DEFAULTS,
   AGENT_EFFORTS,
+  type BoardSummary,
   CANCELLED_COLUMN,
   agentWorkerName,
   JEV_AGENT,
@@ -97,7 +98,7 @@ interface TicketRow {
   waiting_since: string | null
 }
 
-interface ColumnRow {
+export interface ColumnRow {
   id: string
   board_id: string
   name: string
@@ -111,10 +112,28 @@ interface Workflow {
   doneName: string | null
 }
 
-const key = (name: string) => name.toLowerCase()
+export const columnKey = (name: string) => name.toLowerCase()
+
+/** Each board's review and done columns. */
+export function boardWorkflows(boards: BoardSummary[], columns: ColumnRow[]) {
+  const columnNames = new Map(columns.map((column) => [column.id, column.name]))
+  const workflows = new Map<string, Workflow>()
+  for (const board of boards) {
+    // Without a done column, a board's last column is where finished work goes.
+    const doneId = board.doneColumnId ?? columns.findLast((column) => column.board_id === board.id)?.id ?? null
+    const reviewId = board.reviewColumnId
+    workflows.set(board.id, {
+      reviewId,
+      doneId,
+      reviewName: reviewId ? columnKey(columnNames.get(reviewId)!) : null,
+      doneName: doneId ? columnKey(columnNames.get(doneId)!) : null,
+    })
+  }
+  return workflows
+}
 
 /** Whether nobody works on a ticket anymore: it's done or cancelled, or its pull request was closed unmerged. */
-function isClosed(workflow: Workflow, column: string, pullRequestClosed: boolean) {
+export function isClosed(workflow: Workflow, column: string, pullRequestClosed: boolean) {
   return pullRequestClosed || column === workflow.doneName || column === CANCELLED_COLUMN
 }
 
@@ -141,18 +160,7 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
   const boardNames = new Map(boards.map((board) => [board.id, board.name]))
   const columns = sql.all<ColumnRow>('SELECT id, board_id, name FROM columns ORDER BY board_id, position')
   const columnNames = new Map(columns.map((column) => [column.id, column.name]))
-  const workflows = new Map<string, Workflow>()
-  for (const board of boards) {
-    // Without a done column, a board's last column is where finished work goes.
-    const doneId = board.doneColumnId ?? columns.findLast((column) => column.board_id === board.id)?.id ?? null
-    const reviewId = board.reviewColumnId
-    workflows.set(board.id, {
-      reviewId,
-      doneId,
-      reviewName: reviewId ? key(columnNames.get(reviewId)!) : null,
-      doneName: doneId ? key(columnNames.get(doneId)!) : null,
-    })
-  }
+  const workflows = boardWorkflows(boards, columns)
 
   const tickets = sql.all<TicketRow>(
     `SELECT id, board_id, column_id, number, title, assignee, pr_url, pr_state, created_at, approval,
@@ -203,9 +211,9 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
     let startedAt: string | null = null
     let reviewSince: string | null = null
     for (const entry of entries) {
-      if (entry.type === 'created') column = key(entry.data.column)
+      if (entry.type === 'created') column = columnKey(entry.data.column)
       if (entry.type === 'moved') {
-        column = key(entry.data.to)
+        column = columnKey(entry.data.to)
         if (column === workflow.doneName && entry.createdAt >= since) {
           increment(completedOn, ticket.board_id)
           if (assignee) increment(completedBy, assignee)
@@ -324,7 +332,7 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
     const workflow = workflows.get(ticket.board_id)!
     const counts = boardCounts.get(ticket.board_id) ?? { open: 0, working: 0, review: 0 }
     boardCounts.set(ticket.board_id, counts)
-    if (isClosed(workflow, key(columnNames.get(ticket.column_id)!), ticket.pr_state === 'closed')) continue
+    if (isClosed(workflow, columnKey(columnNames.get(ticket.column_id)!), ticket.pr_state === 'closed')) continue
     counts.open++
     if (!ticket.assignee) continue
     const state: WorkState = ticket.column_id === workflow.reviewId ? 'review' : 'working'
@@ -361,7 +369,7 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
     const kind: OverviewEventKind =
       entry.type === 'created' || entry.type === 'comment'
         ? entry.type
-        : entry.type === 'moved' && key(entry.data.to) === done
+        : entry.type === 'moved' && columnKey(entry.data.to) === done
           ? 'completed'
           : 'update'
     return { at: entry.createdAt, kind, actor: entry.actor, boardId: row.board_id }

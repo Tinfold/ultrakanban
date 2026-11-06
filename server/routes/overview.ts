@@ -1,7 +1,13 @@
 import { Hono } from 'hono'
-import { hideAgentsSchema, overviewActivityQuerySchema, overviewQuerySchema } from '../../shared/schemas.ts'
+import {
+  hideAgentsSchema,
+  morningSummaryQuerySchema,
+  overviewActivityQuerySchema,
+  overviewQuerySchema,
+} from '../../shared/schemas.ts'
 import { transaction } from '../db.ts'
 import { readJson } from '../http.ts'
+import { getMorningSummary } from '../store/morning-summary.ts'
 import { getOverview, getOverviewActivity, hideAgents, showHiddenAgents } from '../store/overview.ts'
 
 export const overviewRoutes = new Hono()
@@ -15,6 +21,10 @@ export const overviewRoutes = new Hono()
       board: c.req.query('board'),
     })
     return c.json(getOverviewActivity(days, board ?? null))
+  })
+  .get('/morning-summary', (c) => {
+    const { since } = morningSummaryQuerySchema.parse({ since: c.req.query('since') })
+    return c.json(getMorningSummary(since))
   })
   .post('/hidden-agents', async (c) => {
     const { names } = await readJson(c, hideAgentsSchema)

@@ -22,8 +22,8 @@ It follows your system's light or dark mode, or pick one with the toggle in the 
 
 The board shows each ticket's agent, plan size, checklist, pull request and its checks, token cost, and what a running
 agent is doing right now. A ticket holds its description, the agent's plan, comments and the full history. The overview
-adds up the work across all boards: Claude plan usage, cycle time, review wait, time worked and tokens per agent and
-model.
+adds up the work across all boards: a morning summary of what happened on each board overnight, Claude plan usage,
+cycle time, review wait, time worked and tokens per agent and model.
 
 ## Install
 
