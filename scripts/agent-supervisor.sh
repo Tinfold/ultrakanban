@@ -370,8 +370,17 @@ start_login() {
   [[ -n $login_pid ]] && kill -0 "$login_pid" 2>/dev/null && return 0
   login=$(curl -sf "$KANBAN/api/system/agents/login") || return 0
   [[ $(jq -r '.state // empty' <<<"$login") == requested ]] || return 0
-  run_login "$(jq -r .kind <<<"$login")" "$(jq -r .requestedAt <<<"$login")" &
+  # If it dies before reporting how it went, the page would wait and this would keep starting it: login_died reports it.
+  (
+    trap login_died EXIT
+    run_login "$(jq -r .kind <<<"$login")" "$(jq -r .requestedAt <<<"$login")"
+    trap - EXIT
+  ) &
   login_pid=$!
+}
+
+login_died() {
+  login_report '{"state":"failed","message":"The login stopped unexpectedly. The log of the agent supervisor says why."}' >/dev/null
 }
 
 # Posts to the login's status (see reportAgentLoginSchema): `login_report <json>`. Fails when the login is over or was
@@ -386,7 +395,7 @@ login_report() {
 # gives claude the code pasted back on the page, and reports how it went. Stops when the login is cancelled or after
 # 15 minutes, when the code or link has expired.
 run_login() {
-  local kind=$1 requested=$2 dir pid fd url user_code code login message status deadline=$((SECONDS + 900)) shown= over= url_seen=
+  local kind=$1 requested=$2 dir pid fd url user_code code login message= status deadline=$((SECONDS + 900)) shown= over= url_seen=
   echo "logging the agents in to $kind, as asked on the Setup page"
   if [[ $kind == github ]] && ! command -v gh >/dev/null; then
     message="gh isn't installed where the agents run. Install the GitHub CLI (https://github.com/cli/cli/blob/trunk/docs/install_linux.md), then log in again."
