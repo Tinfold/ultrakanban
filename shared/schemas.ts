@@ -650,6 +650,8 @@ export const listActivityQuerySchema = z.object({
   type: z.array(z.enum(ACTIVITY_TYPES)).optional(),
 })
 
+export const morningSummaryQuerySchema = z.object({ since: z.iso.datetime({ offset: true }).optional() })
+
 export const overviewQuerySchema = z.object({
   days: z
     .enum(OVERVIEW_RANGES.map(String) as [`${OverviewRange}`])

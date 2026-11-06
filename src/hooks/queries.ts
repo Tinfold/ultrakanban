@@ -21,6 +21,7 @@ export const queryKeys = {
   mergePlan: (boardId: string) => ['merge-plan', boardId] as const,
   mergeRun: (boardId: string) => ['merge-run', boardId] as const,
   overview: (days: OverviewRange) => ['overview', days] as const,
+  morningSummary: (since: string) => ['overview', 'morning-summary', since] as const,
   allOverviews: ['overview'] as const,
   appUpdate: ['app-update'] as const,
   claudeUsage: ['claude-usage'] as const,
@@ -96,6 +97,9 @@ export const useTicketAttachments = (ticketId: string) =>
 /** Keeps showing the previous range while another one loads. */
 export const useOverview = (days: OverviewRange) =>
   useQuery({ queryKey: queryKeys.overview(days), queryFn: () => api.overview(days), placeholderData: keepPreviousData })
+
+export const useMorningSummary = (since: string) =>
+  useQuery({ queryKey: queryKeys.morningSummary(since), queryFn: () => api.morningSummary(since) })
 
 /** A column's tickets no agent is working on. Checked every minute, since tickets become idle as time passes. */
 export const useIdleTickets = (columnId: string, enabled: boolean) =>
