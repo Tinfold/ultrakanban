@@ -692,7 +692,8 @@ ticket can be in one epic, sub-tickets included.
 Agents report the tokens each run used on a ticket, and the [overview](#overview) adds them up per agent, board and
 day. `scripts/agent-loop.sh` reports every `claude -p` run it starts that leaves a result (from the result at the end of
 its `--output-format stream-json` output, all models the run called, subagents included); other agents can report
-theirs the same way. Runs that weren't on a ticket (an assistant
+theirs the same way. Report what the run added: claude's result counts the whole session, so for a resumed run the loop
+subtracts the totals of the session's last run, which it keeps in the ticket's state. Runs that weren't on a ticket (an assistant
 answering a question, say) are reported to the board instead, and count toward the agent's and the board's totals just
 the same, with `ticketId: null`. Every ticket carries its runs' totals in `usage`.
 
