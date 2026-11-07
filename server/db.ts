@@ -583,6 +583,11 @@ export const MIGRATIONS = [
   -- {steps, omittedSteps}, cleared with the run's other fields when it ends.
   ALTER TABLE tickets ADD COLUMN run_steps TEXT;
   `,
+  `
+  -- The most GB of build output a checkout of the board's agent keeps (see BoardSummary.agentMaxBuildGb); NULL for
+  -- the loop's MAX_BUILD_GB.
+  ALTER TABLE boards ADD COLUMN agent_max_build_gb INTEGER;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

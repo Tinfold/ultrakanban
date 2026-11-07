@@ -498,6 +498,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
     const text = (field: string) => String(data.get(field) ?? '').trim() || null
     const archiveDays = Number(text('archiveDoneDays'))
     const maxTurns = Number(text('agentMaxTurns'))
+    const maxBuildGb = text('agentMaxBuildGb')
     const approvalSize = String(data.get('approvalSize') ?? NONE)
     // Left alone without a key, as the settings aren't shown then.
     const jevPatch: BoardPatch = hasTypesafeKey ? jev : {}
@@ -515,6 +516,7 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
       agentEffort: agent.agentEffort,
       agentConcurrency,
       agentMaxTurns: maxTurns >= 1 ? Math.round(maxTurns) : null,
+      agentMaxBuildGb: maxBuildGb === null ? null : Math.max(0, Math.round(Number(maxBuildGb))),
       agentConflictConcurrency,
       ...fixRuns,
       agentEnabled: data.get('agentEnabled') === 'on',
@@ -821,6 +823,19 @@ function BoardSettingsForm({ onClose }: { onClose: () => void }) {
                     step={1}
                     defaultValue={detail.board.agentMaxTurns ?? ''}
                     placeholder="no limit"
+                  />
+                </div>
+                <div className="grid content-start gap-2">
+                  <Label htmlFor="board-settings-agent-max-build-gb">Max build output (GB)</Label>
+                  <Input
+                    id="board-settings-agent-max-build-gb"
+                    name="agentMaxBuildGb"
+                    type="number"
+                    min={0}
+                    max={100000}
+                    step={1}
+                    defaultValue={detail.board.agentMaxBuildGb ?? ''}
+                    placeholder="default"
                   />
                 </div>
                 <div className="grid content-start gap-2">

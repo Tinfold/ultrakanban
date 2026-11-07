@@ -80,6 +80,7 @@ const agentModel = z
   .nullable()
 const agentEffort = z.enum(AGENT_EFFORTS).nullable()
 const agentMaxTurns = z.int().min(1).max(10_000).nullable()
+const agentMaxBuildGb = z.int().min(0).max(100_000).nullable()
 const agentConcurrency = z.int().min(1).max(AGENT_MAX_CONCURRENCY).nullable()
 const agentConflictConcurrency = z.int().min(0).max(AGENT_MAX_CONCURRENCY).nullable()
 const archiveDoneDays = z.int().min(1).max(3650).nullable()
@@ -113,6 +114,7 @@ export const createBoardSchema = z.object({
   agentEffort: agentEffort.optional(),
   agentConcurrency: agentConcurrency.optional(),
   agentMaxTurns: agentMaxTurns.optional(),
+  agentMaxBuildGb: agentMaxBuildGb.optional(),
   agentConflictConcurrency: agentConflictConcurrency.optional(),
   agentConflictModel: agentModel.optional(),
   agentConflictEffort: agentEffort.optional(),
@@ -148,6 +150,7 @@ export const updateBoardSchema = z.object({
   agentEffort: agentEffort.optional(),
   agentConcurrency: agentConcurrency.optional(),
   agentMaxTurns: agentMaxTurns.optional(),
+  agentMaxBuildGb: agentMaxBuildGb.optional(),
   agentConflictConcurrency: agentConflictConcurrency.optional(),
   agentConflictModel: agentModel.optional(),
   agentConflictEffort: agentEffort.optional(),
