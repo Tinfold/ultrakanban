@@ -555,6 +555,8 @@ export interface BoardSummary {
   agentConcurrency: number | null
   /** The most turns one run of the agent may take (claude's `--max-turns`); no limit when not set. */
   agentMaxTurns: number | null
+  // The most GB of build output a checkout keeps between runs, 0 for no limit; the loop's MAX_BUILD_GB when null
+  agentMaxBuildGb: number | null
   /**
    * How many more runs the agent can make at once that only fix merge conflicts (and answer whatever else is new on
    * those tickets), each in its own git worktree, beside `agentConcurrency`: the conflicts that merging one pull request

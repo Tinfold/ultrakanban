@@ -160,3 +160,25 @@ describe("switching every board's agents off and on", () => {
     for (const id of [deleted, agentOff]) assert.ok(!(await wanted()).includes(id), id)
   })
 })
+
+describe("a board's limit on its agent's build output", () => {
+  test('is kept, cleared and validated', async () => {
+    const { body: board } = await call<{ id: string; agentMaxBuildGb: number | null }>('POST', '/boards', {
+      name: 'Builds',
+      columns: ['Todo'],
+    })
+    assert.equal(board.agentMaxBuildGb, null)
+
+    const limit = async () =>
+      (await call<{ board: { agentMaxBuildGb: number | null } }>('GET', `/boards/${board.id}`)).body.board
+        .agentMaxBuildGb
+    for (const value of [150, 0, null]) {
+      assert.equal((await call('PATCH', `/boards/${board.id}`, { agentMaxBuildGb: value })).status, 200)
+      assert.equal(await limit(), value)
+    }
+
+    for (const value of [-1, 1.5, 100_001]) {
+      assert.equal((await call('PATCH', `/boards/${board.id}`, { agentMaxBuildGb: value })).status, 400)
+    }
+  })
+})
