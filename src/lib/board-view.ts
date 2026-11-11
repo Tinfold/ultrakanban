@@ -1,4 +1,16 @@
-import type { AgentEffort, BoardDetail, Priority, Tag, Ticket, TicketSize } from '@shared/domain'
+import {
+  AGENT_DEFAULTS,
+  type AgentEffort,
+  type BoardDetail,
+  type BoardSummary,
+  type Column,
+  IN_PROGRESS_COLUMN,
+  isBoardAgent,
+  type Priority,
+  type Tag,
+  type Ticket,
+  type TicketSize,
+} from '@shared/domain'
 import { priorityRank } from './priority'
 
 export const SORT_OPTIONS = {
@@ -121,3 +133,22 @@ export function modelsOf(tickets: Ticket[]) {
     a.localeCompare(b),
   )
 }
+
+/**
+ * Who holds a ticket in progress other than the board's agent, e.g. another agent or a person working it through the
+ * API: the agent loop neither runs it nor answers feedback on it. Null when the board's agent holds it, no one does, it
+ * isn't in the In progress column, or the board has no agent switched on (then no ticket is the loop's).
+ */
+export function outsideAgent(
+  ticket: Pick<Ticket, 'assignee'>,
+  board: Pick<BoardSummary, 'agentEnabled' | 'agentName'>,
+  column: Pick<Column, 'name'> | undefined,
+) {
+  if (!board.agentEnabled || !ticket.assignee || column?.name.toLowerCase() !== IN_PROGRESS_COLUMN) return null
+  return isBoardAgent(board, ticket.assignee) ? null : ticket.assignee
+}
+
+/** What it means that someone other than the board's agent holds a ticket in progress (see `outsideAgent`). */
+export const outsideAgentNote = (board: Pick<BoardSummary, 'agentName'>) =>
+  `Not the board's agent (${board.agentName ?? AGENT_DEFAULTS.name}): it works this outside the agent loop, e.g. ` +
+  "through the API. The loop doesn't run it or answer feedback on it."
