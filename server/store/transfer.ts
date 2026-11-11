@@ -35,6 +35,7 @@ export function exportBoard(id: string): BoardExport {
       agentEffort: ticket.agentEffort,
       agentModel: ticket.agentModel,
       agentDocker: ticket.agentDocker,
+      noAutoMerge: ticket.noAutoMerge,
       // A local pull request lives on this board only (see LocalPullRequest), so it isn't exported.
       pullRequest:
         ticket.pullRequest && !parseLocalPullRequestUrl(ticket.pullRequest.url)

@@ -583,6 +583,10 @@ export const MIGRATIONS = [
   -- {steps, omittedSteps}, cleared with the run's other fields when it ends.
   ALTER TABLE tickets ADD COLUMN run_steps TEXT;
   `,
+  `
+  -- Whether the board's auto-merge leaves the ticket's pull request alone, for people to merge (see Ticket).
+  ALTER TABLE tickets ADD COLUMN no_auto_merge INTEGER NOT NULL DEFAULT 0;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

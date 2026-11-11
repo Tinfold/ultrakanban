@@ -58,6 +58,7 @@ export type TicketPatch = Partial<
     | 'agentEffort'
     | 'agentModel'
     | 'agentDocker'
+    | 'noAutoMerge'
     | 'tagIds'
     | 'epicId'
   >

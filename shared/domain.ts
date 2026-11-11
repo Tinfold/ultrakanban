@@ -709,6 +709,11 @@ export interface Ticket {
   agentModel: string | null
   /** Whether the board's agent works this ticket in a Docker container; the board's `agentDocker` when not set. */
   agentDocker: boolean | null
+  /**
+   * Whether the board's auto-merge leaves its pull request alone, so that a person merges it (its `autoMergeWait`
+   * says so). Merging it by hand, or with "merge all", still works.
+   */
+  noAutoMerge: boolean
   tagIds: string[]
   pullRequest: PullRequest | null
   position: number

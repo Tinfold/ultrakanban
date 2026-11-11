@@ -49,6 +49,7 @@ import { newId, now, reorder, sql, touchBoard, updateRow, wakeAgent } from '../d
 import { badRequest, conflict, HttpError, notFound } from '../errors.ts'
 import { publish } from '../events.ts'
 import { logActivity } from './activity.ts'
+import { NO_AUTO_MERGE_REASON } from './auto-merge.ts'
 import { getClaudeUsage } from './claude-usage.ts'
 import { getColumn, listColumns, resolveColumn, workflowColumns } from './columns.ts'
 import { resolveEpic } from './epics.ts'
@@ -67,6 +68,7 @@ interface TicketRow {
   agent_effort: AgentEffort | null
   agent_model: string | null
   agent_docker: number | null
+  no_auto_merge: number
   pr_url: string | null
   pr_state: string
   pr_title: string | null
@@ -200,11 +202,17 @@ function runOf(row: RunRow): AgentRun | null {
 /**
  * Why auto-merge waits on the ticket's pull request, as its latest round found, only while that can still apply: the
  * board has auto-merge on, the ticket is in its review column and the pull request is open. So a ticket that moves on,
- * or a board that switches auto-merge off, stops showing it at once, before the next round forgets it.
+ * or a board that switches auto-merge off, stops showing it at once, before the next round forgets it. Marking the
+ * ticket not to merge automatically (`noAutoMerge`), or unmarking it, shows at once too.
  */
 function autoMergeWaitOf(row: TicketRow): AutoMergeWait | null {
   const open = row.pr_state === 'unknown' || row.pr_state === 'open' || row.pr_state === 'draft'
-  if (!row.auto_merge_wait || !row.auto_merge_on || !row.pr_url || !open) return null
+  if (!row.auto_merge_on || !row.pr_url || !open) return null
+  const marked = row.no_auto_merge === 1
+  if (marked && row.auto_merge_wait !== NO_AUTO_MERGE_REASON) {
+    return { reason: NO_AUTO_MERGE_REASON, failed: false, since: row.updated_at }
+  }
+  if (!row.auto_merge_wait || (!marked && row.auto_merge_wait === NO_AUTO_MERGE_REASON)) return null
   return {
     reason: row.auto_merge_wait,
     failed: row.auto_merge_failed === 1,
@@ -225,6 +233,7 @@ const toTicket = (row: TicketRow): Ticket => ({
   agentEffort: row.agent_effort,
   agentModel: row.agent_model,
   agentDocker: row.agent_docker === null ? null : row.agent_docker === 1,
+  noAutoMerge: row.no_auto_merge === 1,
   tagIds: row.tag_ids ? row.tag_ids.split(',') : [],
   pullRequest: row.pr_url ? toPullRequest(row.pr_url, row) : null,
   position: row.position,
@@ -262,6 +271,7 @@ const EDITABLE_FIELDS = [
   'agentEffort',
   'agentModel',
   'agentDocker',
+  'noAutoMerge',
 ] as const
 
 /** Actor recorded for changes caused by GitHub pull request updates. */
@@ -557,8 +567,9 @@ export function createTicket(boardId: string, input: CreateTicketInput, actor: s
   const timestamp = now()
   sql.run(
     `INSERT INTO tickets (id, board_id, column_id, number, title, description, priority, assignee, due_date,
-       agent_effort, agent_model, agent_docker, parent_id, epic_id, position, moved_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       agent_effort, agent_model, agent_docker, no_auto_merge, parent_id, epic_id, position, moved_at, created_at,
+       updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     boardId,
     column.id,
@@ -571,6 +582,7 @@ export function createTicket(boardId: string, input: CreateTicketInput, actor: s
     input.agentEffort ?? null,
     input.agentModel ?? null,
     input.agentDocker == null ? null : Number(input.agentDocker),
+    Number(input.noAutoMerge ?? false),
     parentId,
     epicId,
     count,
@@ -602,6 +614,7 @@ export function updateTicket(id: string, input: UpdateTicketInput, actor: string
     agent_effort: has('agentEffort') ? input.agentEffort : undefined,
     agent_model: has('agentModel') ? input.agentModel : undefined,
     agent_docker: has('agentDocker') ? (input.agentDocker == null ? null : Number(input.agentDocker)) : undefined,
+    no_auto_merge: has('noAutoMerge') ? Number(input.noAutoMerge) : undefined,
   })
 
   if (input.tags) {
