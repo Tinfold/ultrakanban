@@ -587,6 +587,10 @@ export const MIGRATIONS = [
   -- Whether the board's auto-merge leaves the ticket's pull request alone, for people to merge (see Ticket).
   ALTER TABLE tickets ADD COLUMN no_auto_merge INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  -- Whether the board's agent runs Claude with ultracode (standing multi-agent workflows) on the ticket.
+  ALTER TABLE tickets ADD COLUMN agent_ultracode INTEGER NOT NULL DEFAULT 0;
+  `,
 ]
 
 export const databasePath = process.env.ULTRAKANBAN_DB ?? 'data/ultrakanban.db'

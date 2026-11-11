@@ -555,6 +555,18 @@ describe('pull request workflow', () => {
     assert.equal(cleared.agentDocker, null)
   })
 
+  test('tickets can turn on ultracode for the agent', async () => {
+    const ticket = await addTicket({ title: 'Big refactor', agentUltracode: true })
+    assert.equal(ticket.agentUltracode, true)
+    assert.equal((await addTicket({ title: 'Typo' })).agentUltracode, false, 'off unless the ticket turns it on')
+    assert.equal((await call('PATCH', `/tickets/${ticket.id}`, { agentUltracode: null })).status, 400)
+
+    const { body: off } = await call<Ticket>('PATCH', `/tickets/${ticket.id}`, { agentUltracode: false })
+    assert.equal(off.agentUltracode, false)
+    const activity = (await call<Activity[]>('GET', `/tickets/${ticket.id}/activity`)).body
+    assert.ok(activity.some((entry) => entry.type === 'updated' && entry.data.fields.includes('agentUltracode')))
+  })
+
   test('review needs a configured review column', async () => {
     await call('PATCH', `/boards/${boardId}`, { reviewColumn: null })
     const ticket = await addTicket({ title: 'A' })

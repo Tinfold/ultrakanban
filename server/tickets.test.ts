@@ -751,10 +751,15 @@ describe('boards', () => {
       priority: 'high',
       agentEffort: 'low',
       noAutoMerge: true,
+      agentUltracode: true,
     })
     await call('POST', `/tickets/${ticket.id}/comments`, { body: 'hello' })
-    const { body: exported } = await call<{ tickets: { noAutoMerge: boolean }[] }>('GET', `/boards/${boardId}/export`)
+    const { body: exported } = await call<{ tickets: { noAutoMerge: boolean; agentUltracode: boolean }[] }>(
+      'GET',
+      `/boards/${boardId}/export`,
+    )
     assert.equal(exported.tickets[0].noAutoMerge, true)
+    assert.equal(exported.tickets[0].agentUltracode, true)
 
     const { body: imported } = await call<{ id: string }>('POST', '/boards/import', exported)
     const { body: reexported } = await call('GET', `/boards/${imported.id}/export`)

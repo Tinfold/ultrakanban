@@ -376,6 +376,35 @@ uses is already loaded, here.
 $(<"$skill")")
 }
 
+# The arguments for claude of the next run on a ticket (run_args): CLAUDE_ARGS and the loop's own (claude_args), with
+# ultracode on (claude's ultracode setting: the run orchestrates multi-agent workflows) when the ticket's
+# agentUltracode is on. Never for a run only to fix merge conflicts or failing CI (run_on_ticket's fix). claude only takes the last --settings, so ultracode goes into the one CLAUDE_ARGS
+# has, if any (inline JSON or a file), rather than dropping it.
+use_ultracode() {
+  local id=$1 i at= value merged
+  run_args=(${claude_args[@]+"${claude_args[@]}"})
+  ((${fix:-0})) && return 0
+  get "/tickets/$id" | jq -e '.agentUltracode == true' >/dev/null || return 0
+  for i in "${!run_args[@]}"; do
+    [[ ${run_args[i]} == --settings || ${run_args[i]} == --settings=* ]] && at=$i
+  done
+  if [[ -z $at ]]; then
+    run_args+=(--settings '{"ultracode":true}')
+    return 0
+  fi
+  if [[ ${run_args[at]} == --settings ]]; then value=${run_args[at + 1]-}; else value=${run_args[at]#--settings=}; fi
+  if [[ $value == '{'* ]]; then merged=$(jq -c '. + {ultracode: true}' <<<"$value" 2>/dev/null); else
+    merged=$(jq -c '. + {ultracode: true}' "$value" 2>/dev/null)
+  fi
+  if [[ -z $merged ]]; then
+    log "ticket $id: can't add ultracode to the settings CLAUDE_ARGS gives claude ($value); running without it"
+  elif [[ ${run_args[at]} == --settings ]]; then
+    run_args[at + 1]=$merged
+  else
+    run_args[at]=--settings=$merged
+  fi
+}
+
 # The image runs use in Docker when DOCKER_IMAGE isn't set: the tools the loop gives a run on the machine (claude,
 # git, gh, jq, curl) and Node.js. Built the first time a run needs it.
 read -r -d '' DOCKERFILE <<'DOCKERFILE'
@@ -493,6 +522,7 @@ run_claude() {
   shift 2
   output=$(mktemp) && errors=$(mktemp) && stopped=$(mktemp) || return 1
   use_skills
+  use_ultracode "$id"
   if ! use_docker "$id"; then
     claude_stopped= claude_stop_requested= claude_errors= claude_subtype= claude_result="Can't run it in Docker: $docker_error."
     rm -f "$output" "$errors" "$stopped"
@@ -527,7 +557,7 @@ in memory and is never cleaned up. \$TMPDIR is on disk, and the loop empties it 
     # The agents' API key reaches only a run that goes on it, as claude's own.
     if [[ -n $api_key_budget ]]; then export ANTHROPIC_API_KEY=$AGENT_API_KEY; fi
     unset AGENT_API_KEY
-    exec ${scope_args[@]+"${scope_args[@]}"} timeout --foreground -k "${TICKET_KILL_AFTER:-30}" "$TICKET_TIMEOUT" ${docker_args[@]+"${docker_args[@]}"} claude -p ${claude_args[@]+"${claude_args[@]}"} \
+    exec ${scope_args[@]+"${scope_args[@]}"} timeout --foreground -k "${TICKET_KILL_AFTER:-30}" "$TICKET_TIMEOUT" ${docker_args[@]+"${docker_args[@]}"} claude -p ${run_args[@]+"${run_args[@]}"} \
       ${skill_args[@]+"${skill_args[@]}"} ${budget_args[@]+"${budget_args[@]}"} ${max_turns:+--max-turns "$max_turns"} --model "$model" --effort "$effort" \
       --output-format stream-json --verbose "$@"
   ) <<<"$prompt" >"$output" 2>"$errors" &
