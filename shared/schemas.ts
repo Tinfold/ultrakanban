@@ -661,6 +661,11 @@ export const overviewQuerySchema = z.object({
     .transform((days) => Number(days) as OverviewRange),
 })
 
+export const overviewActivityQuerySchema = overviewQuerySchema.extend({
+  /** Only this board's activity. */
+  board: z.string().min(1).optional(),
+})
+
 export const hideAgentsSchema = z.object({ names: z.array(name).min(1).max(100) })
 
 export const BOARD_EXPORT_FORMAT = 'ultrakanban/board@1'

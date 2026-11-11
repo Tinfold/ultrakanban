@@ -20,7 +20,7 @@ function Routes() {
     <div className="flex h-dvh flex-col overflow-x-hidden">
       <Switch>
         <Route path="/" component={HomePage} />
-        <Route path="/overview" component={OverviewPage} />
+        <Route path="/overview/:tab?">{({ tab }) => <OverviewPage tab={tab} />}</Route>
         <Route path="/setup" component={SetupPage} />
         <Route path="/b/:boardId/pr/:number/:tab?">
           {({ boardId, number, tab }) => (

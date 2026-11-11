@@ -1060,6 +1060,12 @@ export const JEV_INPUT_USD_PER_MILLION = 0.042
  */
 export const TOKEN_WEIGHTS = { inputTokens: 1, outputTokens: 5, cacheReadTokens: 0.1, cacheWriteTokens: 1.25 } as const
 
+/**
+ * What Opus lists per million uncached input tokens, in US dollars; the other kinds cost `TOKEN_WEIGHTS` times that.
+ * The overview's savings price tokens at what Opus runs reported they cost, and at this when none did.
+ */
+export const OPUS_INPUT_USD_PER_MILLION = 5
+
 /** A run's tokens weighted by kind (see `TOKEN_WEIGHTS`), in uncached-input tokens. */
 export const weightedTokens = (counts: TokenCounts) =>
   counts.inputTokens * TOKEN_WEIGHTS.inputTokens +
@@ -1455,6 +1461,8 @@ export interface OverviewUsage extends TokenCounts {
   costUsd: number | null
   /** Whether the run went on the agents' API key, its cost billed rather than estimated (see `AgentApiKey`). */
   apiKey: boolean
+  /** Where the model and effort the run worked at came from (see `RunRouting`); null when that isn't known. */
+  routingSource: RoutingSource | null
   /**
    * Split by model. Runs that didn't report it count as a run of the model in the agent's name (see `workerModel`),
    * or of `UNKNOWN_MODEL`.
@@ -1477,6 +1485,9 @@ export interface OverviewTicketUsage {
 export type OverviewActivity = Activity & {
   ticket: { number: number; title: string; boardId: string; boardName: string }
 }
+
+/** The most entries `GET /overview/activity` returns, the newest of the range. */
+export const OVERVIEW_ACTIVITY_LIMIT = 100
 
 export interface Overview {
   generatedAt: string
