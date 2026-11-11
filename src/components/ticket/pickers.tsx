@@ -35,7 +35,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useActor } from '@/hooks/use-actor'
 import { swatch } from '@/lib/colors'
-import { autoMergeLabel, boardDockerLabel, dockerLabel, parseISODate, toISODate } from '@/lib/format'
+import { autoMergeLabel, boardDockerLabel, dockerLabel, parseISODate, toISODate, ultracodeLabel } from '@/lib/format'
 import { PRIORITIES_DESC, PRIORITY_LABELS } from '@/lib/priority'
 import { cn } from '@/lib/utils'
 import { useBoardContext } from '../board/board-context'
@@ -223,6 +223,25 @@ export function AutoMergePicker({ value, onChange, children }: PickerProps<boole
           <DropdownMenuRadioItem value="false">{autoMergeLabel(false)}</DropdownMenuRadioItem>
           <DropdownMenuRadioItem value="true">{autoMergeLabel(true)}</DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+/** Whether the board's agent works a ticket with ultracode on: its runs orchestrate multi-agent workflows. */
+export function UltracodePicker({ value, onChange, children }: PickerProps<boolean>) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-64">
+        <DropdownMenuRadioGroup value={String(value)} onValueChange={(next) => onChange(next === 'true')}>
+          <DropdownMenuRadioItem value="false">{ultracodeLabel(false)}</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="true">{ultracodeLabel(true)}</DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+        <p className="px-2 py-1.5 text-xs text-muted-foreground">
+          Runs orchestrate multi-agent workflows to plan, build and check the work: more thorough, but many times the
+          tokens.
+        </p>
       </DropdownMenuContent>
     </DropdownMenu>
   )

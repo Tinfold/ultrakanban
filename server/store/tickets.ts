@@ -69,6 +69,7 @@ interface TicketRow {
   agent_model: string | null
   agent_docker: number | null
   no_auto_merge: number
+  agent_ultracode: number
   pr_url: string | null
   pr_state: string
   pr_title: string | null
@@ -234,6 +235,7 @@ const toTicket = (row: TicketRow): Ticket => ({
   agentModel: row.agent_model,
   agentDocker: row.agent_docker === null ? null : row.agent_docker === 1,
   noAutoMerge: row.no_auto_merge === 1,
+  agentUltracode: row.agent_ultracode === 1,
   tagIds: row.tag_ids ? row.tag_ids.split(',') : [],
   pullRequest: row.pr_url ? toPullRequest(row.pr_url, row) : null,
   position: row.position,
@@ -272,6 +274,7 @@ const EDITABLE_FIELDS = [
   'agentModel',
   'agentDocker',
   'noAutoMerge',
+  'agentUltracode',
 ] as const
 
 /** Actor recorded for changes caused by GitHub pull request updates. */
@@ -567,9 +570,9 @@ export function createTicket(boardId: string, input: CreateTicketInput, actor: s
   const timestamp = now()
   sql.run(
     `INSERT INTO tickets (id, board_id, column_id, number, title, description, priority, assignee, due_date,
-       agent_effort, agent_model, agent_docker, no_auto_merge, parent_id, epic_id, position, moved_at, created_at,
-       updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       agent_effort, agent_model, agent_docker, no_auto_merge, agent_ultracode, parent_id, epic_id, position, moved_at,
+       created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     boardId,
     column.id,
@@ -583,6 +586,7 @@ export function createTicket(boardId: string, input: CreateTicketInput, actor: s
     input.agentModel ?? null,
     input.agentDocker == null ? null : Number(input.agentDocker),
     Number(input.noAutoMerge ?? false),
+    Number(input.agentUltracode ?? false),
     parentId,
     epicId,
     count,
@@ -615,6 +619,7 @@ export function updateTicket(id: string, input: UpdateTicketInput, actor: string
     agent_model: has('agentModel') ? input.agentModel : undefined,
     agent_docker: has('agentDocker') ? (input.agentDocker == null ? null : Number(input.agentDocker)) : undefined,
     no_auto_merge: has('noAutoMerge') ? Number(input.noAutoMerge) : undefined,
+    agent_ultracode: has('agentUltracode') ? Number(input.agentUltracode) : undefined,
   })
 
   if (input.tags) {

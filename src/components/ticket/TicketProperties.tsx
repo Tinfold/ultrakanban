@@ -8,6 +8,7 @@ import {
   LayersIcon,
   TagIcon,
   UserRoundIcon,
+  WorkflowIcon,
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { AGENT_DEFAULTS, type Ticket } from '@shared/domain'
@@ -26,6 +27,7 @@ import {
   formatCost,
   formatDueDate,
   formatTokens,
+  ultracodeLabel,
 } from '@/lib/format'
 import { PRIORITY_LABELS } from '@/lib/priority'
 import { cn } from '@/lib/utils'
@@ -44,6 +46,7 @@ import {
   ModelPicker,
   PriorityPicker,
   TagPicker,
+  UltracodePicker,
 } from './pickers'
 import { PullRequestField } from './PullRequestField'
 
@@ -196,6 +199,24 @@ export function TicketProperties({ ticket }: { ticket: Ticket }) {
                 : dockerLabel(ticket.agentDocker)}
             </Button>
           </DockerPicker>
+        </Property>
+      )}
+
+      {(detail.board.agentEnabled || ticket.agentUltracode) && (
+        <Property label="Ultracode">
+          <UltracodePicker
+            value={ticket.agentUltracode}
+            onChange={(agentUltracode) => actions.updateTicket(ticket.id, { agentUltracode })}
+          >
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(triggerClass, !ticket.agentUltracode && 'text-muted-foreground')}
+            >
+              <WorkflowIcon />
+              {ultracodeLabel(ticket.agentUltracode)}
+            </Button>
+          </UltracodePicker>
         </Property>
       )}
 

@@ -162,5 +162,8 @@ export const dockerLabel = (docker: boolean) => (docker ? 'Docker' : 'On the mac
 /** Whether the board's auto-merge merges a ticket's pull request once it is ready (see `Ticket.noAutoMerge`). */
 export const autoMergeLabel = (noAutoMerge: boolean) => (noAutoMerge ? "Don't merge automatically" : 'When ready')
 
+/** Whether the board's agent works a ticket with ultracode (multi-agent workflows) on (see `Ticket.agentUltracode`). */
+export const ultracodeLabel = (ultracode: boolean) => (ultracode ? 'On' : 'Off')
+
 /** The board's own setting for where its agent runs tickets, for a ticket that follows it. */
 export const boardDockerLabel = (docker: boolean) => `Board default (${docker ? 'Docker' : 'on the machine'})`

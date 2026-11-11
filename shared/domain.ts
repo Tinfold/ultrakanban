@@ -714,6 +714,11 @@ export interface Ticket {
    * says so). Merging it by hand, or with "merge all", still works.
    */
   noAutoMerge: boolean
+  /**
+   * Whether the board's agent works this ticket with Claude Code's ultracode on: its runs orchestrate multi-agent
+   * workflows for the work, which costs far more usage. Runs only to fix merge conflicts or failing CI never use it.
+   */
+  agentUltracode: boolean
   tagIds: string[]
   pullRequest: PullRequest | null
   position: number

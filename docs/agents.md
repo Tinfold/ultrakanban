@@ -490,6 +490,13 @@ run costs about its number of requests times its context. Besides loading no MCP
   one big read doesn't ride along with every later request (`CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS` and
   `BASH_MAX_OUTPUT_LENGTH`).
 
+**Ultracode:** a ticket with its **Ultracode** property on (`agentUltracode`) is worked with Claude Code's
+`ultracode` setting on: the loop starts its runs' `claude -p` with `--settings '{"ultracode":true}'` (added to the
+`--settings` that `CLAUDE_ARGS` has, if any, since claude only takes the last one). The run then orchestrates
+multi-agent workflows to plan, build and check its work: more thorough, but it uses many times the tokens, so turn it on
+for large or hard tickets. Runs only to fix merge conflicts or failing CI never use it. It needs a Claude Code version
+and a model that support ultracode; the setting has no effect otherwise.
+
 **Running agents in Docker:** with **Run the agent in Docker containers** (`agentDocker`) on in Board settings, the
 loop starts each run's `claude -p` in a throwaway container instead of directly on the machine. The container gets the
 run's checkout (at the same path), the agent's `~/.claude`, `~/.claude.json`, gh and git settings and the host's

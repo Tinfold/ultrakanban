@@ -237,6 +237,7 @@ export const createTicketSchema = z.object({
   agentModel: agentModel.optional(),
   agentDocker: z.boolean().nullable().optional(),
   noAutoMerge: z.boolean().optional(),
+  agentUltracode: z.boolean().optional(),
   pullRequest: pullRequestUrl.nullable().optional(),
   position: position.optional(),
   /** The ticket it is a sub-ticket of: its id or number (`12` or `#12`). */
@@ -260,6 +261,7 @@ export const updateTicketSchema = z.object({
   agentModel: agentModel.optional(),
   agentDocker: z.boolean().nullable().optional(),
   noAutoMerge: z.boolean().optional(),
+  agentUltracode: z.boolean().optional(),
   pullRequest: pullRequestUrl.nullable().optional(),
   /** Makes it a sub-ticket of another ticket (its id or number), or with `null` a ticket of its own again. */
   parent: ref.nullable().optional(),
@@ -689,6 +691,7 @@ export const boardExportSchema = z.object({
       agentModel: agentModel.default(null),
       agentDocker: z.boolean().nullable().default(null),
       noAutoMerge: z.boolean().default(false),
+      agentUltracode: z.boolean().default(false),
       pullRequest: z
         .object({
           // Local pull requests live on the board they were opened on, and aren't exported (see exportBoard).
