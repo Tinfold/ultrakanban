@@ -12,6 +12,7 @@ import {
   MessageSquareIcon,
   PaperclipIcon,
   SquareCheckIcon,
+  UnplugIcon,
 } from 'lucide-react'
 import { openBlockers } from '@shared/blockers'
 import type { Ticket, TicketUsage } from '@shared/domain'
@@ -25,6 +26,7 @@ import { EpicChip } from '@/components/common/EpicChip'
 import { TagChip } from '@/components/common/TagChip'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { WaitingBadge } from '@/components/common/WaitingBadge'
+import { outsideAgent, outsideAgentNote } from '@/lib/board-view'
 import { COST_NOTE, dueState, formatDueDate, formatModel, formatUsage, formatUsageShort, ticketRef } from '@/lib/format'
 import { checklistProgress } from '@/lib/markdown'
 import { CONFLICTS_HINT } from '@/lib/pull-request'
@@ -53,7 +55,7 @@ interface TicketCardProps {
 }
 
 export function TicketCard({ ticket, overlay, selecting, selected }: TicketCardProps) {
-  const { detail, tagsById, epicsById, ticketsById } = useBoardContext()
+  const { detail, tagsById, epicsById, ticketsById, columnsById } = useBoardContext()
   const checklist = checklistProgress(ticket.description)
   const tags = ticket.tagIds.flatMap((tagId) => tagsById.get(tagId) ?? [])
   // The agent doesn't claim a ticket that waits for an unfinished one, so say why it sits there.
@@ -61,7 +63,9 @@ export function TicketCard({ ticket, overlay, selecting, selected }: TicketCardP
   const parent = ticket.parentId ? ticketsById.get(ticket.parentId) : undefined
   const epic = ticket.epicId ? epicsById.get(ticket.epicId) : undefined
   const subtickets = ticket.subtickets
+  const outsider = outsideAgent(ticket, detail.board, columnsById.get(ticket.columnId))
   const hasMeta =
+    outsider ||
     blockers.length > 0 ||
     subtickets ||
     ticket.dueDate ||
@@ -121,6 +125,15 @@ export function TicketCard({ ticket, overlay, selecting, selected }: TicketCardP
       )}
       {hasMeta && (
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground [&_svg]:size-3">
+          {outsider && (
+            <span
+              className="flex items-center gap-1 rounded-sm border border-violet-500/40 bg-violet-500/10 px-1 font-medium leading-4 text-violet-700 dark:text-violet-300"
+              title={`Claimed by ${outsider}. ${outsideAgentNote(detail.board)}`}
+            >
+              <UnplugIcon />
+              External agent
+            </span>
+          )}
           <WaitingBadge ticket={ticket} />
           {ticket.estimate && (
             <span

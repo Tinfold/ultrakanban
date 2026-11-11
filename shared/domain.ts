@@ -157,6 +157,16 @@ export function agentWorkerName(board: Pick<BoardSummary, 'agentName' | 'agentMo
 }
 
 /**
+ * Whether a name is the board's agent's: its own (`agentName`), its loop's (`<agent>-loop`) or one of its workers'
+ * (`<agent>/<model>/<effort>`), as scripts/agent-loop.sh's `ours` tells. Tickets anyone else holds aren't the loop's to
+ * work: an agent or a person works them on their own, e.g. through the API.
+ */
+export function isBoardAgent(board: Pick<BoardSummary, 'agentName'>, name: string) {
+  const agent = board.agentName ?? AGENT_DEFAULTS.name
+  return name === agent || name === `${agent}-loop` || name.startsWith(`${agent}/`)
+}
+
+/**
  * The parts of an `<agent>/<model>/<effort>` name (see `agentWorkerName`): the agent first, the effort last and the
  * model everything in between, so model names with slashes work too (`opencode/openrouter/qwen/qwen3-coder/high`).
  * The effort is whatever the agent calls it: agents other than Claude Code have their own levels (`minimal`) or

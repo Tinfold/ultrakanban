@@ -7,6 +7,7 @@ import {
   HandIcon,
   LayersIcon,
   TagIcon,
+  UnplugIcon,
   UserRoundIcon,
 } from 'lucide-react'
 import type { ReactNode } from 'react'
@@ -17,6 +18,7 @@ import { PriorityIcon } from '@/components/common/PriorityIcon'
 import { ColorDot, TagChip } from '@/components/common/TagChip'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
+import { outsideAgent, outsideAgentNote } from '@/lib/board-view'
 import {
   autoMergeLabel,
   boardDockerLabel,
@@ -64,6 +66,7 @@ export function TicketProperties({ ticket }: { ticket: Ticket }) {
   const column = columnsById.get(ticket.columnId)
   const tags = ticket.tagIds.flatMap((tagId) => tagsById.get(tagId) ?? [])
   const epic = ticket.epicId ? epicsById.get(ticket.epicId) : undefined
+  const outsider = outsideAgent(ticket, detail.board, column)
 
   return (
     <dl className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-start gap-x-2 gap-y-0.5">
@@ -101,6 +104,12 @@ export function TicketProperties({ ticket }: { ticket: Ticket }) {
             )}
           </Button>
         </AssigneePicker>
+        {outsider && (
+          <p className="flex gap-1.5 px-2 pb-1 text-xs text-violet-700 dark:text-violet-300">
+            <UnplugIcon className="mt-0.5 size-3 shrink-0" />
+            {outsideAgentNote(detail.board)}
+          </p>
+        )}
       </Property>
 
       <Property label="Due date">
