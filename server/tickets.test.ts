@@ -744,9 +744,17 @@ describe('boards', () => {
   })
 
   test('export/import round-trips a board', async () => {
-    const ticket = await addTicket({ title: 'A', column: 'Done', tags: ['x'], priority: 'high', agentEffort: 'low' })
+    const ticket = await addTicket({
+      title: 'A',
+      column: 'Done',
+      tags: ['x'],
+      priority: 'high',
+      agentEffort: 'low',
+      noAutoMerge: true,
+    })
     await call('POST', `/tickets/${ticket.id}/comments`, { body: 'hello' })
-    const { body: exported } = await call('GET', `/boards/${boardId}/export`)
+    const { body: exported } = await call<{ tickets: { noAutoMerge: boolean }[] }>('GET', `/boards/${boardId}/export`)
+    assert.equal(exported.tickets[0].noAutoMerge, true)
 
     const { body: imported } = await call<{ id: string }>('POST', '/boards/import', exported)
     const { body: reexported } = await call('GET', `/boards/${imported.id}/export`)

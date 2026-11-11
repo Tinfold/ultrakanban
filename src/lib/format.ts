@@ -159,5 +159,8 @@ export function formatModel(model: string) {
 /** Where the board's agent runs a ticket: in a Docker container or directly on the machine. */
 export const dockerLabel = (docker: boolean) => (docker ? 'Docker' : 'On the machine')
 
+/** Whether the board's auto-merge merges a ticket's pull request once it is ready (see `Ticket.noAutoMerge`). */
+export const autoMergeLabel = (noAutoMerge: boolean) => (noAutoMerge ? "Don't merge automatically" : 'When ready')
+
 /** The board's own setting for where its agent runs tickets, for a ticket that follows it. */
 export const boardDockerLabel = (docker: boolean) => `Board default (${docker ? 'Docker' : 'on the machine'})`

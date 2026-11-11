@@ -246,6 +246,56 @@ describe('merging all reviewed pull requests', () => {
     assert.equal((await call<MergeRun>('GET', `/boards/${boardId}/merge-run`)).body.id, run.id)
   })
 
+  test('auto-merge leaves tickets marked not to merge automatically, and the ones built on them, to people', async () => {
+    const marked = await inReview(1)
+    const stacked = await inReview(2, { base: 'branch-1' })
+    const other = await inReview(3)
+    const { body: ticket } = await call<Ticket>('PATCH', `/tickets/${marked}`, { noAutoMerge: true })
+    assert.equal(ticket.noAutoMerge, true)
+    assert.equal(ticket.autoMergeWait, null, 'the board has auto-merge off')
+    const waitOf = async (id: string) => (await call<Ticket>('GET', `/tickets/${id}`)).body.autoMergeWait?.reason
+
+    await call('PATCH', `/boards/${boardId}`, { autoMerge: true })
+    // It shows at once, before auto-merge's next round.
+    assert.equal(await waitOf(marked), 'Marked to merge by hand')
+    await mergeQueue.autoMergeAll()
+
+    assert.deepEqual(merges, ['acme/app#3:merge'])
+    assert.deepEqual(
+      (await ticketsIn('Done')).map((done) => done.id),
+      [other],
+    )
+    assert.equal(await waitOf(marked), 'Marked to merge by hand')
+    assert.equal(await waitOf(stacked), 'Waits for #1 to merge first')
+
+    // Merging all by hand still merges it.
+    const run = await runToEnd()
+    assert.deepEqual(
+      run.steps.map((step) => [step.number, step.status]),
+      [
+        [1, 'merged'],
+        [2, 'merged'],
+      ],
+    )
+  })
+
+  test('a ticket marked not to merge automatically waits even when nothing else could be ready', async () => {
+    const marked = await inReview(1)
+    await call('PATCH', `/tickets/${marked}`, { noAutoMerge: true })
+    await call('PATCH', `/boards/${boardId}`, { autoMerge: true })
+    const reads = pullRequestReads.length
+    assert.equal(await mergeQueue.autoMerge(boardId), null)
+    assert.equal(pullRequestReads.length, reads, 'it asks GitHub nothing')
+    assert.deepEqual(merges, [])
+
+    // Unmarked, it stops showing at once, and merges at the next round.
+    const { body: ticket } = await call<Ticket>('PATCH', `/tickets/${marked}`, { noAutoMerge: false })
+    assert.equal(ticket.noAutoMerge, false)
+    assert.equal(ticket.autoMergeWait, null)
+    await mergeQueue.autoMergeAll()
+    assert.deepEqual(merges, ['acme/app#1:merge'])
+  })
+
   test('auto-merge can ignore checks that failed only because of billing', async () => {
     const BILLING =
       'The job was not started because recent account payments have failed or your spending limit needs to be increased.'

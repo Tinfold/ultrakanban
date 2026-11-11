@@ -2,6 +2,9 @@ import type { AutoMergeWait } from '../../shared/domain.ts'
 import { now, sql } from '../db.ts'
 import { publish } from '../events.ts'
 
+/** Why auto-merge leaves the pull request of a ticket marked `noAutoMerge` alone. */
+export const NO_AUTO_MERGE_REASON = 'Marked to merge by hand'
+
 /** What auto-merge found about one ticket's pull request (see `AutoMergeWait`); null when it is ready. */
 export type AutoMergeFinding = Pick<AutoMergeWait, 'reason' | 'failed'> | null
 

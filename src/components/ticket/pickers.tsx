@@ -35,7 +35,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useActor } from '@/hooks/use-actor'
 import { swatch } from '@/lib/colors'
-import { boardDockerLabel, dockerLabel, parseISODate, toISODate } from '@/lib/format'
+import { autoMergeLabel, boardDockerLabel, dockerLabel, parseISODate, toISODate } from '@/lib/format'
 import { PRIORITIES_DESC, PRIORITY_LABELS } from '@/lib/priority'
 import { cn } from '@/lib/utils'
 import { useBoardContext } from '../board/board-context'
@@ -207,6 +207,21 @@ export function DockerPicker({ value, onChange, children }: PickerProps<boolean 
           </DropdownMenuRadioItem>
           <DropdownMenuRadioItem value="true">{dockerLabel(true)}</DropdownMenuRadioItem>
           <DropdownMenuRadioItem value="false">{dockerLabel(false)}</DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+/** Whether the board's auto-merge merges the ticket's pull request, or leaves it for a person to merge. */
+export function AutoMergePicker({ value, onChange, children }: PickerProps<boolean>) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-56">
+        <DropdownMenuRadioGroup value={String(value)} onValueChange={(next) => onChange(next === 'true')}>
+          <DropdownMenuRadioItem value="false">{autoMergeLabel(false)}</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="true">{autoMergeLabel(true)}</DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>

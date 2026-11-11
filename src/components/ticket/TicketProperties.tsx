@@ -1,4 +1,14 @@
-import { CalendarIcon, ContainerIcon, CpuIcon, GaugeIcon, LayersIcon, TagIcon, UserRoundIcon } from 'lucide-react'
+import {
+  CalendarIcon,
+  ContainerIcon,
+  CpuIcon,
+  GaugeIcon,
+  GitMergeIcon,
+  HandIcon,
+  LayersIcon,
+  TagIcon,
+  UserRoundIcon,
+} from 'lucide-react'
 import type { ReactNode } from 'react'
 import { AGENT_DEFAULTS, type Ticket } from '@shared/domain'
 import { EpicChip } from '@/components/common/EpicChip'
@@ -8,6 +18,7 @@ import { ColorDot, TagChip } from '@/components/common/TagChip'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
 import {
+  autoMergeLabel,
   boardDockerLabel,
   COST_NOTE,
   dockerLabel,
@@ -24,6 +35,7 @@ import { AgentSuggestionButton } from './AgentSuggestionButton'
 import { JevSuggestionButton } from './JevSuggestionButton'
 import {
   AssigneePicker,
+  AutoMergePicker,
   ColumnPicker,
   DueDatePicker,
   DockerPicker,
@@ -190,6 +202,20 @@ export function TicketProperties({ ticket }: { ticket: Ticket }) {
       <Property label="Pull request">
         <PullRequestField ticket={ticket} />
       </Property>
+
+      {(detail.board.autoMerge || ticket.noAutoMerge) && (
+        <Property label="Auto-merge">
+          <AutoMergePicker
+            value={ticket.noAutoMerge}
+            onChange={(noAutoMerge) => actions.updateTicket(ticket.id, { noAutoMerge })}
+          >
+            <Button variant="ghost" size="sm" className={triggerClass}>
+              {ticket.noAutoMerge ? <HandIcon /> : <GitMergeIcon />}
+              {autoMergeLabel(ticket.noAutoMerge)}
+            </Button>
+          </AutoMergePicker>
+        </Property>
+      )}
 
       {ticket.usage.runs > 0 && (
         <Property label="Usage">

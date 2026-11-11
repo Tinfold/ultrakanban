@@ -42,7 +42,8 @@
 - **Auto-merge**: optionally, per board, merge pull requests in review by themselves once they have no conflicts,
   every check has passed and every checklist item of their ticket is checked. Cards in review say what each one is
   waiting for ("Waiting for checks", "2 checklist items unchecked", "Waits for #41 to merge first"), and a merge that
-  fails shows in red rather than only in the server's log
+  fails shows in red rather than only in the server's log. A ticket can be marked **Don't merge automatically**, to
+  leave its pull request for a person to merge
 - **Delete branches after merge**: optionally, per board, delete a pull request's branch on GitHub once it is merged,
   moving the pull requests stacked on it to its base first
 - **Notifications**: optionally, per board, send an ntfy, Discord or webhook message when a ticket needs you: an agent

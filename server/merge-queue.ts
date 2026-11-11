@@ -16,7 +16,7 @@ import { badRequest, conflict, HttpError } from './errors.ts'
 import type { GitHubPullRequest } from './github.ts'
 import type { Notifier } from './notifications.ts'
 import type { PullRequestSync } from './pull-request-sync.ts'
-import { type AutoMergeFinding, setAutoMergeWaits } from './store/auto-merge.ts'
+import { type AutoMergeFinding, NO_AUTO_MERGE_REASON, setAutoMergeWaits } from './store/auto-merge.ts'
 import { getBoard, listBoards } from './store/boards.ts'
 import { getTicket, listTickets, pullRequestChecks } from './store/tickets.ts'
 
@@ -82,10 +82,12 @@ const someNames = (names: string[]) =>
 
 /**
  * Why auto-merge can't merge a ticket's pull request, going by what the board knows without asking GitHub (see
- * `mergeCandidates`): it is a draft, has conflicts, or its ticket's checklist isn't done. Null when it could be ready.
+ * `mergeCandidates`): its ticket is marked not to merge automatically (`noAutoMerge`), it is a draft, has conflicts, or
+ * its ticket's checklist isn't done. Null when it could be ready.
  * The same reasons, in the same order, as `autoMerge` gives once it asks GitHub.
  */
 function knownWait(ticket: Ticket): AutoMergeFinding {
+  if (ticket.noAutoMerge) return { reason: NO_AUTO_MERGE_REASON, failed: false }
   if (ticket.pullRequest?.state === 'draft') return { reason: 'Still a draft', failed: false }
   if (ticket.pullRequest?.conflicts) return { reason: 'Merge conflicts', failed: false }
   const unchecked = parseChecklist(ticket.description).filter((item) => !item.checked).length
@@ -394,6 +396,8 @@ export function createMergeQueue(
     ready: Set<string>,
     billingOnly: boolean,
   ): AutoMergeFinding {
+    // A person merges it, whatever GitHub says, and the pull requests built on it wait for that.
+    if (ticket.noAutoMerge) return knownWait(ticket)
     if (item.skip) {
       // It couldn't be read from GitHub: auto-merge itself failed.
       if (!pullRequest) return { reason: item.skip, failed: true }
@@ -414,9 +418,10 @@ export function createMergeQueue(
   }
 
   /**
-   * Merges the board's pull requests that are ready: in the review column, open, not a draft, without conflicts,
-   * with every check passed (or failed only for billing, on boards that ignore that) and every checklist item of their
-   * ticket checked, and building only on others that are ready too. Returns the run, or null when none were ready (or another run is going), without starting one.
+   * Merges the board's pull requests that are ready: in the review column, not marked to be merged by hand
+   * (`noAutoMerge`), open, not a draft, without conflicts, with every check passed (or failed only for billing, on
+   * boards that ignore that) and every checklist item of their ticket checked, and building only on others that are
+   * ready too. Returns the run, or null when none were ready (or another run is going), without starting one.
    *
    * Each round also records why each of the review column's pull requests isn't merged (see `AutoMergeWait`): what
    * keeps it from being ready, or that merging it failed, including when the round itself couldn't run. A ready one
@@ -455,7 +460,8 @@ export function createMergeQueue(
         if (parseLocalPullRequestUrl(item.url)) continue
         const ticket = getTicket(item.ticketId)
         const pullRequest = pullRequestOf.get(item.ticketId) ?? null
-        const billingOnly = !item.skip && checklistDone(ticket) && (await onlyBillingFails(ticket, pullRequest))
+        const billingOnly =
+          !item.skip && !ticket.noAutoMerge && checklistDone(ticket) && (await onlyBillingFails(ticket, pullRequest))
         const wait = waitFor(item, pullRequest, ticket, byTicket, ready, billingOnly)
         if (wait) {
           findings.set(item.ticketId, wait)
