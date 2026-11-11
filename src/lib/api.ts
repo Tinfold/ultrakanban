@@ -23,6 +23,7 @@ import type {
   MergePlan,
   MergeRun,
   Overview,
+  OverviewActivity,
   OverviewRange,
   LiveRun,
   RunRecord,
@@ -188,6 +189,8 @@ export const api = {
   startMergeRun: (boardId: string, method: MergeMethod) =>
     request<MergeRun>('POST', `/boards/${boardId}/merge-run`, { method }),
   overview: (days: OverviewRange) => request<Overview>('GET', `/overview${query({ days: String(days) })}`),
+  overviewActivity: (days: OverviewRange, board?: string) =>
+    request<OverviewActivity[]>('GET', `/overview/activity${query({ days: String(days), board })}`),
   hideAgents: (names: string[]) => request<void>('POST', '/overview/hidden-agents', { names }),
   showHiddenAgents: () => request<void>('DELETE', '/overview/hidden-agents'),
   appUpdate: () => request<AppUpdate>('GET', '/system/update'),

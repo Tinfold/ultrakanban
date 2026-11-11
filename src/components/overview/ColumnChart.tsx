@@ -1,5 +1,7 @@
 import { type CSSProperties, type ReactNode, useState } from 'react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { useStoredState } from '@/hooks/use-stored-state'
+import { storageKeys } from '@/lib/storage'
 import { cn } from '@/lib/utils'
 
 export interface ChartSeries {
@@ -28,6 +30,10 @@ interface ColumnChartProps {
   minStep?: number
   /** Shown below the chart. */
   footer?: ReactNode
+  /** Names the chart in storage, where the series its legend turned off are remembered. */
+  storageKey: string
+  /** Labels of the series that start off, until the legend turns them on. */
+  hiddenByDefault?: string[]
   id?: string
   className?: string
 }
@@ -56,14 +62,24 @@ export function ColumnChart({
   formatTick = formatValue,
   minStep = 0,
   footer,
+  storageKey,
+  hiddenByDefault = [],
   id,
   className,
 }: ColumnChartProps) {
-  const totals = columns.map((column) => sum(column.values))
+  const [storedHidden, setHidden] = useStoredState<string[]>(storageKeys.chartHidden(storageKey), hiddenByDefault)
+  // A single series can't be turned off, and if every series is off (the series changed since), all of them show.
+  const shown = series.map((item) => series.length === 1 || !storedHidden.includes(item.label))
+  if (!shown.includes(true)) shown.fill(true)
+  const shownCount = shown.filter(Boolean).length
+  const toggle = (label: string) =>
+    setHidden((hidden) => (hidden.includes(label) ? hidden.filter((other) => other !== label) : [...hidden, label]))
+
+  const totals = columns.map((column) => sum(column.values.filter((_, s) => shown[s])))
   const ticks = niceTicks(Math.max(0, ...totals), minStep)
   const top = ticks.at(-1)!
   const labelEvery = Math.ceil(columns.length / AXIS_LABELS)
-  const empty = totals.every((total) => total === 0)
+  const empty = columns.every((column) => sum(column.values) === 0)
   const [open, setOpen] = useState<number | null>(null)
 
   return (
@@ -74,14 +90,27 @@ export function ColumnChart({
           <p className="text-xs text-muted-foreground">{description}</p>
         </div>
         {series.length > 1 && (
-          <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-            {series.map((item) => (
-              <li key={item.label} className="flex items-center gap-1.5">
-                <span
-                  className="size-2.5 rounded-[3px] bg-(--swatch)"
-                  style={{ '--swatch': item.color } as CSSProperties}
-                />
-                {item.label}
+          <ul className="flex flex-wrap gap-x-1 gap-y-1 text-xs text-muted-foreground">
+            {series.map((item, s) => (
+              <li key={item.label}>
+                <button
+                  type="button"
+                  aria-pressed={shown[s]}
+                  // The last series shown stays on, so the chart never goes blank.
+                  disabled={shown[s] && shownCount === 1}
+                  title={shown[s] ? `Hide ${item.label}` : `Show ${item.label}`}
+                  onClick={() => toggle(item.label)}
+                  className={cn(
+                    'flex items-center gap-1.5 rounded-sm px-1 py-0.5 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:hover:text-muted-foreground',
+                    !shown[s] && 'line-through opacity-60',
+                  )}
+                >
+                  <span
+                    className={cn('size-2.5 rounded-[3px] border border-(--swatch)', shown[s] && 'bg-(--swatch)')}
+                    style={{ '--swatch': item.color } as CSSProperties}
+                  />
+                  {item.label}
+                </button>
               </li>
             ))}
           </ul>
@@ -135,7 +164,8 @@ export function ColumnChart({
                     >
                       {column.values.map(
                         (value, s) =>
-                          value > 0 && (
+                          value > 0 &&
+                          shown[s] && (
                             <div
                               key={series[s].label}
                               className="min-h-0.5 bg-(--swatch) last:rounded-t-[4px]"
@@ -150,7 +180,7 @@ export function ColumnChart({
                   <TooltipContent side="top" className="grid gap-1 px-2.5 py-2">
                     <p className="font-medium">{column.title}</p>
                     {series.map((item, s) => (
-                      <p key={item.label} className="flex items-center gap-2">
+                      <p key={item.label} className={cn('flex items-center gap-2', !shown[s] && 'opacity-50')}>
                         <span
                           className="h-0.5 w-2.5 rounded-full bg-(--swatch)"
                           style={{ '--swatch': item.color } as CSSProperties}

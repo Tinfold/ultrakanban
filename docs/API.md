@@ -1072,6 +1072,10 @@ Stale or duplicate agent names can be cleared from the list: `POST /overview/hid
 actor), and `DELETE /overview/hidden-agents` (204) lists every cleared agent again. Totals, charts and sessions still
 include their work.
 
+`GET /overview/activity?days=7|14|30&board=<boardId>` is the activity feed: the latest 100 activity entries of the last
+`days` days (default `14`), as in `recent`, newest first. With `board`, only that board's. A comment's or plan's
+`body` is cut to its first 200 characters.
+
 ## Updating ultrakanban
 
 The app can't update itself from its container; the updater does it when asked: the agent supervisor

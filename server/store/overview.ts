@@ -8,6 +8,7 @@ import {
   agentWorkerName,
   JEV_AGENT,
   noUsage,
+  OVERVIEW_ACTIVITY_LIMIT,
   type Overview,
   type OverviewActivity,
   type OverviewAgent,
@@ -38,6 +39,49 @@ import { queryUsage } from './usage.ts'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const RECENT_LIMIT = 30
+
+type FeedRow = ActivityRow & { number: number; title: string; board_id: string; board_name: string }
+
+const FEED_QUERY = `SELECT a.*, t.number, t.title, t.board_id, b.name AS board_name
+  FROM activity a JOIN tickets t ON t.id = a.ticket_id JOIN boards b ON b.id = t.board_id`
+
+const toOverviewActivity = (row: FeedRow): OverviewActivity => ({
+  ...toActivity(row),
+  ticket: { number: row.number, title: row.title, boardId: row.board_id, boardName: row.board_name },
+})
+
+/** How much of a comment's or plan's body the activity feed keeps: it says what happened, not what was written. */
+const FEED_BODY_CHARS = 200
+
+/** `entry` with its body, if it has one, cut to `FEED_BODY_CHARS`. */
+function shortenBody(entry: OverviewActivity): OverviewActivity {
+  if (!('body' in entry.data) || entry.data.body.length <= FEED_BODY_CHARS) return entry
+  return {
+    ...entry,
+    data: { ...entry.data, body: `${entry.data.body.slice(0, FEED_BODY_CHARS)}…` },
+  } as OverviewActivity
+}
+
+/**
+ * The overview's activity feed: the latest `OVERVIEW_ACTIVITY_LIMIT` entries of the last `days` days on every board, or
+ * on `boardId` only, newest first. Bodies of comments and plans are cut short (see `FEED_BODY_CHARS`).
+ */
+export function getOverviewActivity(days: OverviewRange, boardId: string | null, at = new Date()): OverviewActivity[] {
+  const since = new Date(at.getTime() - days * DAY_MS).toISOString()
+  const rows = boardId
+    ? sql.all<FeedRow>(
+        `${FEED_QUERY} WHERE a.created_at >= ? AND t.board_id = ? ORDER BY a.id DESC LIMIT ?`,
+        since,
+        boardId,
+        OVERVIEW_ACTIVITY_LIMIT,
+      )
+    : sql.all<FeedRow>(
+        `${FEED_QUERY} WHERE a.created_at >= ? ORDER BY a.id DESC LIMIT ?`,
+        since,
+        OVERVIEW_ACTIVITY_LIMIT,
+      )
+  return rows.map((row) => shortenBody(toOverviewActivity(row)))
+}
 
 interface TicketRow {
   id: string
@@ -226,6 +270,7 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
       boardId: run.boardId,
       ...counts,
       apiKey: run.apiKey,
+      routingSource: run.routing?.source ?? null,
       // Runs that didn't report their models ran the one in the agent's name, if it has one.
       models: run.models.length ? run.models : [{ model: workerModel(run.agent) ?? UNKNOWN_MODEL, ...counts }],
     }
@@ -429,17 +474,7 @@ export function getOverview(days: OverviewRange, at = new Date()): Overview {
   })
   const deletedBoards = [...agentDisk].filter(([id]) => !boardNames.has(id)).map(([, disk]) => disk)
 
-  const recent = sql
-    .all<ActivityRow & { number: number; title: string; board_id: string; board_name: string }>(
-      `SELECT a.*, t.number, t.title, t.board_id, b.name AS board_name
-       FROM activity a JOIN tickets t ON t.id = a.ticket_id JOIN boards b ON b.id = t.board_id
-       ORDER BY a.id DESC LIMIT ?`,
-      RECENT_LIMIT,
-    )
-    .map((row): OverviewActivity => ({
-      ...toActivity(row),
-      ticket: { number: row.number, title: row.title, boardId: row.board_id, boardName: row.board_name },
-    }))
+  const recent = sql.all<FeedRow>(`${FEED_QUERY} ORDER BY a.id DESC LIMIT ?`, RECENT_LIMIT).map(toOverviewActivity)
 
   const sum = (values: Iterable<number>) => [...values].reduce((total, value) => total + value, 0)
   return {

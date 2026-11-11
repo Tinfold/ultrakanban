@@ -21,6 +21,8 @@ export const queryKeys = {
   mergePlan: (boardId: string) => ['merge-plan', boardId] as const,
   mergeRun: (boardId: string) => ['merge-run', boardId] as const,
   overview: (days: OverviewRange) => ['overview', days] as const,
+  // Under `allOverviews`, so live updates refresh it with the overview.
+  overviewActivity: (days: OverviewRange, board: string | undefined) => ['overview', 'activity', days, board] as const,
   allOverviews: ['overview'] as const,
   appUpdate: ['app-update'] as const,
   claudeUsage: ['claude-usage'] as const,
@@ -96,6 +98,15 @@ export const useTicketAttachments = (ticketId: string) =>
 /** Keeps showing the previous range while another one loads. */
 export const useOverview = (days: OverviewRange) =>
   useQuery({ queryKey: queryKeys.overview(days), queryFn: () => api.overview(days), placeholderData: keepPreviousData })
+
+/** The overview's activity feed over `days`, on every board or on `board` only; fetched only while `enabled`. */
+export const useOverviewActivity = (days: OverviewRange, board: string | undefined, enabled: boolean) =>
+  useQuery({
+    queryKey: queryKeys.overviewActivity(days, board),
+    queryFn: () => api.overviewActivity(days, board),
+    placeholderData: keepPreviousData,
+    enabled,
+  })
 
 /** A column's tickets no agent is working on. Checked every minute, since tickets become idle as time passes. */
 export const useIdleTickets = (columnId: string, enabled: boolean) =>

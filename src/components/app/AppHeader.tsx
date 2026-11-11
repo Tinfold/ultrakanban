@@ -22,7 +22,7 @@ export function Logo() {
 }
 
 function OverviewLink() {
-  const [active] = useRoute('/overview')
+  const [active] = useRoute('/overview/:tab?')
   return (
     <Tooltip>
       <TooltipTrigger asChild>

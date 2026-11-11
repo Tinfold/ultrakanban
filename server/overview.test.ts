@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict'
 import { beforeEach, describe, test } from 'node:test'
-import { type Overview, type Ticket, type TokenUsage } from '../shared/domain.ts'
-import { getOverview } from './store/overview.ts'
+import {
+  OVERVIEW_ACTIVITY_LIMIT,
+  type Overview,
+  type OverviewActivity,
+  type Ticket,
+  type TokenUsage,
+} from '../shared/domain.ts'
+import { getOverview, getOverviewActivity } from './store/overview.ts'
 import { addTicket, app, boardId, call, pullRequestStatuses, useBoard } from './test-app.ts'
 
 describe('overview', () => {
@@ -511,5 +517,40 @@ describe('overview', () => {
     const { body: latest } = await call<Overview>('GET', '/overview')
     assert.equal(latest.disk.deletedBoards, 0)
     assert.equal(boardOf(latest).disk.agent?.worktrees, 0)
+  })
+
+  test("the overview keeps its recent activity short; the Activity tab gets a board's own feed", async () => {
+    const created = []
+    for (let i = 0; i < 40; i++) created.push(await addTicket({ title: `Ticket ${i}` }))
+    const { body } = await call<Overview>('GET', '/overview')
+    assert.equal(body.recent.length, 30)
+
+    // Another board's newer activity doesn't push this board's out of its feed.
+    const { body: other } = await call<{ id: string }>('POST', '/boards', { name: 'Other', columns: ['Todo'] })
+    const ours = boardId
+    useBoard(other.id)
+    for (let i = 0; i < 5; i++) await addTicket({ title: `Elsewhere ${i}` })
+    const { body: feed } = await call<OverviewActivity[]>('GET', `/overview/activity?days=7&board=${ours}`)
+    assert.deepEqual(
+      feed.map((entry) => entry.ticketId),
+      created.map((ticket) => ticket.id).toReversed(),
+    )
+    assert.ok(feed.every((entry) => entry.ticket.boardId === ours))
+    const { body: everywhere } = await call<OverviewActivity[]>('GET', '/overview/activity')
+    assert.equal(everywhere[0].ticket.boardId, other.id)
+  })
+
+  test('the activity feed keeps to its range and limit, and cuts long bodies short', async () => {
+    const ticket = await addTicket({ title: 'Long' })
+    await call('POST', `/tickets/${ticket.id}/comments`, { body: 'x'.repeat(5000) })
+    const [comment] = getOverviewActivity(14, boardId)
+    assert.equal(comment.type, 'comment')
+    assert.equal(comment.type === 'comment' && comment.data.body, `${'x'.repeat(200)}…`)
+
+    // A week on, a 7-day feed no longer has it.
+    assert.deepEqual(getOverviewActivity(7, boardId, new Date(Date.now() + 8 * 24 * 60 * 60 * 1000)), [])
+
+    for (let i = 0; i < OVERVIEW_ACTIVITY_LIMIT; i++) await addTicket({ title: `Ticket ${i}` })
+    assert.equal(getOverviewActivity(14, boardId).length, OVERVIEW_ACTIVITY_LIMIT)
   })
 })
