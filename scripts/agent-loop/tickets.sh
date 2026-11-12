@@ -305,15 +305,17 @@ Finish with a ticket comment summarising what you did, then exit." \
 }
 
 # Whether the agent may take a ticket from the backlog column: the board allows it and has that column, and the
-# in-progress column holds fewer than CLAIM_LIMIT (the board's parallel runs) tickets. Tickets already in progress
-# take up the slots, so the backlog isn't pulled into progress while they're being worked.
+# in-progress column holds fewer than CLAIM_LIMIT (the board's parallel runs) tickets of the agent's own (assigned to
+# a name ours() accepts). Its tickets already in progress take up the slots, so the backlog isn't pulled into progress
+# while they're being worked; tickets there that other agents or people hold, or nobody does, don't.
 backlog_on() {
   board | jq -e --arg name "$BACKLOG_COLUMN" --arg progress "$IN_PROGRESS_COLUMN" \
-    --argjson limit "$CLAIM_LIMIT" '
+    --arg agent "$AGENT" --arg loop "$LOOP_ACTOR" --argjson limit "$CLAIM_LIMIT" '
     def column($n): first(.columns[] | select((.name | ascii_downcase) == ($n | ascii_downcase)) | .id) // null;
+    def ours: . != null and (. == $agent or . == $loop or startswith($agent + "/"));
     column($progress) as $p
     | .board.agentBacklog and column($name) != null
-      and ([.tickets[] | select($p != null and .columnId == $p)] | length) < $limit' >/dev/null
+      and ([.tickets[] | select($p != null and .columnId == $p and (.assignee | ours))] | length) < $limit' >/dev/null
 }
 
 # How many tickets the agent claimed whose first run hasn't finished yet: going, failed (waiting to be retried, or

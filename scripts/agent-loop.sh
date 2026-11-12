@@ -26,7 +26,8 @@
 #   - someone approving the ticket's plan (POST /tickets/:id/approve), when it waited for approval
 # A pull request closed without merging moves its ticket to the cancelled column. Only when none of its tickets
 # needs work does it claim the next ticket from the todo column, or, when the board's agentBacklog setting is on and
-# the todo column has none left and fewer than CLAIM_LIMIT tickets are in progress, from the backlog column.
+# the todo column has none left and fewer than CLAIM_LIMIT of its tickets are in progress (tickets other agents or
+# people hold don't count), from the backlog column.
 #
 # The first run on a claimed ticket posts a plan with a size estimate (POST /tickets/:id/plan) before it starts the
 # work. When the board holds tickets of that size for approval (its approvalSize setting), the run exits there and the
@@ -141,7 +142,8 @@
 #                       or max (default: medium)
 #   TODO_COLUMN         column to take new tickets from (default: Todo)
 #   BACKLOG_COLUMN      column to take new tickets from when the todo column has none, the board's agentBacklog
-#                       setting is on and the in-progress column holds fewer than CLAIM_LIMIT tickets (default: Backlog)
+#                       setting is on and the in-progress column holds fewer than CLAIM_LIMIT of the agent's tickets
+#                       (others' don't count) (default: Backlog)
 #   IN_PROGRESS_COLUMN  column to move claimed tickets to (default: In progress)
 #   CANCELLED_COLUMN    column for tickets whose pull request was closed without merging (default: Cancelled)
 #   IDLE_SECONDS        wait between rounds when there is nothing to do (default: 300); the board can cut it short
