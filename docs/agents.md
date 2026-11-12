@@ -298,8 +298,10 @@ agents working at once, all on your `claude` login and its usage limits.
 
 **Backlog.** The agent claims new tickets from the **Todo** column. Switch on **Take tickets from Backlog when Todo is
 empty** (`agentBacklog`) to let it go on to the **Backlog** column once Todo has none left, as long as the **In
-progress** column holds fewer tickets than **Parallel runs**: tickets already in progress take up the slots, so the
-backlog isn't pulled into progress while they're being worked. The loop reads the setting each time it looks for a
+progress** column holds fewer of the agent's tickets than **Parallel runs**: its tickets already in progress take up
+the slots, so the backlog isn't pulled into progress while they're being worked. Only tickets assigned to the board's
+agent count (its name, or `name/model/effort` for its runs): tickets there that other agents (your own Claude Code
+session working through the API, say) or people hold, or that nobody holds, don't take up its slots. The loop reads the setting each time it looks for a
 ticket, so it takes effect without a restart. It never picks at random: from either column it takes the ticket with
 the highest **priority** first, then the earliest **due date**, then the one nearest the top of the column, so set
 priorities or drag tickets into the order of your roadmap to decide what it works on next. It skips blocked tickets: those tagged `blocked`, and
