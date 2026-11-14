@@ -2,7 +2,7 @@
 # Installs and enables the systemd user services, so the board and its agents start by themselves at login:
 #   ultrakanban.service         the board (podman-compose or docker compose on this checkout's docker-compose.yml)
 #   ultrakanban-agent.service   the agent supervisor, which runs ultrakanban-agent@<board> for boards with the agent on
-#   app-ultrakanban.slice       the memory, swap and CPU those agents may use together
+#   app-ultrakanban.slice       the memory, swap and CPU the supervisor and its agents may use together
 # The agent scripts and the skill are copied to ~/.local/share/ultrakanban-agent, so the services don't depend on
 # which branch this checkout is on. The supervisor updates those copies, and the agents' units, itself when this
 # checkout's default branch moves (when you pull); run this again only after deploy/ultrakanban.service changes.

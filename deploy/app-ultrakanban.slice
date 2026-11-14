@@ -1,6 +1,7 @@
-# Holds every board's agent loop (ultrakanban-agent@<board>.service) and the claude runs and builds they start, so
-# that together they can't starve the rest of the machine of memory, swap or CPU. Installed by
-# scripts/install-services.sh. The percentages are of the machine's memory.
+# Holds every board's agent loop (ultrakanban-agent@<board>.service) and the claude runs and builds they start, and the
+# supervisor (ultrakanban-agent.service) with the board rebuilds it runs, so that together they can't starve the rest of
+# the machine of memory, swap or CPU. Installed by scripts/install-services.sh. The percentages are of the machine's
+# memory.
 #
 # Change the limits with `systemctl --user edit app-ultrakanban.slice` (a drop-in, kept when you install again); they
 # take effect at once, without restarting the agents. `systemctl --user status app-ultrakanban.slice` shows what the

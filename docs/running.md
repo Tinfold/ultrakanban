@@ -8,7 +8,9 @@ docker compose up -d --build  # http://localhost:4317
 ```
 
 nginx serves the app on `ULTRAKANBAN_PORT` (4317 by default) and both containers restart automatically,
-including after a reboot. The database and attachments live in the `ultrakanban-data` volume.
+including after a reboot. The database and attachments live in the `ultrakanban-data` volume. The app may use 1 GB of
+memory (`mem_limit`; it uses about 150 MB) and as much swap again, so a leak gets it restarted rather than slowly filling
+the machine's swap.
 
 ```sh
 docker compose logs -f app                            # logs
