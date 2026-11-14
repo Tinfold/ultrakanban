@@ -157,6 +157,21 @@ select(.type == "result")
      cacheWriteTokens: (.value.cacheCreationInputTokens // 0), costUsd: (.value | cost)}]}
 JQ
 
+# What a run added to its session. Claude's result counts the whole session, so that of a resumed run (--resume) includes
+# every run before it, cost and tokens alike. The input is USAGE's output for the run, and $before USAGE's output for the
+# session's last run, or null for its first. Totals of one session only go up, so if any went down, they aren't: the
+# input is left as it is. A model that added nothing is left out.
+read -r -d '' USAGE_ADDED <<'JQ'
+def counts: ["inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens"];
+def went_down($old): . as $new | any(counts[]; $new[.] < ($old[.] // 0));
+def less($old): . as $new | reduce counts[] as $count ($new; .[$count] -= ($old[$count] // 0))
+  | .costUsd = (if ($new.costUsd | type) == "number" and ($old.costUsd | type) == "number"
+      then [$new.costUsd - $old.costUsd, 0] | max else $new.costUsd end);
+def earlier: . as $model | first($before.models[]? | select(.model == $model.model)) // {};
+if $before == null or went_down($before) or any(.models[]; went_down(earlier)) then .
+else less($before) | .models |= map(less(earlier) | select(. as $model | any(counts[]; $model[.] > 0))) end
+JQ
+
 # When Claude usage resets, from claude's limit message: "... resets 2:50pm (America/New_York)", "... resets Oct 3,
 # 9am (...)", or seconds since the epoch after a "|". Prints it in seconds since the epoch, a minute late to be safe,
 # or RETRY_SECONDS from now if the message doesn't say or says something that can't be right.
@@ -517,7 +532,7 @@ record_run() {
 # dollars; other runs never see the key.
 # claude_subtype is the subtype of the run's result, e.g. error_max_budget_usd for one that reached that cap.
 run_claude() {
-  local id=$1 prompt=$2 output errors stopped code usage=null response scratch= run started summary kind= reason= \
+  local id=$1 prompt=$2 output errors stopped code usage=null totals response scratch= run started summary kind= reason= \
     budget_args=() scope_args=()
   shift 2
   output=$(mktemp) && errors=$(mktemp) && stopped=$(mktemp) || return 1
@@ -591,8 +606,12 @@ in memory and is never cleaned up. \$TMPDIR is on disk, and the loop empties it 
   claude_result=$(jq -r 'if .result then .result.result // empty else .output // [] | join("\n") end' <<<"$summary")
   claude_subtype=$(jq -r '.result.subtype // empty' <<<"$summary")
   printf '%s\n' "$claude_result"
-  if usage=$(jq -c '.result // empty' <<<"$summary" | jq -ce --arg agent "$worker" \
+  if totals=$(jq -c '.result // empty' <<<"$summary" | jq -ce --arg agent "$worker" \
     --argjson apiKey "$([[ -n $api_key_budget ]] && echo true || echo false)" "$USAGE" 2>/dev/null); then
+    usage=$(jq -c --argjson before "$(read_state "$id" | jq -c --arg session "${2:-}" '.sessionTotals[$session] // null')" \
+      "$USAGE_ADDED" <<<"$totals") || usage=$totals
+    update_state "$id" '($v | fromjson) as $last | .sessionTotals += {($last.session): $last.totals}' \
+      "$(jq -nc --arg session "${2:-}" --argjson totals "$totals" '{session: $session, totals: $totals}')"
     response=$(post "/tickets/$id/usage" "$usage")
     [[ ${response##*$'\n'} == 201 ]] || log "can't record the token usage of the run on $id: ${response%$'\n'*}"
   else
@@ -720,7 +739,7 @@ $task$( ((steps)) && unchecked_steps "$id")$notes"
     # The snapshot replaces the state, but the session stays for the next run to resume (the ticket's own again after
     # a fix run), and the run times stay for TRIAGE.
     write_state "$id" "$(read_state "$id" | jq -c --argjson snapshot "$snapshot" \
-      '$snapshot + (. | {runs} | with_entries(select(.value != null))) +
+      '$snapshot + (. | {runs, sessionTotals} | with_entries(select(.value != null))) +
         if .session.fix then (. | {session: .mainSession} | with_entries(select(.value != null)))
         elif .session then {session: (.session | del(.why) + {done: true})} else {} end')"
     remove_scratch "$id"
