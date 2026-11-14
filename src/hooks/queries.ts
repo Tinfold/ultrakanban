@@ -23,6 +23,8 @@ export const queryKeys = {
   overview: (days: OverviewRange) => ['overview', days] as const,
   // Under `allOverviews`, so live updates refresh it with the overview.
   overviewActivity: (days: OverviewRange, board: string | undefined) => ['overview', 'activity', days, board] as const,
+
+  morningSummary: (since: string) => ['overview', 'morning-summary', since] as const,
   allOverviews: ['overview'] as const,
   appUpdate: ['app-update'] as const,
   claudeUsage: ['claude-usage'] as const,
@@ -107,6 +109,9 @@ export const useOverviewActivity = (days: OverviewRange, board: string | undefin
     placeholderData: keepPreviousData,
     enabled,
   })
+
+export const useMorningSummary = (since: string) =>
+  useQuery({ queryKey: queryKeys.morningSummary(since), queryFn: () => api.morningSummary(since) })
 
 /** A column's tickets no agent is working on. Checked every minute, since tickets become idle as time passes. */
 export const useIdleTickets = (columnId: string, enabled: boolean) =>

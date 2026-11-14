@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import type { OverviewActivity } from '@shared/domain'
-import { groupAgents, mergeActivity, saved, savings, usageByTag } from './overview.ts'
+import { groupAgents, mergeActivity, overnightStart, saved, savings, usageByTag } from './overview.ts'
 
 const t = (costUsd: number | null) =>
   ({ tags: [{ name: 'bug', color: 'red' }], usage: { runs: 1, tokens: 10, costUsd } }) as never
@@ -171,4 +171,11 @@ test('savings price tokens at what Opus runs reported they cost', () => {
   assert.deepEqual(result.opusRate, { usdPerMillion: 3, measured: true })
   assert.equal(result.total.opusUsd, 6)
   assert.equal(saved(result.total), 2.5)
+})
+
+test('overnight starts at 18:00 yesterday, whatever the time today', () => {
+  const start = new Date(2026, 10, 4, 18).getTime()
+  for (const hour of [0, 7, 23]) {
+    assert.equal(overnightStart(new Date(2026, 10, 5, hour, 30).getTime()).getTime(), start)
+  }
 })

@@ -28,6 +28,7 @@ import { AgentList } from '@/components/overview/AgentList'
 import { BoardTable } from '@/components/overview/BoardTable'
 import { ClaudeUsage, ClaudeUsageSummary } from '@/components/overview/ClaudeUsage'
 import { type ChartSeries, ColumnChart } from '@/components/overview/ColumnChart'
+import { MorningSummary } from '@/components/overview/MorningSummary'
 import { NeedsAttention } from '@/components/overview/NeedsAttention'
 import { RecentActivity } from '@/components/overview/RecentActivity'
 import { RoutingTable } from '@/components/overview/RoutingTable'
@@ -37,7 +38,7 @@ import { TicketUsageTable, type UsageGrouping } from '@/components/overview/Tick
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { queryKeys, useClaudeUsage, useOverview, useOverviewActivity } from '@/hooks/queries'
+import { queryKeys, useClaudeUsage, useMorningSummary, useOverview, useOverviewActivity } from '@/hooks/queries'
 import { useNow } from '@/hooks/use-now'
 import { useStoredState } from '@/hooks/use-stored-state'
 import { api, errorMessage } from '@/lib/api'
@@ -50,6 +51,7 @@ import {
   modelSeries,
   modelsByTokens,
   needsAttention,
+  overnightStart,
   saved,
   savedShare,
   savings,
@@ -260,6 +262,9 @@ export function OverviewPage({ tab: tabParam }: { tab?: string }) {
   const feed = useOverviewActivity(days, activityBoard === ALL_BOARDS ? undefined : activityBoard, tab === 'activity')
   const { data: claudeUsage } = useClaudeUsage()
   const now = useNow()
+  // Stays the same all day, so the summary only refetches when something changes.
+  const overnight = overnightStart(now).toISOString()
+  const { data: morningSummary } = useMorningSummary(overnight)
   const queryClient = useQueryClient()
 
   const tabLabel = TABS.find(({ id }) => id === tab)!.label
@@ -385,6 +390,18 @@ export function OverviewPage({ tab: tabParam }: { tab?: string }) {
               target="usage"
             />
           </StatRow>
+          {morningSummary && (
+            <Section
+              title="Morning summary"
+              actions={
+                <p className="text-xs text-muted-foreground" title={formatDateTime(morningSummary.since)}>
+                  Since 18:00 yesterday
+                </p>
+              }
+            >
+              <MorningSummary boards={morningSummary.boards} />
+            </Section>
+          )}
           <Section title="Needs attention" id={NEEDS_ATTENTION_ID}>
             <NeedsAttention
               waiting={attention.waiting}
